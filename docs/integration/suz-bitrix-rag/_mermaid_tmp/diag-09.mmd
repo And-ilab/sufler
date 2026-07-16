@@ -1,0 +1,11 @@
+sequenceDiagram
+  participant AG as Bitrix_Agent
+  participant OB as Outbox
+  participant IN as Sufler_Ingest
+
+  IN--xOB: 503 first attempt
+  OB->>OB: status pending
+  AG->>OB: Poll failed events
+  OB->>IN: POST retry same event_id
+  IN-->>OB: 202 Accepted
+  OB->>OB: status sent

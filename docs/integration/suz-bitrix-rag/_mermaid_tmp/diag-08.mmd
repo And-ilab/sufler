@@ -1,0 +1,14 @@
+sequenceDiagram
+  participant OB as Outbox
+  participant IN as Sufler_Ingest
+
+  OB->>IN: POST webhook
+  alt 202 Accepted
+    IN-->>OB: accepted
+  else 200 duplicate
+    IN-->>OB: duplicate ok
+  else 400 validation
+    IN-->>OB: error no retry
+  else 503 temporary
+    IN-->>OB: error retry later
+  end

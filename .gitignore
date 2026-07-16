@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Django
+*.sqlite3
+db.sqlite3
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+*.swp
+
+# Temp extraction artifacts (DOCX unzip)
+docs/remarks/**/_extracted/
+docs/remarks/**/_reply_work/
+docs/remarks/**/_tmp_check/
+
+# Pipeline temp
+**/mermaid-filter.err
+**/_pipeline_status.txt

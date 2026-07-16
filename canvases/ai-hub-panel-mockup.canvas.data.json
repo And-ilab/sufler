@@ -1,0 +1,11 @@
+{
+  "mockupRole": "cc_operator",
+  "mainTab": "sufler",
+  "ocrSubTab": "queue",
+  "panelOpen": true,
+  "panelWidthPx": 560,
+  "panelHeightPx": 560,
+  "panelPinned": false,
+  "suflerMode": "consult",
+  "suflerEnabled": true
+}

@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant Editor as Editor_SUZ
+  participant CMS as Bitrix_CMS
+  participant Outbox as Outbox
+  participant Ingest as Sufler_Ingest
+  participant RAG as RAG_Index
+  Editor->>CMS: Публикация или изменение
+  CMS->>CMS: Маппинг status scope body
+  CMS->>Outbox: Полный payload
+  Outbox->>Ingest: POST webhook
+  Ingest-->>Outbox: 202 accepted
+  Ingest->>RAG: Индексация из payload

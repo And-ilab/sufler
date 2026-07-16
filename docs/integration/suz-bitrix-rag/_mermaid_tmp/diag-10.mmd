@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant AG as Sufler_Reconcile
+  participant BX as Bitrix_API
+  participant IN as Sufler_Ingest
+  participant RAG as RAG_Index
+
+  AG->>BX: GET changes since cursor
+  BX-->>AG: events array with body
+  loop each event
+    AG->>IN: Process as webhook payload
+    IN->>RAG: Apply from event body
+  end

@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant Editor as Editor_SUZ
+  participant BX as Bitrix_CMS
+  participant OB as Outbox
+  participant IN as Sufler_Ingest
+  participant RAG as RAG_Index
+
+  Editor->>BX: Publish new version
+  BX->>BX: Build full payload new version_id
+  BX->>OB: version_published
+  OB->>IN: POST webhook
+  IN-->>OB: 202
+  IN->>RAG: Replace vectors from payload

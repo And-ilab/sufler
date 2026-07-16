@@ -1,0 +1,5 @@
+lines=3886
+effect=52
+deploy_on_prem=0
+fr_cc01_ok=True
+fr_und01_ok=True

@@ -1,0 +1,14 @@
+sequenceDiagram
+  participant Editor as Editor_SUZ
+  participant BX as Bitrix_CMS
+  participant OB as Outbox
+  participant IN as Sufler_Ingest
+  participant RAG as RAG_Index
+
+  Editor->>BX: Publish article
+  BX->>BX: OnAfterIBlockElementUpdate
+  BX->>BX: Build full payload body_html body_plain
+  BX->>OB: Save event payload
+  OB->>IN: POST webhook
+  IN-->>OB: 202 Accepted
+  IN->>RAG: Index chunks from payload

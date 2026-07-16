@@ -1,0 +1,80 @@
+import {
+  Button,
+  Callout,
+  Card,
+  CardBody,
+  CardHeader,
+  Checkbox,
+  Divider,
+  Grid,
+  H1,
+  H2,
+  H3,
+  IconButton,
+  Link,
+  Pill,
+  Row,
+  Select,
+  Spacer,
+  Stack,
+  Stat,
+  Table,
+  Text,
+  TextArea,
+  TextInput,
+  Toggle,
+  useCanvasState,
+  useHostTheme,
+  BarChart,
+  PieChart,
+} from "cursor/canvas";
+import type { CanvasHostTheme } from "cursor/canvas";
+import { useEffect, useState } from "react";
+import type { CSSProperties, JSX, ReactNode } from "react";
+
+// online-chat-mockups v1.4.35 — 2026-07-09 10:40 UTC+3
+// Changelog: АРМ растягивается по высоте превью (убраны 640/760 px); секция «Диалоги коллег» (UC-O8); «Заблокировать клиента» → «Заблокировать».
+const CANVAS_MOCKUP_VERSION = "v1.4.35";
+
+type Screen = "arm" | "widget" | "admin" | "dashboard" | "supervisor" | "postchat" | "analytics";
+type WidgetView = "prechat" | "chat" | "postchat" | "fab";
+type OperatorPresence = "online" | "invisible" | "break" | "lunch" | "offline_queue" | "offline";
+
+const OPERATOR_STATUSES: {
+  id: OperatorPresence;
+  label: string;
+  tone: "success" | "warning" | "neutral" | "info";
+  hint: string;
+}[] = [
+  { id: "online", label: "в сети", tone: "success", hint: "Автоназначение online-диалогов" },
+  { id: "invisible", label: "невидимка", tone: "info", hint: "Текущие диалоги — да; новые online — нет" },
+  { id: "break", label: "перерыв", tone: "warning", hint: "Технологический перерыв, без новых диалогов" },
+  { id: "lunch", label: "обед", tone: "warning", hint: "Учитывается в статистике оператора (#15)" },
+  {
+    id: "offline_queue",
+    label: "офлайн-обращения",
+    tone: "neutral",
+    hint: "Только офлайн-сообщения — online не падают (#15)",
+  },
+  { id: "offline", label: "не в сети", tone: "neutral", hint: "Не получает диалоги" },
+];
+type ArmView = "active" | "colleague";
+type ArmStatsTab = "dialogs" | "history" | "stats" | "employees" | "settings";
+type ArmRole = "operator" | "supervisor" | "admin";
+
+const ARM_STATS_RAIL_WIDTH = 52;
+const ARM_STATS_DRAWER_WIDTH = ARM_STATS_RAIL_WIDTH;
+
+const ARM_ROLE_LABELS: Record<ArmRole, string> = {
+  operator: "Оператор КЦ",
+  supervisor: "Супервизор",
+  admin: "Администратор",
+};
+
+const ARM_STATS_TABS: { id: ArmStatsTab; label: string }[] = [
+  { id: "dialogs", label: "Диалоги" },
+  { id: "history", label: "История" },
+  { id: "stats", label: "Статистика" },
+  { id: "employees", label: "Сотрудники" },
+  { id: "settings", label: "Настройки" },
+];

@@ -1,0 +1,22 @@
+﻿43 const OPERATOR_STATUSES: {
+1846               <Pill tone={OPERATOR_STATUSES.find((status) => status.id === st)?.tone ?? "neutral"} size="sm">
+1847                 {OPERATOR_STATUSES.find((status) => status.id === st)?.label ?? st}
+2026               {OPERATOR_STATUSES.map((status) => (
+2057               {OPERATOR_STATUSES.find((status) => status.id === presence)?.hint}
+2918                         tone={OPERATOR_STATUSES.find((status) => status.id === st)?.tone ?? "neutral"}
+2921                         {OPERATOR_STATUSES.find((status) => status.id === st)?.label ?? st}
+==== 1990
+1993:           <Row style={{ gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+1996:               aria-expanded={statsDrawerOpen}
+1997:               aria-controls="arm-stats-drawer"
+1998:               title={statsDrawerOpen ? "╤ъЁ√Є№ ёфтшцэє■ ярэхы№" : "╠хэ■: фшрыюуш, шёЄюЁш , ёЄрЄшёЄшър"}
+2001:                 border: statsDrawerOpen ? `1px solid ${scheme.accent}` : `1px solid ${t.stroke.secondary}`,
+2002:                 background: statsDrawerOpen ? t.fill.tertiary : "transparent",
+2003:                 color: statsDrawerOpen ? scheme.accentControl : t.text.secondary,
+2019:                 flexWrap: "nowrap",
+2020:                 overflowX: "auto",
+2026:               {OPERATOR_STATUSES.map((status) => (
+==== 2100
+==== 2180
+==== 2250
+2286:             <Row style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>

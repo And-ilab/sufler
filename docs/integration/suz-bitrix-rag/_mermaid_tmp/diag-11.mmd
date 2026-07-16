@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant JOB as Sufler_FullLoad
+  participant BX as Bitrix_REST
+  participant RAG as RAG_Index
+
+  JOB->>BX: list elements page 1
+  BX-->>JOB: IDs batch
+  loop each article_id
+    JOB->>BX: element.get
+    BX-->>JOB: 200 body
+    JOB->>RAG: Index
+  end
+  JOB->>BX: list next page

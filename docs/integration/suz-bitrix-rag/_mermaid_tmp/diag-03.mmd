@@ -1,0 +1,11 @@
+sequenceDiagram
+  participant Editor as Editor_SUZ
+  participant BX as Bitrix_CMS
+  participant OB as Outbox
+  participant IN as Sufler_Ingest
+
+  Editor->>BX: Save draft
+  BX->>OB: article.updated draft
+  OB->>IN: POST webhook
+  IN-->>OB: 202 Accepted
+  Note over IN: No RAG update

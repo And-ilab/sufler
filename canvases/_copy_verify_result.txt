@@ -1,0 +1,12 @@
+COPY_RESULTS
+online-chat-mockups.canvas.tsx: ok=False (shell sandbox blocked; shutil.copy2 not executed)
+online-chat-mockups.canvas.data.json: ok=True (written via file API with _canvasBuild v1.4.43)
+
+TSX_SIZE=unknown (dest still stale; ~3927 lines estimated)
+VERSION_LINE=const CANVAS_MOCKUP_VERSION = "v1.4.35";
+VERSION_OK=False
+JSON_CANVAS_BUILD=v1.4.43
+JSON_UPDATED=True
+
+SOURCE_CANVAS_MOCKUP_VERSION=v1.4.48 (at time of check)
+RUN_SCRIPT=python c:\sufler\canvases\_copy_verify.py

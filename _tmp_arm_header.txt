@@ -1,0 +1,40 @@
+1946:           position: "relative",
+1947:           ...panelStyle(t),
+1948:           padding: "10px 16px",
+1949:           paddingRight: WINDOW_CONTROLS_WIDTH,
+1950:           borderRadius: `${RADIUS_MD} ${RADIUS_MD} 0 0`,
+1951:           borderBottom: `1px solid ${scheme.accent}`,
+1952:           background: scheme.headerBg,
+1953:           zIndex: 5,
+1954:         }}
+1955:       >
+1956:         <Row style={{ justifyContent: "space-between", alignItems: "center", minHeight: 36 }}>
+1957:           <Row style={{ gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+1958:             <button
+1959:               type="button"
+1960:               aria-expanded={statsDrawerOpen}
+1961:               aria-controls="arm-stats-drawer"
+1962:               title={statsDrawerOpen ? "Скрыть сдвижную панель" : "Меню: диалоги, история, статистика"}
+1963:               onClick={toggleStatsDrawer}
+1964:               style={{
+1965:                 border: statsDrawerOpen ? `1px solid ${scheme.accent}` : `1px solid ${t.stroke.secondary}`,
+1966:                 background: statsDrawerOpen ? t.fill.tertiary : "transparent",
+1967:                 color: statsDrawerOpen ? scheme.accentControl : t.text.secondary,
+1968:                 borderRadius: RADIUS_SM,
+1969:                 padding: "4px 10px",
+1970:                 fontSize: 12,
+1971:                 fontFamily: "inherit",
+1972:                 cursor: "pointer",
+1973:                 lineHeight: 1.3,
+1974:               }}
+1975:             >
+1976:               ☰ Меню
+1977:             </button>
+1978:             <Text weight="semibold">Беларусбанк · Онлайн-чат · Макет {CANVAS_MOCKUP_VERSION}</Text>
+1979:             <Row
+1980:               style={{
+1981:                 gap: 4,
+1982:                 flexDirection: "row",
+1983:                 flexWrap: "nowrap",
+1984:                 overflowX: "auto",
+1985:                 alignItems: "center",

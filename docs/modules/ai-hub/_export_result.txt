@@ -1,0 +1,11 @@
+EXPORT SUCCESS
+FullName: C:\sufler\docs\modules\ai-hub\TZ-unified-v1.4.docx
+Length: 209184
+LastWriteTime: 2026-07-10 00:22:44
+
+Commands:
+  export-unified-to-word.ps1 (includes prepare_customer_export.py)
+
+Pandoc flags verified:
+  --toc
+  --toc-depth=3

@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant OP as Operator_Debug
+  participant FE as Sufler_Fetch
+  participant BX as Bitrix_REST
+
+  OP->>FE: Need article check
+  FE->>BX: GET iblock.element.get
+  alt 200 OK
+    BX-->>FE: Article JSON
+    Note over FE: Compare checksum or inspect
+  else 404
+    BX-->>FE: Not found
+  end
