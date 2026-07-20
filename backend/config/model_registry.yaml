@@ -1,0 +1,79 @@
+version: 1
+slots:
+  asr:
+    dev_model: vosk-model-small-ru-0.22
+    prod_candidate: null
+    kpi:
+      languages: [ru, en]
+      accuracy_percent_min: 90
+      concurrent_calls_min: 70
+      latency_p95_ms_max: 1000
+    status: development
+
+  embedding:
+    dev_model: null
+    prod_candidate: null
+    kpi:
+      languages: [ru, en]
+      similarity_metric: cosine
+    status: pending
+
+  qu:
+    dev_model: null
+    prod_candidate: null
+    kpi:
+      languages: [ru, en]
+      ambiguous_top2_score_delta_pp_max: 5
+    status: pending
+
+  llm_sufler_cc:
+    dev_model: null
+    prod_candidate: null
+    kpi:
+      profile: sufler_cc
+      grounded_in: cc_production
+      response_chars_max: 500
+      latency_p95_ms_max: 2000
+      requests_per_second_min: 10
+      hallucination_percent_max: 3
+    status: pending
+
+  llm_assistant_bank:
+    dev_model: null
+    prod_candidate: null
+    kpi:
+      profile: assistant_bank
+      sources_required: true
+      response_chars_max: 500
+      latency_p95_ms_max: 2000
+      requests_per_second_min: 10
+      hallucination_percent_max: 3
+    status: pending
+
+  llm_docs_ocr:
+    dev_model: null
+    prod_candidate: null
+    kpi:
+      deployment: on_prem
+      structured_output_required: true
+      response_chars_max: 500
+      latency_p95_ms_max: 2000
+      requests_per_second_min: 10
+      hallucination_percent_max: 3
+    status: pending
+
+  ocr:
+    dev_model: null
+    prod_candidate: null
+    kpi:
+      accuracy_percent_min: 95
+      throughput_pages_per_second_min: 1
+    status: pending
+
+  reranker:
+    dev_model: null
+    prod_candidate: null
+    kpi:
+      relevance_score_percent: true
+      threshold_configurable: true
+    status: pending
