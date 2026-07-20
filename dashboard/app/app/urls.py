@@ -1,7 +1,2 @@
-from django.contrib import admin
-from django.urls import path, include
-
-urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('', include('chat.urls')),
-]
+"""Legacy shim: use ``sufler.urls`` in new code."""
+from sufler.urls import *  # noqa: F401,F403

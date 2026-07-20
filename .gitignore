@@ -5,6 +5,8 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.env
+backend/services/asr/model/
 
 # Django
 *.sqlite3
