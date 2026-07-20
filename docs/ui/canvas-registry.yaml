@@ -41,15 +41,15 @@ canvases:
     canvas_file: canvases/ai-hub-panel-mockup.canvas.tsx
     spec_md: docs/ui/ai-hub-panel-mockup.md
     i8_id: "I-1"
-    react_component_path: null
-    status: canvas-ready
+    react_component_path: frontend/src/ai-hub/panel/AiHubPanel.tsx
+    status: react-ready
 
   - task_id: ai-hub-settings
     canvas_file: canvases/ai-hub-settings-mockup.canvas.tsx
     spec_md: docs/ui/ai-hub-settings-mockup.md
     i8_id: "I-2, II-4, II-5, III-4, III-7, IV-4, IV-5"
-    react_component_path: null
-    status: canvas-ready
+    react_component_path: frontend/src/ai-hub/admin/AiHubAdminApp.tsx
+    status: react-ready
 
   - task_id: ocr-documents
     canvas_file: canvases/ocr-documents-mockup.canvas.tsx

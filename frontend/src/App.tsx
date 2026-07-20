@@ -1,43 +1,121 @@
-import { Button, Card, Fab, HintCard, Sidebar, StatusBadge } from './components'
+import { usePortalAuth } from './auth/usePortalAuth'
+import { AiHubAdminApp } from './ai-hub/admin/AiHubAdminApp'
+import { isAdminCenterRole } from './ai-hub/admin/adminNav'
+import { AiHubPanelHost } from './ai-hub/panel/AiHubPanel'
+import {
+  Button,
+  Card,
+  PortalLauncher,
+  StatusBadge,
+  getAllowedLauncherModules,
+  type LauncherModule,
+} from './components'
 import './App.css'
 
-const navItems = [
-  { label: 'Диалоги', href: '#dialogs', active: true },
-  { label: 'Подсказки', href: '#hints' },
-  { label: 'Отчёты', href: '#reports' },
-]
+function StandaloneModule({
+  module,
+  roles,
+}: {
+  module: LauncherModule
+  roles: readonly string[]
+}) {
+  const allowed = getAllowedLauncherModules(roles).includes(module)
+  const label = module === 'sufler' ? 'Суфлёр' : 'Ассистент'
+
+  if (!allowed) {
+    return (
+      <main className="standalone-module standalone-module--denied">
+        <Card>
+          <StatusBadge status="danger">403</StatusBadge>
+          <h1>Нет доступа</h1>
+          <p>Роль пользователя не разрешает открывать модуль «{label}».</p>
+          <Button onClick={() => window.location.assign('/')}>Вернуться на портал</Button>
+        </Card>
+      </main>
+    )
+  }
+
+  return (
+    <main className="standalone-module">
+      <Card className="standalone-module__window">
+        <header className="standalone-module__header">
+          <div>
+            <p className="app-eyebrow">Отдельное окно AI Hub</p>
+            <h1>{label}</h1>
+          </div>
+          <StatusBadge status="success">Доступ разрешён</StatusBadge>
+        </header>
+        <p className="app-muted">
+          Маршрут работает как standalone entry point. Основной интерфейс модуля
+          подключается здесь без изменения портального launcher.
+        </p>
+        <Button onClick={() => window.location.assign('/')}>Вернуться на портал</Button>
+      </Card>
+    </main>
+  )
+}
 
 function App() {
-  return (
-    <div className="app-shell">
-      <Sidebar items={navItems} />
-      <main className="app-main">
-        <header className="app-header">
-          <div>
-            <p className="app-eyebrow">Рабочее место оператора</p>
-            <h1>Активный диалог</h1>
-          </div>
-          <StatusBadge status="success">В сети</StatusBadge>
-        </header>
+  const auth = usePortalAuth()
+  const route = window.location.pathname.replace(/\/+$/, '') || '/'
 
-        <Card>
-          <h2>Иван Петров</h2>
-          <p className="app-muted">Клиент уточняет условия выпуска платёжной карты.</p>
-          <div className="app-actions">
-            <Button>Ответить</Button>
-            <Button variant="secondary">Завершить</Button>
-            <Button variant="ghost">Передать</Button>
-          </div>
-        </Card>
-
-        <HintCard title="Рекомендуемый ответ">
-          Для оформления карты потребуется паспорт. Заявку можно подать в отделении
-          или через интернет-банкинг. Срок выпуска зависит от выбранного продукта.
-        </HintCard>
+  if (auth.status === 'loading') {
+    return (
+      <main className="standalone-module" aria-busy="true">
+        <Card>Проверяем права доступа…</Card>
       </main>
-      <div className="app-fab">
-        <Fab aria-label="Открыть чат" badge={2}>💬</Fab>
-      </div>
+    )
+  }
+
+  if (route === '/sufler' || route === '/assistant') {
+    return (
+      <StandaloneModule
+        module={route.slice(1) as LauncherModule}
+        roles={auth.roles}
+      />
+    )
+  }
+
+  if (route === '/ai-hub') {
+    return (
+      <AiHubPanelHost
+        roles={auth.roles}
+        rbacTabs={auth.tabs}
+        username={auth.username}
+        initialOpen
+      />
+    )
+  }
+
+  if (route === '/ai-hub/admin' || route.startsWith('/ai-hub/admin/')) {
+    if (!isAdminCenterRole(auth.roles)) {
+      return (
+        <main className="standalone-module standalone-module--denied">
+          <Card>
+            <StatusBadge status="danger">403</StatusBadge>
+            <h1>Нет доступа к Центру настроек</h1>
+            <p>Для этого маршрута требуется одна из административных ролей I.4.</p>
+            <Button onClick={() => window.location.assign('/')}>Вернуться на портал</Button>
+          </Card>
+        </main>
+      )
+    }
+    return (
+      <AiHubAdminApp
+        roles={auth.roles}
+        demoRoleSwitcher={import.meta.env.DEV}
+      />
+    )
+  }
+
+  return (
+    <div className="portal-route">
+      {auth.status === 'unavailable' && (
+        <div className="portal-route__auth-status" role="status">
+          Launcher скрыт: авторизация недоступна
+        </div>
+      )}
+      <PortalLauncher roles={auth.roles} />
     </div>
   )
 }

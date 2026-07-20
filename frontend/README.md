@@ -64,3 +64,62 @@ npm run test:visual:update
 Изменение baseline без соответствующего изменения компонента или tokens
 считается ошибкой. Генерируемые `storybook-static`, `node_modules`,
 Playwright reports и test results не коммитятся.
+
+## Портальный launcher I-0
+
+`src/components/PortalLauncher.tsx` реализует основной вариант I.5:
+
+- кнопка AI 56×56 px в правом нижнем углу;
+- меню выбора «Суфлёр | Ассистент»;
+- одновременное открытие двух независимых окон;
+- сворачивание, закрытие, разворачивание и drag-resize окон;
+- standalone routes `/sufler` и `/assistant`;
+- скрытие launcher и защита routes по ролям I.4.
+
+В приложении роли загружаются из `GET /api/auth/me/`. Vite проксирует `/api`
+на Django `http://127.0.0.1:8000`. Если backend недоступен или пользователь не
+авторизован, launcher не отображается. Только для локальной разработки можно
+задать роли через запятую:
+
+```powershell
+$env:VITE_DEV_RBAC_ROLES="contact_center_telephony_operator"
+npm run dev
+```
+
+Storybook states:
+
+- `Portal/Launcher / Menu Open` — visual baseline I-0;
+- `Portal/Launcher / Both Windows` — параллельная работа;
+- `Portal/Launcher / Unauthorized` — RBAC-hidden state.
+
+Baseline `tests/ui/__snapshots__/portal-launcher-menu.png` обновляется только
+через `npm run test:visual:update` после проверки canvas I-0 и PNG diff.
+
+## Admin center
+
+Маршрут `/ai-hub/admin/` реализован в `src/ai-hub/admin/` по
+`ai-hub-settings-mockup`: полноэкранная оболочка, sidebar 240 px с группами,
+breadcrumbs и sticky footer «Сохранить». Все 18 screen id доступны как
+`/ai-hub/admin/<screen_id>`; профиль КЦ параметров модели использует
+`/ai-hub/admin/model_params/cc`.
+
+Production-навигация фильтруется по административным ролям I.4. Переключатель
+«Демо роль» включён только в dev/Storybook и не повышает реальные права.
+Story `AI Hub/Admin Shell / Default` является основой visual review для
+последующих задач P2-04, P3-03, P3-05, P4-03, P4-07 и P5-03.
+
+Экран `Параметры модели LLM` использует API
+`/api/admin/model-registry/model-params/`. Форма содержит sliders generation,
+chunk/overlap и retrieval thresholds, показывает inline validation и сохраняет
+данные в Django DB. Story `AI Hub/Admin Shell / Model Parameters` и baseline
+`model-params-form.png` фиксируют layout.
+
+## AI Hub panel
+
+Маршрут `/ai-hub` рендерит host из `src/ai-hub/panel/`: FAB 56 px,
+slide-in panel 400 px, pin/minimize/close и вкладки «Ассистент», «Документы»,
+«Суфлёр». Вкладки скрываются по I.4 RBAC; `sufler_chat` не даёт вкладку Hub.
+При `callActive` tab bar блокируется на единственной вкладке «Суфлёр».
+
+Storybook states: default assistant, documents-only, active call и closed FAB.
+HintCard в «Суфлёре» использует общий compact/expand-in-place pattern.
