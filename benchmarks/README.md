@@ -1,5 +1,63 @@
 # Sufler benchmarks
 
+## Unified CLI
+
+`bench.py` is the common entry point for AI Model Layer benchmarks. Available
+suites are `asr`, `embedding`, `qu`, `llm`, and `ocr`.
+
+Run a suite from the repository root:
+
+```powershell
+.\backend\.venv\Scripts\python.exe .\benchmarks\bench.py run `
+  --suite asr `
+  --output .\reports
+```
+
+`--output` is optional and defaults to `reports/`. A successful run exits
+with code `0`, prints the report path, and writes
+`<suite>-<UTC timestamp>.json`.
+
+Embedding, QU, LLM, and OCR are stubs. ASR invokes the streaming Vosk runner
+when models and WAV samples are available; otherwise it writes the same
+explicit placeholder values. ASR setup and metric semantics are documented
+in `suites/README.md`.
+
+The output contract is defined by `report.schema.json` (JSON Schema draft
+2020-12). Report shape:
+
+```json
+{
+  "schema_version": "1.0",
+  "report_id": "asr-20260720T140000000000Z",
+  "suite": "asr",
+  "runner_status": "stub",
+  "generated_at": "2026-07-20T14:00:00+00:00",
+  "datasets": ["asr-synthetic-samples"],
+  "metrics": {
+    "latency_ms": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "status": "placeholder"
+    },
+    "accuracy_percent": {
+      "value": null,
+      "status": "placeholder"
+    },
+    "wer_percent": {
+      "value": null,
+      "status": "placeholder"
+    }
+  }
+}
+```
+
+CLI integration test:
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m pytest `
+  .\tests\benchmarks\test_bench_cli.py -v
+```
+
 ## ASR hotword benchmark
 
 Suite `suites/asr_hotword.py` maps to **FR-ASR-09**: specialized dictionaries

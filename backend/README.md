@@ -33,9 +33,13 @@ backend/
 ├── requirements.txt
 ├── Dockerfile
 ├── sufler/                  # settings, urls, ASGI/WSGI, Celery
+├── audit/                   # VI.3 JSON audit, file/HTTP KUMA sinks
+├── auth/                    # dev mock LDAP, P7-03 LDAP stub, I.4 RBAC
 ├── chat/                    # Django app
 ├── config/                  # YAML-конфигурация, включая ModelRegistry
 ├── core/                    # общая backend-инфраструктура
+├── hub/                     # Admin API и DB-настройки ModelRegistry
+├── ingest/                  # SUZ webhook → cc_production pgvector
 ├── services/asr/            # dev ASR-сервис
 ├── templates/
 ├── static/
@@ -131,6 +135,23 @@ python -m venv .venv
 
 Без `POSTGRES_HOST` backend использует локальную SQLite-базу
 `backend/db.sqlite3`. Сервер доступен на <http://127.0.0.1:8000/>.
+
+## Development authentication and RBAC
+
+При `DJANGO_DEBUG=true` по умолчанию используется development-only mock LDAP:
+
+```powershell
+$env:AUTH_MODE = "mock_ldap"
+$env:AUTH_MOCK_LDAP_DEFAULT_PASSWORD = "local-dev-secret"
+.\.venv\Scripts\python.exe manage.py runserver
+```
+
+Аккаунты `dev-role-01`…`dev-role-13` соответствуют 13 ролям I.4.
+`dev-role-01` может войти в Django admin. Для production требуется
+`AUTH_MODE=ldap`, реальные AD-группы и human sign-off P7-03.
+
+Полная конфигурация и примеры decorators:
+[`auth/README.md`](auth/README.md).
 
 ## Celery
 

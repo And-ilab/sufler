@@ -69,13 +69,17 @@ def load_dataset(path: Path = DEFAULT_DATASET_PATH) -> list[BankTerm]:
 
     if not isinstance(payload, Mapping):
         raise BenchmarkInputError("Dataset root must be an object")
-    if payload.get("requirement") != REQUIREMENT_ID:
+    source = payload.get("source")
+    requirement = payload.get("requirement")
+    if requirement is None and isinstance(source, Mapping):
+        requirement = source.get("requirement")
+    if requirement != REQUIREMENT_ID:
         raise BenchmarkInputError(
             f"Dataset must map to {REQUIREMENT_ID}"
         )
-    raw_terms = payload.get("terms")
+    raw_terms = payload.get("samples", payload.get("terms"))
     if not isinstance(raw_terms, list):
-        raise BenchmarkInputError("Dataset 'terms' must be a list")
+        raise BenchmarkInputError("Dataset 'samples' must be a list")
     if len(raw_terms) != EXPECTED_TERM_COUNT:
         raise BenchmarkInputError(
             f"Dataset must contain exactly {EXPECTED_TERM_COUNT} terms"
@@ -191,7 +195,7 @@ def evaluate(
     without_boost: Mapping[str, str],
     with_boost: Mapping[str, str],
     *,
-    dataset_name: str = "asr-bank-terms-v1",
+    dataset_name: str = "asr-bank-terms",
 ) -> dict[str, Any]:
     """Build an FR-ASR-09 comparison report from paired transcripts."""
     known_ids = {term.id for term in terms}

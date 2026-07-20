@@ -1,8 +1,17 @@
 {
-  "name": "asr-bank-terms-v1",
-  "requirement": "FR-ASR-09",
-  "language": "ru",
-  "terms": [
+  "schema_version": "1.0",
+  "id": "asr-bank-terms",
+  "version": "1.0",
+  "description": "Banking terms and accepted aliases for hotword evaluation.",
+  "modules": ["asr"],
+  "tasks": ["hotword", "term-accuracy"],
+  "status": "ready",
+  "source": {
+    "type": "tz",
+    "path": "docs/modules/ai-hub/tz-unified-v1.4.md",
+    "requirement": "FR-ASR-09"
+  },
+  "samples": [
     {"id": "bank-001", "term": "ЕРИП", "aliases": ["е р и п"]},
     {"id": "bank-002", "term": "М-Банкинг", "aliases": ["м банкинг"]},
     {"id": "bank-003", "term": "Интернет-банкинг", "aliases": ["интернет банкинг"]},

@@ -67,6 +67,16 @@ services:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      AUTH_MODE: ${AUTH_MODE:-mock_ldap}
+      AUTH_MOCK_LDAP_DEFAULT_PASSWORD: ${AUTH_MOCK_LDAP_DEFAULT_PASSWORD:-dev-only-password}
+      SUZ_WEBHOOK_HMAC_SECRET: ${SUZ_WEBHOOK_HMAC_SECRET:-}
+      AUDIT_ENABLED: ${AUDIT_ENABLED:-true}
+      AUDIT_SINKS: ${AUDIT_SINKS:-file}
+      AUDIT_FILE_PATH: /var/log/sufler/audit.jsonl
+      AUDIT_HTTP_COLLECTOR_URL: ${AUDIT_HTTP_COLLECTOR_URL:-}
+      AUDIT_HTTP_TIMEOUT_SECONDS: ${AUDIT_HTTP_TIMEOUT_SECONDS:-5}
+      AUDIT_DEVICE_VENDOR: ${AUDIT_DEVICE_VENDOR:-Belarusbank}
+      AUDIT_DEVICE_PRODUCT: ${AUDIT_DEVICE_PRODUCT:-AI_Hub}
       POSTGRES_DB: ${POSTGRES_DB:-sufler}
       POSTGRES_USER: ${POSTGRES_USER:-sufler}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -81,6 +91,8 @@ services:
       - python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000
     ports:
       - "${BACKEND_PORT_HOST:-8000}:8000"
+    volumes:
+      - audit_data:/var/log/sufler
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,6 +122,15 @@ services:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      AUTH_MODE: ${AUTH_MODE:-mock_ldap}
+      AUTH_MOCK_LDAP_DEFAULT_PASSWORD: ${AUTH_MOCK_LDAP_DEFAULT_PASSWORD:-dev-only-password}
+      AUDIT_ENABLED: ${AUDIT_ENABLED:-true}
+      AUDIT_SINKS: ${AUDIT_SINKS:-file}
+      AUDIT_FILE_PATH: /var/log/sufler/audit.jsonl
+      AUDIT_HTTP_COLLECTOR_URL: ${AUDIT_HTTP_COLLECTOR_URL:-}
+      AUDIT_HTTP_TIMEOUT_SECONDS: ${AUDIT_HTTP_TIMEOUT_SECONDS:-5}
+      AUDIT_DEVICE_VENDOR: ${AUDIT_DEVICE_VENDOR:-Belarusbank}
+      AUDIT_DEVICE_PRODUCT: ${AUDIT_DEVICE_PRODUCT:-AI_Hub}
       POSTGRES_DB: ${POSTGRES_DB:-sufler}
       POSTGRES_USER: ${POSTGRES_USER:-sufler}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -119,6 +140,8 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       MINIO_ENDPOINT: http://minio:9000
     command: celery -A sufler worker --loglevel=info --hostname=worker@%h
+    volumes:
+      - audit_data:/var/log/sufler
     depends_on:
       postgres:
         condition: service_healthy
@@ -143,3 +166,4 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  audit_data:

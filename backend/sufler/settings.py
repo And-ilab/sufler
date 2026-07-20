@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -45,7 +47,11 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'chat'
+    'audit.apps.AuditConfig',
+    'chat',
+    'hub.apps.HubConfig',
+    'ingest.apps.IngestConfig',
+    'qu.apps.QuConfig',
 ]
 
 MIDDLEWARE = [
@@ -54,6 +60,8 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'audit.middleware.AuditMiddleware',
+    'auth.middleware.RBACMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -69,6 +77,7 @@ TEMPLATES = [
             'context_processors': [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
+                'auth.context_processors.rbac',
                 'django.contrib.messages.context_processors.messages',
             ],
         },
@@ -120,6 +129,92 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
+
+# Authentication and I.4 RBAC.
+AUTH_MODE = os.getenv(
+    "AUTH_MODE",
+    "mock_ldap" if DEBUG else "model",
+).strip().lower()
+AUTH_MOCK_LDAP_USERS_JSON = os.getenv("AUTH_MOCK_LDAP_USERS_JSON", "")
+AUTH_MOCK_LDAP_DEFAULT_PASSWORD = os.getenv(
+    "AUTH_MOCK_LDAP_DEFAULT_PASSWORD",
+    "dev-only-password",
+)
+AUTH_MOCK_LDAP_ALLOW_INSECURE = os.getenv(
+    "AUTH_MOCK_LDAP_ALLOW_INSECURE",
+    "false",
+).lower() in {"1", "true", "yes"}
+AUTH_LDAP_ROLE_GROUP_MAP = {}
+
+if AUTH_MODE == "mock_ldap":
+    AUTHENTICATION_BACKENDS = [
+        "auth.mock_ldap.MockLDAPBackend",
+        "django.contrib.auth.backends.ModelBackend",
+    ]
+elif AUTH_MODE == "ldap":
+    from auth.ldap_config import build_ldap_settings
+
+    globals().update(build_ldap_settings())
+    AUTHENTICATION_BACKENDS = [
+        "django_auth_ldap.backend.LDAPBackend",
+        "django.contrib.auth.backends.ModelBackend",
+    ]
+elif AUTH_MODE == "model":
+    AUTHENTICATION_BACKENDS = [
+        "django.contrib.auth.backends.ModelBackend",
+    ]
+else:
+    raise ImproperlyConfigured(
+        "AUTH_MODE must be one of: mock_ldap, ldap, model"
+    )
+
+# Path policies are opt-in so legacy routes remain compatible. New Hub/API
+# routes should use decorators or add a prefix here.
+RBAC_PATH_PERMISSIONS = {}
+RBAC_PUBLIC_PATH_PREFIXES = (
+    "/api/v1/knowledge/",
+    "/client-info/",
+    "/static/",
+    "/admin/login/",
+)
+
+SUZ_WEBHOOK_HMAC_SECRET = os.getenv("SUZ_WEBHOOK_HMAC_SECRET", "")
+
+MODEL_REGISTRY_PATH = Path(
+    os.getenv(
+        "MODEL_REGISTRY_PATH",
+        str(BASE_DIR / "config" / "model_registry.yaml"),
+    )
+)
+
+# Structured VI.3 audit and KUMA-compatible sinks.
+AUDIT_ENABLED = os.getenv("AUDIT_ENABLED", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+AUDIT_SINKS = tuple(
+    sink.strip().lower()
+    for sink in os.getenv("AUDIT_SINKS", "file").split(",")
+    if sink.strip()
+)
+AUDIT_FILE_PATH = Path(
+    os.getenv(
+        "AUDIT_FILE_PATH",
+        str(BASE_DIR / "var" / "audit" / "audit.jsonl"),
+    )
+)
+AUDIT_HTTP_COLLECTOR_URL = os.getenv("AUDIT_HTTP_COLLECTOR_URL", "")
+AUDIT_HTTP_TIMEOUT_SECONDS = float(
+    os.getenv("AUDIT_HTTP_TIMEOUT_SECONDS", "5")
+)
+AUDIT_DEVICE_VENDOR = os.getenv("AUDIT_DEVICE_VENDOR", "Belarusbank")
+AUDIT_DEVICE_PRODUCT = os.getenv("AUDIT_DEVICE_PRODUCT", "AI_Hub")
+AUDIT_DEVICE_VERSION = os.getenv("AUDIT_DEVICE_VERSION", "0.1.0-dev")
+AUDIT_SOURCE_SERVICE = os.getenv(
+    "AUDIT_SOURCE_SERVICE",
+    "sufler-backend",
+)
 
 
 # Internationalization
