@@ -17,7 +17,7 @@
 | Активный план доработок | [`docs/remarks/plan-dorabotok-v1.4.md`](docs/remarks/plan-dorabotok-v1.4.md) |
 | Договорные требования (Прил. 1) | [`docs/sources/technical-requirements/prilozhenie-1.md`](docs/sources/technical-requirements/prilozhenie-1.md) |
 | Интерактивные макеты UI | [`canvases/`](canvases/) |
-| Прототип АРМ оператора | [`dashboard/app/`](dashboard/app/) |
+| Backend и АРМ оператора | [`backend/`](backend/) |
 
 ---
 
@@ -25,10 +25,14 @@
 
 ```
 sufler/
+├── backend/           ← канонический Django-проект sufler, app chat и ASR
+├── infra/             ← Docker Compose: PostgreSQL/pgvector, Redis, MinIO, Celery
+├── tests/
+│   └── acceptance/    ← сквозные smoke/acceptance-тесты backend
 ├── docs/              ← документация (источники, ТЗ, замечания, UI, HR)
 ├── canvases/          ← интерактивные макеты (Cursor Canvas)
-├── dashboard/         ← прототип Django: АРМ оператора онлайн-чата
-├── recognizer/        ← прототип ASR (Vosk, WebSocket)
+├── dashboard/app/     ← legacy-обёртки Django для обратной совместимости
+├── recognizer/        ← legacy-обёртка ASR для обратной совместимости
 ├── _extracted/        ← рабочие текстовые выгрузки из DOCX (не канон)
 ├── _*.py, _*.md       ← рабочие скрипты и черновики (не канон)
 └── .cursor/           ← правила и настройки Cursor IDE
@@ -161,11 +165,14 @@ Word-экспорты: `TZ-unified-v1.2.docx`, `TZ-unified-v1.3.docx`, `TZ-unifi
 
 ## 4. Прототипы кода
 
-### Dashboard — АРМ оператора (`dashboard/app/`)
+### Backend — Django-проект `sufler` (`backend/`)
 
 **Стек:** Django 5 · SQLite · channels · websockets
 
-Прототип операторского рабочего места онлайн-чата: регистрация клиента, сессии по каналам, история сообщений, отчёты.
+Единая точка сборки backend и прототип операторского рабочего места
+онлайн-чата: регистрация клиента, сессии по каналам, история сообщений,
+отчёты. Django-приложение находится в `backend/chat/`; старый
+`dashboard/app/manage.py` сохранён как совместимая точка входа.
 
 | Модель | Назначение |
 |--------|------------|
@@ -183,9 +190,11 @@ Word-экспорты: `TZ-unified-v1.2.docx`, `TZ-unified-v1.3.docx`, `TZ-unifi
 | `/reports/` | Статистика |
 | `/api/*` | REST API |
 
-### Recognizer — ASR-прототип (`recognizer/`)
+### Recognizer — ASR-прототип (`backend/services/asr/`)
 
-Dev-прототип потокового распознавания речи: Vosk `vosk-model-ru-0.22` + WebSocket (`main.py`).
+Dev-прототип потокового распознавания речи: Vosk `vosk-model-ru-0.22` +
+WebSocket (`main.py`). Старый `recognizer/main.py` перенаправляет запуск в
+новый сервис.
 
 > В production-ТЗ ASR — on-prem streaming (вендор TBD); встроенный STT Oktell (Yandex/Google) **исключён**.
 
@@ -240,8 +249,8 @@ docs/sources/                    docs/modules/ + docs/integration/
                               canvases/ + docs/ui/
                               (макеты для согласования)
                                        ▼
-                              dashboard/ + recognizer/
-                              (прототипы реализации)
+                              backend/
+                              (каноническая реализация)
 ```
 
 ---
@@ -261,6 +270,7 @@ docs/sources/                    docs/modules/ + docs/integration/
 
 | README | Путь |
 |--------|------|
+| Backend и структура monorepo | [`backend/README.md`](backend/README.md) |
 | Индекс документации | [`docs/README.md`](docs/README.md) |
 | Исходники заказчика | [`docs/sources/README.md`](docs/sources/README.md) |
 | Контур AI Hub | [`docs/modules/ai-hub/README.md`](docs/modules/ai-hub/README.md) |

@@ -8,9 +8,7 @@ from .forms import ClientInfoForm
 from django.utils import timezone
 from datetime import timedelta
 import json
-from django.db.models import Count, Sum, Avg, Max, Q
-from django.db.models.functions import TruncDate
-import datetime
+from django.db.models import Count
 
 
 def dashboard(request):
@@ -224,12 +222,6 @@ def chat_interface(request):
     }
 
     return render(request, 'index.html', context)
-
-
-def reports(request):
-    """Страница отчетов"""
-    return render(request, 'reports.html')
-
 
 def settings_view(request):
     """Страница настроек"""
