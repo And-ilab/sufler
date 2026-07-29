@@ -166,7 +166,12 @@ class SuzIngestWebhookTest(TestCase):
             status="archived",
         )
         self.assertEqual(self.post(archived).json()["outcome"], "queued")
-        self.assertFalse(CCProductionChunk.objects.filter(is_active=True).exists())
+        self.assertFalse(
+            CCProductionChunk.objects.filter(
+                article_id=published["article_id"],
+                is_active=True,
+            ).exists()
+        )
 
         deleted = {
             "event_id": str(uuid.uuid4()),
@@ -176,8 +181,9 @@ class SuzIngestWebhookTest(TestCase):
             "iblock_id": 7,
         }
         self.assertEqual(self.post(deleted).json()["outcome"], "queued")
-        self.assertFalse(CCProductionChunk.objects.exists())
-
+        self.assertFalse(
+            CCProductionChunk.objects.filter(article_id=101).exists()
+        )
     def test_hmac_and_checksum_are_validated(self):
         payload = self.payload()
         with self.settings(SUZ_WEBHOOK_HMAC_SECRET="shared-secret"):

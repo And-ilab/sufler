@@ -18,6 +18,7 @@
 | Договорные требования (Прил. 1) | [`docs/sources/technical-requirements/prilozhenie-1.md`](docs/sources/technical-requirements/prilozhenie-1.md) |
 | Интерактивные макеты UI | [`canvases/`](canvases/) |
 | Backend и АРМ оператора | [`backend/`](backend/) |
+| Требования к серверу / ВМ | [`docs/technical/server-requirements.md`](docs/technical/server-requirements.md) |
 
 ---
 

@@ -11,6 +11,15 @@
 | **[tz-oktell-sufler-telephony.md](tz-oktell-sufler-telephony.md)** | **Заказчик / Oktell + Исполнитель** | **Итоговое ТЗ v0.1:** модель **T** (WebSocket события + dual-leg ASR on-prem + RAG) |
 | [протокол-интеграция-oktell-sufler-telephony.md](протокол-интеграция-oktell-sufler-telephony.md) | Команда проекта | UC оператора, риски, этапы, расширенный чек-лист |
 | [CONTINUATION.md](CONTINUATION.md) | Разработка | Контекст для продолжения в Cursor |
+| [oktell-t45-smoke.md](../../runbooks/oktell-t45-smoke.md) | Ops / ДИТ | Smoke TEST line T+45: `OKTELL_MODE=mock\|prod` (P4-02) |
+
+## Runtime config (P4-02)
+
+| Flag | Values | Effect |
+|------|--------|--------|
+| `OKTELL_MODE` | `mock` (default) / `prod` | Local `oktell_mock` vs bank TEST line **T+45** (`test_line_t45`) |
+
+Factory: `OktellClient.from_settings()`. Env templates: [`infra/.env.example`](../../../infra/.env.example), TEST cutover [`infra/test/.env.example`](../../../infra/test/.env.example). Ops smoke: [oktell-t45-smoke.md](../../runbooks/oktell-t45-smoke.md).
 
 ## Связанные документы
 

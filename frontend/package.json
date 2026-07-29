@@ -11,7 +11,8 @@
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
     "test:visual": "playwright test",
-    "test:visual:update": "playwright test --update-snapshots",
+    "test:visual:canvas": "playwright test --project=visual",
+    "test:visual:update": "playwright test --project=visual --update-snapshots",
     "playwright:install": "playwright install chromium"
   },
   "dependencies": {

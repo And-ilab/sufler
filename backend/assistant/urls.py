@@ -1,0 +1,31 @@
+from django.urls import path
+
+from assistant.views import (
+    assistant_chat,
+    assistant_openapi,
+    assistant_report_detail,
+    assistant_reports_analytics,
+    assistant_reports_catalog,
+    assistant_reports_export,
+)
+
+urlpatterns = [
+    path("chat", assistant_chat, name="assistant_chat"),
+    path("openapi.json", assistant_openapi, name="assistant_openapi"),
+    path("reports/", assistant_reports_catalog, name="assistant_reports_catalog"),
+    path(
+        "reports/analytics/",
+        assistant_reports_analytics,
+        name="assistant_reports_analytics",
+    ),
+    path(
+        "reports/export/",
+        assistant_reports_export,
+        name="assistant_reports_export",
+    ),
+    path(
+        "reports/<str:report_id>/",
+        assistant_report_detail,
+        name="assistant_report_detail",
+    ),
+]

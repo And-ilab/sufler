@@ -41,17 +41,27 @@ ALLOWED_HOSTS = [
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'drf_spectacular',
+    'channels',
     'audit.apps.AuditConfig',
     'chat',
     'hub.apps.HubConfig',
     'ingest.apps.IngestConfig',
     'qu.apps.QuConfig',
+    'orchestrator.apps.OrchestratorConfig',
+    'assistant.apps.AssistantConfig',
+    'ocr.apps.OcrConfig',
+    'telephony.apps.TelephonyConfig',
+    'reports.apps.ReportsConfig',
+    'api_docs.apps.ApiDocsConfig',
 ]
 
 MIDDLEWARE = [
@@ -86,6 +96,28 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'sufler.wsgi.application'
 ASGI_APPLICATION = 'sufler.asgi.application'
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    }
+}
+if os.getenv("REDIS_URL") or os.getenv("REDIS_HOST"):
+    redis_url = os.getenv("REDIS_URL")
+    if not redis_url:
+        redis_host = os.getenv("REDIS_HOST", "127.0.0.1")
+        redis_port = os.getenv("REDIS_PORT", "6379")
+        redis_password = os.getenv("REDIS_PASSWORD", "")
+        if redis_password:
+            redis_url = f"redis://:{redis_password}@{redis_host}:{redis_port}/0"
+        else:
+            redis_url = f"redis://{redis_host}:{redis_port}/0"
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [redis_url]},
+        }
+    }
 
 
 # Database
@@ -130,11 +162,22 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Authentication and I.4 RBAC.
+# Authentication and I.4 / I.10 RBAC.
+# AUTH_BACKEND preferred (ldaps|mock_ldap|model); AUTH_MODE kept as alias (P2-01).
+from auth.ldap_config import resolve_auth_backend
+
+AUTH_BACKEND = os.getenv("AUTH_BACKEND", "").strip()
 AUTH_MODE = os.getenv(
     "AUTH_MODE",
     "mock_ldap" if DEBUG else "model",
 ).strip().lower()
+AUTH_MODE = resolve_auth_backend(
+    auth_backend=AUTH_BACKEND or None,
+    auth_mode=AUTH_MODE,
+    debug=DEBUG,
+)
+# Canonical name after normalize (ldaps replaces legacy "ldap").
+AUTH_BACKEND = AUTH_MODE
 AUTH_MOCK_LDAP_USERS_JSON = os.getenv("AUTH_MOCK_LDAP_USERS_JSON", "")
 AUTH_MOCK_LDAP_DEFAULT_PASSWORD = os.getenv(
     "AUTH_MOCK_LDAP_DEFAULT_PASSWORD",
@@ -146,12 +189,12 @@ AUTH_MOCK_LDAP_ALLOW_INSECURE = os.getenv(
 ).lower() in {"1", "true", "yes"}
 AUTH_LDAP_ROLE_GROUP_MAP = {}
 
-if AUTH_MODE == "mock_ldap":
+if AUTH_BACKEND == "mock_ldap":
     AUTHENTICATION_BACKENDS = [
         "auth.mock_ldap.MockLDAPBackend",
         "django.contrib.auth.backends.ModelBackend",
     ]
-elif AUTH_MODE == "ldap":
+elif AUTH_BACKEND == "ldaps":
     from auth.ldap_config import build_ldap_settings
 
     globals().update(build_ldap_settings())
@@ -159,13 +202,13 @@ elif AUTH_MODE == "ldap":
         "django_auth_ldap.backend.LDAPBackend",
         "django.contrib.auth.backends.ModelBackend",
     ]
-elif AUTH_MODE == "model":
+elif AUTH_BACKEND == "model":
     AUTHENTICATION_BACKENDS = [
         "django.contrib.auth.backends.ModelBackend",
     ]
 else:
     raise ImproperlyConfigured(
-        "AUTH_MODE must be one of: mock_ldap, ldap, model"
+        "AUTH_BACKEND must be one of: ldaps, mock_ldap, model"
     )
 
 # Path policies are opt-in so legacy routes remain compatible. New Hub/API
@@ -173,12 +216,49 @@ else:
 RBAC_PATH_PERMISSIONS = {}
 RBAC_PUBLIC_PATH_PREFIXES = (
     "/api/v1/knowledge/",
+    "/api/auth/login/",
+    "/api/auth/logout/",
+    "/api/schema/",
+    "/api/docs/",
+    "/api/redoc/",
+    "/health/",
+    "/metrics/",
     "/client-info/",
     "/static/",
     "/admin/login/",
 )
 
+SUZ_INGEST_MODE = os.getenv("SUZ_INGEST_MODE", "mock").strip().lower() or "mock"
 SUZ_WEBHOOK_HMAC_SECRET = os.getenv("SUZ_WEBHOOK_HMAC_SECRET", "")
+SUZ_WEBHOOK_PATH = os.getenv(
+    "SUZ_WEBHOOK_PATH",
+    "/api/v1/knowledge/events",
+)
+_suz_iblocks = os.getenv("SUZ_ALLOWED_IBLOCK_IDS", "").strip()
+SUZ_ALLOWED_IBLOCK_IDS = frozenset(
+    int(part.strip())
+    for part in _suz_iblocks.split(",")
+    if part.strip().isdigit()
+)
+# INT-09 Model B polling fallback (Bitrix outbox /changes).
+BITRIX_REST_BASE_URL = os.getenv("BITRIX_REST_BASE_URL", "").rstrip("/")
+BITRIX_SERVICE_TOKEN = os.getenv("BITRIX_SERVICE_TOKEN", "")
+BITRIX_CHANGES_PATH = os.getenv(
+    "BITRIX_CHANGES_PATH",
+    "/local/api/sufler/v1/changes",
+)
+BITRIX_HTTP_TIMEOUT_SECONDS = float(
+    os.getenv("BITRIX_HTTP_TIMEOUT_SECONDS", "15")
+)
+SUZ_RECONCILE_ENABLED = os.getenv("SUZ_RECONCILE_ENABLED", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+SUZ_RECONCILE_LIMIT = int(os.getenv("SUZ_RECONCILE_LIMIT", "100"))
+SUZ_RECONCILE_INTERVAL_SECONDS = int(
+    os.getenv("SUZ_RECONCILE_INTERVAL_SECONDS", "300")
+)
 
 MODEL_REGISTRY_PATH = Path(
     os.getenv(
@@ -186,8 +266,15 @@ MODEL_REGISTRY_PATH = Path(
         str(BASE_DIR / "config" / "model_registry.yaml"),
     )
 )
+# Bank TEST inference binding (ModelRegistry deployment_profiles.test).
+AI_INFERENCE_PROFILE = os.getenv("AI_INFERENCE_PROFILE", "test").strip() or "test"
+# Optional override of slot kpi.gateway_mode (stub|openai).
+MODEL_GATEWAY_MODE = os.getenv("MODEL_GATEWAY_MODE", "").strip()
+ASR_MODE = os.getenv("ASR_MODE", "stub").strip() or "stub"
+ASR_WS_URL = os.getenv("ASR_WS_URL", "ws://asr:8765/")
+ASR_HEALTH_URL = os.getenv("ASR_HEALTH_URL", "http://asr:8764/health")
 
-# Structured VI.3 audit and KUMA-compatible sinks.
+# Structured VI.3 audit and KUMA-compatible sinks (P2-05 schema_version=1.0 unchanged).
 AUDIT_ENABLED = os.getenv("AUDIT_ENABLED", "true").lower() in {
     "1",
     "true",
@@ -204,7 +291,12 @@ AUDIT_FILE_PATH = Path(
         str(BASE_DIR / "var" / "audit" / "audit.jsonl"),
     )
 )
-AUDIT_HTTP_COLLECTOR_URL = os.getenv("AUDIT_HTTP_COLLECTOR_URL", "")
+# Prefer AUDIT_KUMA_COLLECTOR_URL (VI.3 prod); fall back to AUDIT_HTTP_COLLECTOR_URL.
+AUDIT_HTTP_COLLECTOR_URL = (
+    os.getenv("AUDIT_KUMA_COLLECTOR_URL", "").strip()
+    or os.getenv("AUDIT_HTTP_COLLECTOR_URL", "").strip()
+)
+AUDIT_KUMA_COLLECTOR_URL = AUDIT_HTTP_COLLECTOR_URL
 AUDIT_HTTP_TIMEOUT_SECONDS = float(
     os.getenv("AUDIT_HTTP_TIMEOUT_SECONDS", "5")
 )
@@ -215,6 +307,29 @@ AUDIT_SOURCE_SERVICE = os.getenv(
     "AUDIT_SOURCE_SERVICE",
     "sufler-backend",
 )
+
+# VI.2 Oktell telephony adapter (P4-02).
+# OKTELL_MODE=mock → local oktell_mock; prod → TEST line T+45 / real WS.
+OKTELL_MODE = os.getenv("OKTELL_MODE", "mock").strip().lower() or "mock"
+OKTELL_ENABLED = os.getenv("OKTELL_ENABLED", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+OKTELL_WS_URL = os.getenv("OKTELL_WS_URL", "ws://127.0.0.1:8766")
+OKTELL_MOCK_WS_URL = os.getenv("OKTELL_MOCK_WS_URL", "ws://127.0.0.1:8766")
+OKTELL_PROD_WS_URL = os.getenv("OKTELL_PROD_WS_URL", "")
+OKTELL_SUBSCRIBE_EVENT = os.getenv("OKTELL_SUBSCRIBE_EVENT", "phoneevent")
+OKTELL_OPEN_TIMEOUT_SECONDS = float(
+    os.getenv("OKTELL_OPEN_TIMEOUT_SECONDS", "5")
+)
+OKTELL_PROFILE_ID = os.getenv("OKTELL_PROFILE_ID", "test_line_t45")
+OKTELL_TEST_LINE_LABEL = os.getenv(
+    "OKTELL_TEST_LINE_LABEL",
+    "T+45 test line",
+)
+OKTELL_TEST_QUEUE = os.getenv("OKTELL_TEST_QUEUE", "")
+OKTELL_TEST_MARKING = os.getenv("OKTELL_TEST_MARKING", "TEST_OKTELL_T45")
 
 
 # Internationalization
@@ -251,3 +366,38 @@ CELERY_TASK_TIME_LIMIT = 30 * 60
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ROOT_USER", "")
 MINIO_SECRET_KEY = os.getenv("MINIO_ROOT_PASSWORD", "")
+MINIO_OCR_BUCKET = os.getenv("MINIO_OCR_BUCKET", "sufler-ocr")
+# auto | fs | minio — fs used when credentials empty or tests override.
+OCR_OBJECT_STORE_BACKEND = os.getenv("OCR_OBJECT_STORE_BACKEND", "auto")
+OCR_OBJECT_STORE_ROOT = Path(
+    os.getenv(
+        "OCR_OBJECT_STORE_ROOT",
+        str(BASE_DIR / "var" / "ocr-objects"),
+    )
+)
+OCR_MAX_UPLOAD_BYTES = int(os.getenv("OCR_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
+
+# Django REST Framework + drf-spectacular (OpenAPI `/api/schema/`).
+REST_FRAMEWORK = {
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.AllowAny",
+    ],
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Sufler AI Hub API",
+    "DESCRIPTION": (
+        "OpenAPI for integrators and приёмка. Curated paths for "
+        "assistant, sufler, and ingest are merged via postprocessing hook."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "POSTPROCESSING_HOOKS": [
+        "api_docs.openapi_v1.merge_into_spectacular_schema",
+    ],
+}

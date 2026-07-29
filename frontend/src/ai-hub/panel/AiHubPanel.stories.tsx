@@ -28,6 +28,16 @@ export const DocumentsOnly: Story = {
   },
 }
 
+export const DocumentsUploadFlow: Story = {
+  args: {
+    roles: ['document_recognition_user'],
+    username: 'Петрова А.С. · Верификатор',
+    initialTab: 'documents',
+    initialDocumentSubTab: 'upload',
+    initialPinned: true,
+  },
+}
+
 export const ActiveCall: Story = {
   args: {
     roles: ['contact_center_telephony_operator'],

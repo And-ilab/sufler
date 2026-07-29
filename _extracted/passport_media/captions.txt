@@ -1,0 +1,21 @@
+# Suggested Russian figure captions (from document section placement)
+# Source: Паспорт_станка_GW_DS09_ГОСТ_2_601_2019_1.docx
+
+image2.png
+Рисунок — Общий вид изделия (раздел 1. Основные сведения об изделии)
+
+image4.png
+Рисунок — Габаритные размеры станка (раздел 2.4. Габаритные размеры и внешний вид)
+
+image1.png
+Рисунок — Внешний вид станка (раздел 2.4. Габаритные размеры и внешний вид)
+
+image3.png
+Рисунок — Упаковка изделия (раздел 5. Упаковка)
+
+# Size-based type hints (no vision; inferred from pixels/file size only)
+# image2.png: 586x946, ~971 KB — tall portrait, high bytes/px → likely photo of machine (general view)
+# image4.png: 1039x729, ~215 KB — landscape, low bytes/px → likely dimension drawing / schematic
+# image1.png: 365x527, ~275 KB — portrait mid density → likely external-view photo or detail figure
+# image3.png: 1019x1032, ~1.6 MB — near-square, highest size → likely packaging photo
+# note: word/media also contained image6.png (70 bytes) — skipped (not requested)

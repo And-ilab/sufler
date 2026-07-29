@@ -11,6 +11,9 @@ import {
   type ModelParamsScreenHandle,
 } from './ModelParamsScreen'
 import { QuPreviewScreen } from './QuPreviewScreen'
+import { KbAdminScreen } from './KbAdminScreen'
+import { PromptsAssistantScreen } from './PromptsAssistantScreen'
+import { CapabilitiesScreen } from './CapabilitiesScreen'
 import type { ModelParamsData } from './api/modelRegistry'
 import {
   ADMIN_GROUPS,
@@ -60,19 +63,19 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
   },
   prompts_assistant: {
     title: 'Промпты ассистента',
-    subtitle: 'Библиотека System, Task и Scope промптов с версиями.',
-    status: '24 опубликовано',
-    cards: [['System', '6', 'Базовые инструкции'], ['Task', '12', 'Рабочие сценарии'], ['Scope', '8', 'Подразделения']],
+    subtitle: 'Библиотека system/task/scope для профиля assistant_bank (III.10.1).',
+    status: 'CRUD',
+    cards: [['Промпты', 'assistant_*', '≠ cc_production'], ['Studio', '3 колонки', 'Библиотека · Редактор · Preview'], ['Публикация', 'draft → vN', 'Журнал Общее']],
   },
   capabilities: {
     title: 'Навыки и инструменты',
-    subtitle: 'Каталог навыков ассистента и разрешённых операций.',
-    status: '18 навыков',
-    cards: [['KB lookup', 'Включён', 'Поиск по БЗ'], ['Calculator', 'Включён', 'Локальное выполнение'], ['HR helper', 'Черновик', 'Требует review']],
+    subtitle: 'Реестр capabilities (VII.5 D4): RAG, RPA, SQL, перевод — toggle + deep link.',
+    status: 'Stub registry',
+    cards: [['Capabilities', '8', 'Карточки 2×N'], ['KB', 'assistant_*', 'Изоляция'], ['Политики', 'III.6.5', 'SQL read-only']],
   },
   kb_admin: {
-    title: 'Базы знаний',
-    subtitle: 'Источники, индексация и scope корпоративных знаний.',
+    title: 'Базы знаний КЦ',
+    subtitle: 'Создание БЗ, загрузка pdf/docx, переиндексация и статус индекса.',
     status: 'Индекс актуален',
     cards: [['Документы', '1 240', 'В основном индексе'], ['Последний reindex', '2 мин', 'FR-UND-08'], ['Ошибки', '0', 'За 24 часа']],
   },
@@ -148,6 +151,18 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
     status: '3 online',
     cards: [['Bitrix24', 'Online', 'CRM adapter'], ['Online Chat', 'Online', 'Webhook'], ['Oktell', 'Mock', 'WebSocket / MRCP risk']],
   },
+  asr_qa: {
+    title: 'QA записей ASR',
+    subtitle: 'Каталог записей, аудиоплеер и синхронный транскрипт для аналитика КЦ.',
+    status: 'FR-ASR-10',
+    cards: [['Каталог', 'Все записи', 'TTL 1 год'], ['Фильтры', 'Опционально', 'Низкая уверенность'], ['Учебные', 'Кандидаты', 'Дообучение ASR']],
+  },
+  cc_reports: {
+    title: 'Отчётность КЦ',
+    subtitle: 'FR-RPT-CC: таблицы, фильтры периода, экспорт CSV/XLSX и графики ASR.',
+    status: 'II.6',
+    cards: [['Аналитика', 'Stub ETL', 'asr_stats'], ['Экспорт', 'CSV / XLSX', 'UTF-8'], ['Графики', 'ASR quality', 'Распознавание']],
+  },
 }
 
 const DEMO_ROLE_LABELS: Record<DemoAdminRole, string> = {
@@ -209,6 +224,10 @@ export function AiHubAdminApp({
     : undefined
 
   const navigate = (event: MouseEvent<HTMLAnchorElement>, item: AdminNavItem) => {
+    if (item.id === 'asr_qa' || item.id === 'cc_reports') {
+      window.location.assign(adminRoute(item))
+      return
+    }
     event.preventDefault()
     setScreen(item.id)
     setProfile(item.profile ?? (item.id === 'llm_config_cc' ? 'cc' : 'assistant'))
@@ -308,6 +327,12 @@ export function AiHubAdminApp({
             />
           ) : screen === 'qu_admin' ? (
             <QuPreviewScreen />
+          ) : screen === 'kb_admin' ? (
+            <KbAdminScreen canEdit={canEdit} />
+          ) : screen === 'prompts_assistant' ? (
+            <PromptsAssistantScreen canEdit={canEdit} />
+          ) : screen === 'capabilities' ? (
+            <CapabilitiesScreen canEdit={canEdit} />
           ) : (
             <>
               <section className="admin-stats" aria-label={`Сводка экрана ${copy.title}`}>
@@ -351,7 +376,7 @@ export function AiHubAdminApp({
           )}
         </main>
 
-        {screen !== 'qu_admin' && (
+        {screen !== 'qu_admin' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && (
         <footer className="admin-save-footer" data-testid="admin-save-footer">
           <span>
             {screen === 'model_params'

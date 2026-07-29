@@ -1,0 +1,2953 @@
+{
+  "tracked_count_a7daa4f": 686,
+  "chats_with_writes_jul21plus": {
+    "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f": {
+      "count": 842,
+      "unique_files": 275,
+      "ts": "Monday, Jul 27, 2026, 11:36 AM (UTC+3)",
+      "files_sample": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/deploy-test.yml",
+        ".gitignore",
+        "backend/README.md",
+        "backend/api_docs/__init__.py",
+        "backend/api_docs/apps.py",
+        "backend/api_docs/export_postman.py",
+        "backend/api_docs/openapi_v1.py",
+        "backend/assistant/__init__.py",
+        "backend/assistant/apps.py",
+        "backend/assistant/ass_reports.py",
+        "backend/assistant/chat.py",
+        "backend/assistant/openapi.py",
+        "backend/assistant/urls.py",
+        "backend/assistant/views.py",
+        "backend/audit/README.md",
+        "backend/audit/__init__.py",
+        "backend/audit/samples.py",
+        "backend/audit/service.py",
+        "backend/audit/sinks/http.py",
+        "backend/auth/README.md",
+        "backend/auth/c2_groups.py",
+        "backend/auth/ldap_config.py",
+        "backend/auth/roles.py",
+        "backend/auth/urls.py",
+        "backend/auth/views.py",
+        "backend/config/model_registry.yaml",
+        "backend/config/ocr_validation_rules.yaml",
+        "backend/core/health.py",
+        "backend/core/metrics.py",
+        "backend/core/model_gateway.py",
+        "backend/core/model_registry.py",
+        "backend/hub/assistant_admin.py",
+        "backend/hub/kb_admin.py",
+        "backend/hub/migrations/0002_kb_admin.py",
+        "backend/hub/models.py",
+        "backend/hub/urls.py",
+        "backend/hub/views.py",
+        "backend/ingest/README.md",
+        "backend/ingest/bitrix_client.py"
+      ]
+    },
+    "badafbfe-2638-4aa1-bd87-a5f58dbb7c3a": {
+      "count": 20,
+      "unique_files": 8,
+      "ts": "Tuesday, Jul 21, 2026, 2:36 PM (UTC+3)",
+      "files_sample": [
+        "frontend/.dockerignore",
+        "frontend/Dockerfile",
+        "frontend/README.md",
+        "frontend/src/auth/usePortalAuth.ts",
+        "frontend/vite.config.ts",
+        "infra/.env.example",
+        "infra/README.md",
+        "infra/docker-compose.yml"
+      ]
+    },
+    "7f7b3d86-e4c0-4678-9f51-8fd6aef57284": {
+      "count": 18,
+      "unique_files": 4,
+      "ts": "Friday, Jul 24, 2026, 4:54 PM (UTC+3)",
+      "files_sample": [
+        "_extracted/_fix_manual_comments.py",
+        "_extracted/_make_framed_pair.py",
+        "_extracted/_patch_manual_comments.py",
+        "_extracted/_patch_passport_comments.py"
+      ]
+    },
+    "b8aea5f0-1f51-43b6-96c6-bccd563582fd": {
+      "count": 12,
+      "unique_files": 5,
+      "ts": "Tuesday, Jul 21, 2026, 1:25 PM (UTC+3)",
+      "files_sample": [
+        "_extracted/_list_top_comments.py",
+        "_extracted/extract_comment_context.py",
+        "_extracted/patch_acceptance_scenarios.py",
+        "_extracted/verify_patched_docx.py",
+        "docs/remarks/otvety-zamechaniya-tz-v1.4.md"
+      ]
+    },
+    "ab1a12a4-6fdf-456f-ad0a-b495c4fae664": {
+      "count": 8,
+      "unique_files": 4,
+      "ts": "Tuesday, Jul 21, 2026, 2:08 PM (UTC+3)",
+      "files_sample": [
+        "README.md",
+        "docs/README.md",
+        "docs/modules/ai-hub/README.md",
+        "docs/technical/server-requirements.md"
+      ]
+    },
+    "8b04aa50-e564-4398-812d-267563831ba0": {
+      "count": 6,
+      "unique_files": 2,
+      "ts": "Wednesday, Jul 22, 2026, 2:29 PM (UTC+3)",
+      "files_sample": [
+        "_extracted/build_operation_manual.py",
+        "_extracted/extract_pptx.py"
+      ]
+    },
+    "71ce5721-a45f-489b-976f-c3bf2c309086": {
+      "count": 4,
+      "unique_files": 2,
+      "ts": "Thursday, Jul 23, 2026, 4:34 PM (UTC+3)",
+      "files_sample": [
+        "docs/remarks/suz-integration/_build_otvety_docx.py",
+        "docs/remarks/suz-integration/otvety-new-it-outsource-cms-rag.md"
+      ]
+    },
+    "16563d67-d8f5-48be-8199-7106b90ea42b": {
+      "count": 2,
+      "unique_files": 1,
+      "ts": "Tuesday, Jul 21, 2026, 2:20 PM (UTC+3)",
+      "files_sample": [
+        "infra/.env"
+      ]
+    }
+  },
+  "all_chat_meta_jul21plus": {
+    "0739a475-e036-4837-bc41-ecb49d85722c": {
+      "ts": "Monday, Jul 27, 2026, 2:53 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\0739a475-e036-4837-bc41-ecb49d85722c\\0739a475-e036-4837-bc41-ecb49d85722c.jsonl"
+    },
+    "16563d67-d8f5-48be-8199-7106b90ea42b": {
+      "ts": "Tuesday, Jul 21, 2026, 2:20 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\16563d67-d8f5-48be-8199-7106b90ea42b\\16563d67-d8f5-48be-8199-7106b90ea42b.jsonl"
+    },
+    "2a0837a1-238b-4cec-b4f3-05aa4f8c812c": {
+      "ts": "Friday, Jul 24, 2026, 4:55 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\2a0837a1-238b-4cec-b4f3-05aa4f8c812c\\2a0837a1-238b-4cec-b4f3-05aa4f8c812c.jsonl"
+    },
+    "38e3134a-8ae6-4d21-bbf1-9f1774eef5da": {
+      "ts": "Friday, Jul 24, 2026, 5:04 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\38e3134a-8ae6-4d21-bbf1-9f1774eef5da\\38e3134a-8ae6-4d21-bbf1-9f1774eef5da.jsonl"
+    },
+    "5b76ce1f-0bfe-4012-9525-6425e54987c0": {
+      "ts": "Monday, Jul 20, 2026, 8:09 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\5b76ce1f-0bfe-4012-9525-6425e54987c0\\5b76ce1f-0bfe-4012-9525-6425e54987c0.jsonl"
+    },
+    "695faea4-9bde-483a-b32b-71e8c69a6a7f": {
+      "ts": "Monday, Jul 20, 2026, 11:36 AM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\695faea4-9bde-483a-b32b-71e8c69a6a7f\\695faea4-9bde-483a-b32b-71e8c69a6a7f.jsonl"
+    },
+    "6ee6264c-e935-492a-8ca2-8c0eb0af5872": {
+      "ts": "Wednesday, Jul 29, 2026, 1:47 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\6ee6264c-e935-492a-8ca2-8c0eb0af5872\\6ee6264c-e935-492a-8ca2-8c0eb0af5872.jsonl"
+    },
+    "71ce5721-a45f-489b-976f-c3bf2c309086": {
+      "ts": "Thursday, Jul 23, 2026, 4:34 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\71ce5721-a45f-489b-976f-c3bf2c309086\\71ce5721-a45f-489b-976f-c3bf2c309086.jsonl"
+    },
+    "7f7b3d86-e4c0-4678-9f51-8fd6aef57284": {
+      "ts": "Friday, Jul 24, 2026, 4:54 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\7f7b3d86-e4c0-4678-9f51-8fd6aef57284\\7f7b3d86-e4c0-4678-9f51-8fd6aef57284.jsonl"
+    },
+    "8b04aa50-e564-4398-812d-267563831ba0": {
+      "ts": "Wednesday, Jul 22, 2026, 2:29 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\8b04aa50-e564-4398-812d-267563831ba0\\8b04aa50-e564-4398-812d-267563831ba0.jsonl"
+    },
+    "91de339d-ae3a-424a-ad86-0eb07b3c2ba7": {
+      "ts": "Friday, Jul 24, 2026, 4:58 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\91de339d-ae3a-424a-ad86-0eb07b3c2ba7\\91de339d-ae3a-424a-ad86-0eb07b3c2ba7.jsonl"
+    },
+    "99578adc-af7c-4f08-a2f5-842cec4ace93": {
+      "ts": "Monday, Jul 27, 2026, 12:51 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\99578adc-af7c-4f08-a2f5-842cec4ace93\\99578adc-af7c-4f08-a2f5-842cec4ace93.jsonl"
+    },
+    "9f0a0050-0802-404b-a616-26ace0d661dd": {
+      "ts": "Monday, Jul 20, 2026, 4:12 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\9f0a0050-0802-404b-a616-26ace0d661dd\\9f0a0050-0802-404b-a616-26ace0d661dd.jsonl"
+    },
+    "aa730b4c-9380-41a3-b6ca-915a29fcc736": {
+      "ts": "Monday, Jul 20, 2026, 3:51 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\aa730b4c-9380-41a3-b6ca-915a29fcc736\\aa730b4c-9380-41a3-b6ca-915a29fcc736.jsonl"
+    },
+    "ab1a12a4-6fdf-456f-ad0a-b495c4fae664": {
+      "ts": "Tuesday, Jul 21, 2026, 2:08 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\ab1a12a4-6fdf-456f-ad0a-b495c4fae664\\ab1a12a4-6fdf-456f-ad0a-b495c4fae664.jsonl"
+    },
+    "b8aea5f0-1f51-43b6-96c6-bccd563582fd": {
+      "ts": "Tuesday, Jul 21, 2026, 1:25 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\b8aea5f0-1f51-43b6-96c6-bccd563582fd\\b8aea5f0-1f51-43b6-96c6-bccd563582fd.jsonl"
+    },
+    "badafbfe-2638-4aa1-bd87-a5f58dbb7c3a": {
+      "ts": "Tuesday, Jul 21, 2026, 2:36 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\badafbfe-2638-4aa1-bd87-a5f58dbb7c3a\\badafbfe-2638-4aa1-bd87-a5f58dbb7c3a.jsonl"
+    },
+    "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f": {
+      "ts": "Monday, Jul 27, 2026, 11:36 AM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\c556b1db-b5a7-4419-aa78-4cc5fecd2a8f\\c556b1db-b5a7-4419-aa78-4cc5fecd2a8f.jsonl"
+    },
+    "ecf0395e-a244-46e2-928d-211d19611b02": {
+      "ts": "Tuesday, Jul 28, 2026, 3:59 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\ecf0395e-a244-46e2-928d-211d19611b02\\ecf0395e-a244-46e2-928d-211d19611b02.jsonl"
+    },
+    "fbed0bf9-6a7a-4e02-ad7f-0f299ea2a808": {
+      "ts": "Monday, Jul 27, 2026, 5:11 PM (UTC+3)",
+      "file": "C:\\Users\\user\\.cursor\\projects\\c-Users-user-Desktop-sufler-sufler\\agent-transcripts\\fbed0bf9-6a7a-4e02-ad7f-0f299ea2a808\\fbed0bf9-6a7a-4e02-ad7f-0f299ea2a808.jsonl"
+    }
+  },
+  "unique_files_total": 294,
+  "by_area": {
+    "github": [
+      {
+        "path": ".github/workflows/ci.yml",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": ".github/workflows/deploy-test.yml",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 5
+      }
+    ],
+    "other": [
+      {
+        "path": ".gitignore",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "README.md",
+        "status": "MODIFIED",
+        "chats": [
+          "ab1a12a4-6fdf-456f-ad0a-b495c4fae664"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "pytest.ini",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      }
+    ],
+    "docs": [
+      {
+        "path": "_extracted/_fix_manual_comments.py",
+        "status": "NEW",
+        "chats": [
+          "7f7b3d86-e4c0-4678-9f51-8fd6aef57284"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "_extracted/_list_top_comments.py",
+        "status": "NEW",
+        "chats": [
+          "b8aea5f0-1f51-43b6-96c6-bccd563582fd"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "_extracted/_make_framed_pair.py",
+        "status": "NEW",
+        "chats": [
+          "7f7b3d86-e4c0-4678-9f51-8fd6aef57284"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "_extracted/_patch_manual_comments.py",
+        "status": "NEW",
+        "chats": [
+          "7f7b3d86-e4c0-4678-9f51-8fd6aef57284"
+        ],
+        "ops": 12
+      },
+      {
+        "path": "_extracted/_patch_passport_comments.py",
+        "status": "NEW",
+        "chats": [
+          "7f7b3d86-e4c0-4678-9f51-8fd6aef57284"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "_extracted/build_operation_manual.py",
+        "status": "NEW",
+        "chats": [
+          "8b04aa50-e564-4398-812d-267563831ba0"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "_extracted/extract_comment_context.py",
+        "status": "NEW",
+        "chats": [
+          "b8aea5f0-1f51-43b6-96c6-bccd563582fd"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "_extracted/extract_pptx.py",
+        "status": "NEW",
+        "chats": [
+          "8b04aa50-e564-4398-812d-267563831ba0"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "_extracted/patch_acceptance_scenarios.py",
+        "status": "NEW",
+        "chats": [
+          "b8aea5f0-1f51-43b6-96c6-bccd563582fd"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "_extracted/verify_patched_docx.py",
+        "status": "NEW",
+        "chats": [
+          "b8aea5f0-1f51-43b6-96c6-bccd563582fd"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "docs/README.md",
+        "status": "MODIFIED",
+        "chats": [
+          "ab1a12a4-6fdf-456f-ad0a-b495c4fae664",
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 41
+      },
+      {
+        "path": "docs/api/README.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/benchmarks/asr-evaluation-report.md",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/delivery/ptr.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 5
+      },
+      {
+        "path": "docs/delivery/ra.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 16
+      },
+      {
+        "path": "docs/delivery/re.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "docs/development/code-review-checklist.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/development/demo-script.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/development/vii5-decisions-tracker.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/development/vpn-request-template.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/integration/oktell-sufler-telephony/README.md",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/modules/ai-hub/README.md",
+        "status": "MODIFIED",
+        "chats": [
+          "ab1a12a4-6fdf-456f-ad0a-b495c4fae664"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "docs/remarks/otvety-zamechaniya-tz-v1.4.md",
+        "status": "NEW",
+        "chats": [
+          "b8aea5f0-1f51-43b6-96c6-bccd563582fd"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "docs/remarks/suz-integration/_build_otvety_docx.py",
+        "status": "NEW",
+        "chats": [
+          "71ce5721-a45f-489b-976f-c3bf2c309086"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "docs/remarks/suz-integration/otvety-new-it-outsource-cms-rag.md",
+        "status": "NEW",
+        "chats": [
+          "71ce5721-a45f-489b-976f-c3bf2c309086"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "docs/runbooks/deploy-test.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/runbooks/i10-ldaps-auth-smoke.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/runbooks/oktell-t45-smoke.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "docs/runbooks/qu-retrain.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/runbooks/reindex.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/runbooks/rollback-qu.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/runbooks/vi3-kuma-audit-smoke.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/technical/model-selection-v1.md",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "docs/technical/ocr-llm-pipeline.md",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 6
+      },
+      {
+        "path": "docs/technical/server-requirements.md",
+        "status": "NEW",
+        "chats": [
+          "ab1a12a4-6fdf-456f-ad0a-b495c4fae664",
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "docs/training/admin-guide-outline.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "docs/training/user-guide-outline.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "docs/ui/canvas-registry.yaml",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      }
+    ],
+    "backend": [
+      {
+        "path": "backend/README.md",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 10
+      },
+      {
+        "path": "backend/api_docs/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/api_docs/apps.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/api_docs/export_postman.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/api_docs/openapi_v1.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/assistant/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/assistant/apps.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/assistant/ass_reports.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/assistant/chat.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/assistant/openapi.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "backend/assistant/urls.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "backend/assistant/views.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "backend/audit/README.md",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/audit/__init__.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/audit/samples.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/audit/service.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/audit/sinks/http.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/auth/README.md",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/auth/c2_groups.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/auth/ldap_config.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/auth/roles.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "backend/auth/urls.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/auth/views.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "backend/config/model_registry.yaml",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "backend/config/ocr_validation_rules.yaml",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "backend/core/health.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "backend/core/metrics.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/core/model_gateway.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/core/model_registry.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "backend/hub/assistant_admin.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/hub/kb_admin.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "backend/hub/migrations/0002_kb_admin.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/hub/models.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "backend/hub/urls.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/hub/views.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 5
+      },
+      {
+        "path": "backend/ingest/README.md",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "backend/ingest/bitrix_client.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/ingest/management/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/ingest/management/commands/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/ingest/management/commands/verify_data_tier.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ingest/migrations/0002_suzreconcilestate.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ingest/migrations/0003_ensure_hnsw_index.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ingest/models.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "backend/ingest/reconcile.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ingest/tasks.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/ingest/urls.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/ingest/views.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/integrations/channels/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/integrations/channels/urls.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/integrations/channels/webhooks.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/integrations/oktell/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 5
+      },
+      {
+        "path": "backend/integrations/oktell/asr_pipeline.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/integrations/oktell/client.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 7
+      },
+      {
+        "path": "backend/integrations/oktell/config.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ocr/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/ocr/apps.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/ocr/engine.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ocr/export.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ocr/management/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/ocr/management/commands/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/ocr/management/commands/verify_support_services.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ocr/migrations/0001_initial.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ocr/migrations/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/ocr/models.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ocr/pipeline.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ocr/storage.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ocr/tasks.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ocr/urls.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "backend/ocr/validation.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/ocr/views.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "backend/orchestrator/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/orchestrator/apps.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/orchestrator/management/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/orchestrator/management/commands/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/orchestrator/management/commands/verify_inference_tier.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "backend/orchestrator/sufler.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 6
+      },
+      {
+        "path": "backend/orchestrator/test_dialog.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/orchestrator/urls.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "backend/orchestrator/views.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 5
+      },
+      {
+        "path": "backend/qu/README.md",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/reports/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/reports/apps.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/reports/asr_qa.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 8
+      },
+      {
+        "path": "backend/reports/cc_analytics.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/reports/migrations/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/reports/models.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/reports/urls.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 6
+      },
+      {
+        "path": "backend/reports/views.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 5
+      },
+      {
+        "path": "backend/requirements-ldap.txt",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/requirements.txt",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 8
+      },
+      {
+        "path": "backend/services/asr/Dockerfile",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/services/asr/runtime.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/sufler/asgi.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/sufler/celery.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "backend/sufler/settings.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 29
+      },
+      {
+        "path": "backend/sufler/urls.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 14
+      },
+      {
+        "path": "backend/telephony/__init__.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "backend/telephony/apps.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/telephony/consumers.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "backend/telephony/routing.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      }
+    ],
+    "frontend": [
+      {
+        "path": "frontend/.dockerignore",
+        "status": "NEW",
+        "chats": [
+          "badafbfe-2638-4aa1-bd87-a5f58dbb7c3a"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/.storybook/main.ts",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/Dockerfile",
+        "status": "NEW",
+        "chats": [
+          "badafbfe-2638-4aa1-bd87-a5f58dbb7c3a"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/Dockerfile.prod",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/README.md",
+        "status": "MODIFIED",
+        "chats": [
+          "badafbfe-2638-4aa1-bd87-a5f58dbb7c3a",
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 7
+      },
+      {
+        "path": "frontend/nginx.prod.conf",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "frontend/package.json",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/playwright.config.ts",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/public/widget/sample.html",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/public/widget/widget.js",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/App.css",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/App.tsx",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 18
+      },
+      {
+        "path": "frontend/src/ai-hub/admin/AiHubAdmin.css",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/src/ai-hub/admin/AiHubAdminApp.stories.tsx",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/src/ai-hub/admin/AiHubAdminApp.tsx",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 11
+      },
+      {
+        "path": "frontend/src/ai-hub/admin/AssistantAdminScreens.css",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/admin/CapabilitiesScreen.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/admin/KbAdminScreen.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/src/ai-hub/admin/PromptsAssistantScreen.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/admin/adminNav.ts",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 10
+      },
+      {
+        "path": "frontend/src/ai-hub/admin/api/assistantAdmin.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/admin/api/kbAdmin.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/ocr/OcrDocumentsPanel.css",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/ocr/OcrDocumentsPanel.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/panel/AiHubPanel.css",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/src/ai-hub/panel/AiHubPanel.stories.tsx",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/panel/AiHubPanel.tsx",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 8
+      },
+      {
+        "path": "frontend/src/ai-hub/reports/AiHubReportsApp.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "frontend/src/ai-hub/reports/AsrQa.css",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/src/ai-hub/reports/AsrQaScreen.stories.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/reports/AsrQaScreen.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/src/ai-hub/reports/CcReports.css",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/reports/CcReportsScreen.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/reports/api/asrQa.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/reports/api/ccReports.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/ai-hub/reports/reportsAccess.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/src/assistant/AssistantChat.css",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/assistant/AssistantChat.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/src/assistant/AssistantWindowApp.css",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/assistant/AssistantWindowApp.stories.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/assistant/AssistantWindowApp.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/assistant/api/chatStream.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/src/assistant/types.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/assistant/useAssistantChat.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/auth/usePortalAuth.ts",
+        "status": "MODIFIED",
+        "chats": [
+          "badafbfe-2638-4aa1-bd87-a5f58dbb7c3a"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "frontend/src/components/HintCard.stories.tsx",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/components/HintCard.tsx",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 6
+      },
+      {
+        "path": "frontend/src/components/PortalLauncher.css",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/components/PortalLauncher.tsx",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "frontend/src/components/Table.stories.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/components/Table.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/components/components.css",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "frontend/src/components/index.ts",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/internal-kc/InternalKcDialogApp.css",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/internal-kc/InternalKcDialogApp.stories.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/internal-kc/InternalKcDialogApp.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/internal-kc/api/testDialog.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/internal-kc/demoResponses.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/internal-kc/internalKcAccess.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/online-chat/ChatArmApp.css",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "frontend/src/online-chat/ChatArmApp.stories.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "frontend/src/online-chat/ChatArmApp.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "frontend/src/online-chat/OperatorStatusSelector.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/online-chat/QueuePanel.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/online-chat/SuflerSidePanel.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/online-chat/chatArmAccess.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/online-chat/hooks/useChatSufler.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "frontend/src/online-chat/operatorStatuses.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/online-chat/sessions.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/sufler/SuflerPhoneApp.css",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/sufler/SuflerPhoneApp.stories.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/sufler/SuflerPhoneApp.tsx",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/sufler/api/suggest.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/src/sufler/hooks/useSuflerTranscript.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "frontend/vite.config.ts",
+        "status": "MODIFIED",
+        "chats": [
+          "badafbfe-2638-4aa1-bd87-a5f58dbb7c3a",
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      }
+    ],
+    "infra": [
+      {
+        "path": "infra/.env",
+        "status": "NEW",
+        "chats": [
+          "16563d67-d8f5-48be-8199-7106b90ea42b"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "infra/.env.example",
+        "status": "MODIFIED",
+        "chats": [
+          "badafbfe-2638-4aa1-bd87-a5f58dbb7c3a",
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 8
+      },
+      {
+        "path": "infra/README.md",
+        "status": "MODIFIED",
+        "chats": [
+          "badafbfe-2638-4aa1-bd87-a5f58dbb7c3a",
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 21
+      },
+      {
+        "path": "infra/docker-compose.yml",
+        "status": "MODIFIED",
+        "chats": [
+          "badafbfe-2638-4aa1-bd87-a5f58dbb7c3a",
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 10
+      },
+      {
+        "path": "infra/postgres/init.sql",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "infra/test/.env.example",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 13
+      },
+      {
+        "path": "infra/test/README.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 29
+      },
+      {
+        "path": "infra/test/backup-postgres.sh",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "infra/test/certs/README.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "infra/test/cutover-checklist.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "infra/test/cutover-int-t-results.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "infra/test/deploy.sh",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 18
+      },
+      {
+        "path": "infra/test/docker-compose.prod-like.yml",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 25
+      },
+      {
+        "path": "infra/test/gen-self-signed-cert.sh",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "infra/test/github-actions-deploy.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "infra/test/nginx.conf",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "infra/test/observability/README.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "infra/test/observability/prometheus-alerts.yml",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "infra/test/observability/prometheus-scrape.yml",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "infra/test/server-requirements.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 18
+      },
+      {
+        "path": "infra/test/sql/ensure_pgvector.sql",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "infra/test/verify-data-tier.sh",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "infra/test/verify-inference-tier.sh",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "infra/test/verify-support-services.sh",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      }
+    ],
+    "tests": [
+      {
+        "path": "tests/acceptance/EXPAND.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/acceptance/README.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 8
+      },
+      {
+        "path": "tests/acceptance/conftest.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "tests/acceptance/fixtures.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "tests/acceptance/generate_protocol.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "tests/acceptance/harness.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/acceptance/load/README.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/acceptance/load/k6_suggest.js",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/acceptance/load/locustfile.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/acceptance/load/requirements.txt",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "tests/acceptance/load/run_load.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "tests/acceptance/load/test_load_smoke.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "tests/acceptance/test_ass_t.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 5
+      },
+      {
+        "path": "tests/acceptance/test_chat_t.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/acceptance/test_doc_t.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 6
+      },
+      {
+        "path": "tests/acceptance/test_env_results.md",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/acceptance/test_generate_protocol.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "tests/acceptance/test_int_t.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "tests/acceptance/test_smoke.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/acceptance/test_suf_t.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 8
+      },
+      {
+        "path": "tests/integration/test_oktell_client.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "tests/test_api_schema.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "tests/test_asr_qa.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/test_ass_reports.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "tests/test_assistant_admin.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/test_assistant_chat.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "tests/test_cc_reports.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "tests/test_channel_webhooks.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/test_data_tier.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "tests/test_edge_nginx.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "tests/test_health.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "tests/test_inference_tier.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "tests/test_ingest_webhook.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/test_int_t_aud.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/test_internal_kc_dialog.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/test_kb_admin.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/test_ldaps_auth.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "tests/test_metrics.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/test_model_registry.py",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/test_ocr_pipeline.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 6
+      },
+      {
+        "path": "tests/test_ocr_validation.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "tests/test_oktell_mode.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "tests/test_online_chat_sufler.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/test_sufler_suggest.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "tests/test_sufler_ws.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "tests/test_support_services.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/test_suz_reconcile.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 1
+      },
+      {
+        "path": "tests/ui/visual.spec.ts",
+        "status": "MODIFIED",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 17
+      },
+      {
+        "path": "tests/ui/visual/generate_from_registry.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 3
+      },
+      {
+        "path": "tests/ui/visual/helpers.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      },
+      {
+        "path": "tests/ui/visual/test_registry_sync.py",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 4
+      },
+      {
+        "path": "tests/ui/widget.spec.ts",
+        "status": "NEW",
+        "chats": [
+          "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f"
+        ],
+        "ops": 2
+      }
+    ]
+  },
+  "key_summaries": {
+    "backend/sufler/settings.py": {
+      "last_chat": "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f",
+      "last_tool": "StrReplace",
+      "chat_ts": "Monday, Jul 27, 2026, 11:36 AM (UTC+3)",
+      "ops_total": 29,
+      "summary_snippet": "Observability baseline for TEST ops is in place.\n\n### Metrics\n- **`GET /metrics/`** — Prometheus text (`sufler_up`, `sufler_health_ok`, `sufler_health_check{component=…}`), no extra deps\n- Wired in Django URLs, RBAC public prefix, and edge nginx\n\n### Alerts + docs\n- [`infra/test/observability/prometheus-alerts.yml`](infra/test/observability/prometheus-alerts.yml) — `SuflerTestHealthFail` (`sufler_health_ok == 0` for 2m) + `SuflerTestTargetDown`\n- [`infra/test/observability/prometheus-scrape.yml`](infra/test/observability/prometheus-scrape.yml) — scrape stub\n- [`infra/test/observability/README.md`](infra/test/observability/README.md) — metrics, alert wiring, structured logging aggregation (Compose logs + audit/KUMA)\n\n### Verify\n```bash\ncurl -k https://localhost/metrics/\ncurl -kf https://loc"
+    },
+    "backend/sufler/urls.py": {
+      "last_chat": "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f",
+      "last_tool": "StrReplace",
+      "chat_ts": "Monday, Jul 27, 2026, 11:36 AM (UTC+3)",
+      "ops_total": 14,
+      "summary_snippet": "Observability baseline for TEST ops is in place.\n\n### Metrics\n- **`GET /metrics/`** — Prometheus text (`sufler_up`, `sufler_health_ok`, `sufler_health_check{component=…}`), no extra deps\n- Wired in Django URLs, RBAC public prefix, and edge nginx\n\n### Alerts + docs\n- [`infra/test/observability/prometheus-alerts.yml`](infra/test/observability/prometheus-alerts.yml) — `SuflerTestHealthFail` (`sufler_health_ok == 0` for 2m) + `SuflerTestTargetDown`\n- [`infra/test/observability/prometheus-scrape.yml`](infra/test/observability/prometheus-scrape.yml) — scrape stub\n- [`infra/test/observability/README.md`](infra/test/observability/README.md) — metrics, alert wiring, structured logging aggregation (Compose logs + audit/KUMA)\n\n### Verify\n```bash\ncurl -k https://localhost/metrics/\ncurl -kf https://loc"
+    },
+    "frontend/src/App.tsx": {
+      "last_chat": "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f",
+      "last_tool": "StrReplace",
+      "chat_ts": "Monday, Jul 27, 2026, 11:36 AM (UTC+3)",
+      "ops_total": 18,
+      "summary_snippet": "Assistant standalone window (Part III.3) is ready.\n\n### UI (`/assistant`)\n- Window chrome matching the canvas: title bar, tabs, chat lenta with sources, composer\n- **SSE streaming** via `POST /api/v1/assistant/chat` (demo token stream in Storybook)\n- **Tool states** visible (Код / SQL / RPA / Документ / RU↔EN) with run actions\n- **Feedback** buttons (Полезно / Неполный / Неверно) lock after selection\n\n### Reuse\nShared `AssistantChat` is used in:\n- standalone `AssistantWindowApp`\n- Hub panel tab «Ассистент»\n- portal launcher assistant preview\n\n### Test\nPlaywright `assistant window III.3 streams tokens, shows tools and feedback` — **passed**."
+    },
+    "frontend/package.json": {
+      "last_chat": "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f",
+      "last_tool": "StrReplace",
+      "chat_ts": "Monday, Jul 27, 2026, 11:36 AM (UTC+3)",
+      "ops_total": 2,
+      "summary_snippet": "Baselines were written on Windows; CI runs Ubuntu, so I'll regenerate them in a Playwright Linux container if Docker is available."
+    },
+    ".github/workflows/ci.yml": {
+      "last_chat": "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f",
+      "last_tool": "StrReplace",
+      "chat_ts": "Monday, Jul 27, 2026, 11:36 AM (UTC+3)",
+      "ops_total": 3,
+      "summary_snippet": "Baselines were written on Windows; CI runs Ubuntu, so I'll regenerate them in a Playwright Linux container if Docker is available."
+    },
+    "infra/docker-compose.yml": {
+      "last_chat": "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f",
+      "last_tool": "StrReplace",
+      "chat_ts": "Monday, Jul 27, 2026, 11:36 AM (UTC+3)",
+      "ops_total": 10,
+      "summary_snippet": "Готово: audit sink смотрит на KUMA collector URL; INT-T-AUD samples проходят; fallback задокументирован. P2-05 (`schema_version=1.0`) не трогали.\n\n**Prod config**\n```env\nAUDIT_SINKS=file,kuma\nAUDIT_KUMA_COLLECTOR_URL=https://kuma-collector…/v1/events\n```\n- `kuma` = HTTP sink; `AUDIT_HTTP_COLLECTOR_URL` — legacy alias  \n- Без `file` — file включается автоматически (INT-T-AUD-03)  \n- Template: `infra/test/.env.example`\n\n**Fallback (sink down)**  \nСобытие остаётся в JSONL + локально пишется `hub.integrations.siem_delivery_failure`; бизнес-запрос не падает.  \nRunbook: [`docs/runbooks/vi3-kuma-audit-smoke.md`](docs/runbooks/vi3-kuma-audit-smoke.md)\n\n**INT-T-AUD**  \n- Samples: `audit.samples.emit_int_t_aud_samples()`  \n- Tests: **10 passed** (`test_int_t_aud.py` + `test_audit.py`)"
+    },
+    "backend/hub/views.py": {
+      "last_chat": "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f",
+      "last_tool": "StrReplace",
+      "chat_ts": "Monday, Jul 27, 2026, 11:36 AM (UTC+3)",
+      "ops_total": 5,
+      "summary_snippet": "Admin III.6 stubs for assistant prompts, tools, and `assistant_*` KB are in place.\n\n### Backend\n- Models: `AssistantKnowledgeBase`, `AssistantPromptTemplate`, `AssistantCapability` (+ migration `0003`)\n- APIs under `/api/admin/assistant/`:\n  - `kb/` — namespace **`assistant_*` only**, rejects `cc_production`\n  - `prompts/` — full CRUD + publish (version bump)\n  - `capabilities/` — registry stub with enable/disable (VII.5 D4)\n\n### Admin UI (settings sidebar)\n- **Промпты ассистента** — 3 columns: library / editor / preview\n- **Навыки и инструменты** — capability cards + toggles + `assistant_*` KB panel\n\n### Isolation\nAssistant KB never writes to `cc_production` / `CCProductionChunk`.\n\n### Tests\n`tests/test_assistant_admin.py` — **3 passed** (KB isolation, prompts CRUD + capabilities toggle, "
+    },
+    "backend/auth/roles.py": {
+      "last_chat": "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f",
+      "last_tool": "StrReplace",
+      "chat_ts": "Monday, Jul 27, 2026, 11:36 AM (UTC+3)",
+      "ops_total": 3,
+      "summary_snippet": "Готово: prod auth переключён на `AUTH_BACKEND=ldaps`, маппинг 13 групп C2 → I.4 проверен.\n\n**Switch**\n- `AUTH_BACKEND=ldaps` (алиас `AUTH_MODE=ldap`) → `django_auth_ldap` + `ldaps://`\n- `mock_ldap` остаётся только для local/CI (P2-01)\n- Env: `infra/test/.env.example`, CA via `AUTH_LDAP_TLS_CACERTFILE`\n- Packages: `backend/requirements-ldap.txt`\n\n**C2 (VII.5) → roles** — working defaults `BB_*` (ДИТ может переопределить JSON):\n- e.g. `BB_CC_Telephony_Operator` → `contact_center_telephony_operator`\n- Source: `RoleDefinition.c2_ad_group` / `auth/c2_groups.py`\n\n**I.10 smoke**\n- `POST /api/auth/login/` + `GET /api/auth/me/`\n- Runbook: [`docs/runbooks/i10-ldaps-auth-smoke.md`](docs/runbooks/i10-ldaps-auth-smoke.md)\n- Tests: **21 passed** (`test_ldaps_auth.py` + `test_rbac.py`)"
+    },
+    ".github/workflows/deploy-test.yml": {
+      "last_chat": "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f",
+      "last_tool": "StrReplace",
+      "chat_ts": "Monday, Jul 27, 2026, 11:36 AM (UTC+3)",
+      "ops_total": 5,
+      "summary_snippet": "Automated TEST deploy is wired up.\n\n### Delivered\n- **`.github/workflows/deploy-test.yml`** — triggers on tags `v*` / `test-*` and **manual dispatch** (`dry_run` default `true`, optional `image_tag`)\n- **Build + push** — backend + frontend → GHCR (or `REGISTRY_HOST` / `IMAGE_PREFIX`)\n- **SSH deploy** — remote `./deploy.sh pull-up` with image refs\n- **`infra/test/github-actions-deploy.md`** — required secrets checklist (names only)\n- Compose/deploy support for `BACKEND_IMAGE` / `FRONTEND_IMAGE` + `pull-up`\n\n### Secrets (see doc)\n`TEST_SSH_HOST`, `TEST_SSH_USER`, `TEST_SSH_KEY`, `TEST_DEPLOY_PATH` (+ optional `TEST_SSH_PORT`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`)\n\nApp secrets stay in `infra/test/.env` on the VM, not in Actions.\n\n### Dry-run\nActions → **Deploy TEST** → `dry_run=true` → bu"
+    }
+  },
+  "focus_chats": {
+    "ecf0395e-a244-46e2-928d-211d19611b02": {
+      "ts": "Tuesday, Jul 28, 2026, 3:59 PM (UTC+3)",
+      "write_ops": 0,
+      "unique_files": []
+    },
+    "fbed0bf9-6a7a-4e02-ad7f-0f299ea2a808": {
+      "ts": "Monday, Jul 27, 2026, 5:11 PM (UTC+3)",
+      "write_ops": 0,
+      "unique_files": []
+    },
+    "0739a475-e036-4837-bc41-ecb49d85722c": {
+      "ts": "Monday, Jul 27, 2026, 2:53 PM (UTC+3)",
+      "write_ops": 0,
+      "unique_files": []
+    },
+    "c556b1db-b5a7-4419-aa78-4cc5fecd2a8f": {
+      "ts": "Monday, Jul 27, 2026, 11:36 AM (UTC+3)",
+      "write_ops": 842,
+      "unique_files": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/deploy-test.yml",
+        ".gitignore",
+        "backend/README.md",
+        "backend/api_docs/__init__.py",
+        "backend/api_docs/apps.py",
+        "backend/api_docs/export_postman.py",
+        "backend/api_docs/openapi_v1.py",
+        "backend/assistant/__init__.py",
+        "backend/assistant/apps.py",
+        "backend/assistant/ass_reports.py",
+        "backend/assistant/chat.py",
+        "backend/assistant/openapi.py",
+        "backend/assistant/urls.py",
+        "backend/assistant/views.py",
+        "backend/audit/README.md",
+        "backend/audit/__init__.py",
+        "backend/audit/samples.py",
+        "backend/audit/service.py",
+        "backend/audit/sinks/http.py",
+        "backend/auth/README.md",
+        "backend/auth/c2_groups.py",
+        "backend/auth/ldap_config.py",
+        "backend/auth/roles.py",
+        "backend/auth/urls.py",
+        "backend/auth/views.py",
+        "backend/config/model_registry.yaml",
+        "backend/config/ocr_validation_rules.yaml",
+        "backend/core/health.py",
+        "backend/core/metrics.py",
+        "backend/core/model_gateway.py",
+        "backend/core/model_registry.py",
+        "backend/hub/assistant_admin.py",
+        "backend/hub/kb_admin.py",
+        "backend/hub/migrations/0002_kb_admin.py",
+        "backend/hub/models.py",
+        "backend/hub/urls.py",
+        "backend/hub/views.py",
+        "backend/ingest/README.md",
+        "backend/ingest/bitrix_client.py",
+        "backend/ingest/management/__init__.py",
+        "backend/ingest/management/commands/__init__.py",
+        "backend/ingest/management/commands/verify_data_tier.py",
+        "backend/ingest/migrations/0002_suzreconcilestate.py",
+        "backend/ingest/migrations/0003_ensure_hnsw_index.py",
+        "backend/ingest/models.py",
+        "backend/ingest/reconcile.py",
+        "backend/ingest/tasks.py",
+        "backend/ingest/urls.py",
+        "backend/ingest/views.py",
+        "backend/integrations/channels/__init__.py",
+        "backend/integrations/channels/urls.py",
+        "backend/integrations/channels/webhooks.py",
+        "backend/integrations/oktell/__init__.py",
+        "backend/integrations/oktell/asr_pipeline.py",
+        "backend/integrations/oktell/client.py",
+        "backend/integrations/oktell/config.py",
+        "backend/ocr/__init__.py",
+        "backend/ocr/apps.py",
+        "backend/ocr/engine.py",
+        "backend/ocr/export.py",
+        "backend/ocr/management/__init__.py",
+        "backend/ocr/management/commands/__init__.py",
+        "backend/ocr/management/commands/verify_support_services.py",
+        "backend/ocr/migrations/0001_initial.py",
+        "backend/ocr/migrations/__init__.py",
+        "backend/ocr/models.py",
+        "backend/ocr/pipeline.py",
+        "backend/ocr/storage.py",
+        "backend/ocr/tasks.py",
+        "backend/ocr/urls.py",
+        "backend/ocr/validation.py",
+        "backend/ocr/views.py",
+        "backend/orchestrator/__init__.py",
+        "backend/orchestrator/apps.py",
+        "backend/orchestrator/management/__init__.py",
+        "backend/orchestrator/management/commands/__init__.py",
+        "backend/orchestrator/management/commands/verify_inference_tier.py",
+        "backend/orchestrator/sufler.py",
+        "backend/orchestrator/test_dialog.py",
+        "backend/orchestrator/urls.py",
+        "backend/orchestrator/views.py",
+        "backend/qu/README.md",
+        "backend/reports/__init__.py",
+        "backend/reports/apps.py",
+        "backend/reports/asr_qa.py",
+        "backend/reports/cc_analytics.py",
+        "backend/reports/migrations/__init__.py",
+        "backend/reports/models.py",
+        "backend/reports/urls.py",
+        "backend/reports/views.py",
+        "backend/requirements-ldap.txt",
+        "backend/requirements.txt",
+        "backend/services/asr/Dockerfile",
+        "backend/services/asr/runtime.py",
+        "backend/sufler/asgi.py",
+        "backend/sufler/celery.py",
+        "backend/sufler/settings.py",
+        "backend/sufler/urls.py",
+        "backend/telephony/__init__.py",
+        "backend/telephony/apps.py",
+        "backend/telephony/consumers.py",
+        "backend/telephony/routing.py",
+        "docs/README.md",
+        "docs/api/README.md",
+        "docs/benchmarks/asr-evaluation-report.md",
+        "docs/delivery/ptr.md",
+        "docs/delivery/ra.md",
+        "docs/delivery/re.md",
+        "docs/development/code-review-checklist.md",
+        "docs/development/demo-script.md",
+        "docs/development/vii5-decisions-tracker.md",
+        "docs/development/vpn-request-template.md",
+        "docs/integration/oktell-sufler-telephony/README.md",
+        "docs/runbooks/deploy-test.md",
+        "docs/runbooks/i10-ldaps-auth-smoke.md",
+        "docs/runbooks/oktell-t45-smoke.md",
+        "docs/runbooks/qu-retrain.md",
+        "docs/runbooks/reindex.md",
+        "docs/runbooks/rollback-qu.md",
+        "docs/runbooks/vi3-kuma-audit-smoke.md",
+        "docs/technical/model-selection-v1.md",
+        "docs/technical/ocr-llm-pipeline.md",
+        "docs/technical/server-requirements.md",
+        "docs/training/admin-guide-outline.md",
+        "docs/training/user-guide-outline.md",
+        "docs/ui/canvas-registry.yaml",
+        "frontend/.storybook/main.ts",
+        "frontend/Dockerfile.prod",
+        "frontend/README.md",
+        "frontend/nginx.prod.conf",
+        "frontend/package.json",
+        "frontend/playwright.config.ts",
+        "frontend/public/widget/sample.html",
+        "frontend/public/widget/widget.js",
+        "frontend/src/App.css",
+        "frontend/src/App.tsx",
+        "frontend/src/ai-hub/admin/AiHubAdmin.css",
+        "frontend/src/ai-hub/admin/AiHubAdminApp.stories.tsx",
+        "frontend/src/ai-hub/admin/AiHubAdminApp.tsx",
+        "frontend/src/ai-hub/admin/AssistantAdminScreens.css",
+        "frontend/src/ai-hub/admin/CapabilitiesScreen.tsx",
+        "frontend/src/ai-hub/admin/KbAdminScreen.tsx",
+        "frontend/src/ai-hub/admin/PromptsAssistantScreen.tsx",
+        "frontend/src/ai-hub/admin/adminNav.ts",
+        "frontend/src/ai-hub/admin/api/assistantAdmin.ts",
+        "frontend/src/ai-hub/admin/api/kbAdmin.ts",
+        "frontend/src/ai-hub/ocr/OcrDocumentsPanel.css",
+        "frontend/src/ai-hub/ocr/OcrDocumentsPanel.tsx",
+        "frontend/src/ai-hub/panel/AiHubPanel.css",
+        "frontend/src/ai-hub/panel/AiHubPanel.stories.tsx",
+        "frontend/src/ai-hub/panel/AiHubPanel.tsx",
+        "frontend/src/ai-hub/reports/AiHubReportsApp.tsx",
+        "frontend/src/ai-hub/reports/AsrQa.css",
+        "frontend/src/ai-hub/reports/AsrQaScreen.stories.tsx",
+        "frontend/src/ai-hub/reports/AsrQaScreen.tsx",
+        "frontend/src/ai-hub/reports/CcReports.css",
+        "frontend/src/ai-hub/reports/CcReportsScreen.tsx",
+        "frontend/src/ai-hub/reports/api/asrQa.ts",
+        "frontend/src/ai-hub/reports/api/ccReports.ts",
+        "frontend/src/ai-hub/reports/reportsAccess.ts",
+        "frontend/src/assistant/AssistantChat.css",
+        "frontend/src/assistant/AssistantChat.tsx",
+        "frontend/src/assistant/AssistantWindowApp.css",
+        "frontend/src/assistant/AssistantWindowApp.stories.tsx",
+        "frontend/src/assistant/AssistantWindowApp.tsx",
+        "frontend/src/assistant/api/chatStream.ts",
+        "frontend/src/assistant/types.ts",
+        "frontend/src/assistant/useAssistantChat.ts",
+        "frontend/src/components/HintCard.stories.tsx",
+        "frontend/src/components/HintCard.tsx",
+        "frontend/src/components/PortalLauncher.css",
+        "frontend/src/components/PortalLauncher.tsx",
+        "frontend/src/components/Table.stories.tsx",
+        "frontend/src/components/Table.tsx",
+        "frontend/src/components/components.css",
+        "frontend/src/components/index.ts",
+        "frontend/src/internal-kc/InternalKcDialogApp.css",
+        "frontend/src/internal-kc/InternalKcDialogApp.stories.tsx",
+        "frontend/src/internal-kc/InternalKcDialogApp.tsx",
+        "frontend/src/internal-kc/api/testDialog.ts",
+        "frontend/src/internal-kc/demoResponses.ts",
+        "frontend/src/internal-kc/internalKcAccess.ts",
+        "frontend/src/online-chat/ChatArmApp.css",
+        "frontend/src/online-chat/ChatArmApp.stories.tsx",
+        "frontend/src/online-chat/ChatArmApp.tsx",
+        "frontend/src/online-chat/OperatorStatusSelector.tsx",
+        "frontend/src/online-chat/QueuePanel.tsx",
+        "frontend/src/online-chat/SuflerSidePanel.tsx",
+        "frontend/src/online-chat/chatArmAccess.ts",
+        "frontend/src/online-chat/hooks/useChatSufler.ts",
+        "frontend/src/online-chat/operatorStatuses.ts",
+        "frontend/src/online-chat/sessions.ts",
+        "frontend/src/sufler/SuflerPhoneApp.css",
+        "frontend/src/sufler/SuflerPhoneApp.stories.tsx",
+        "frontend/src/sufler/SuflerPhoneApp.tsx",
+        "frontend/src/sufler/api/suggest.ts",
+        "frontend/src/sufler/hooks/useSuflerTranscript.ts",
+        "frontend/vite.config.ts",
+        "infra/.env.example",
+        "infra/README.md",
+        "infra/docker-compose.yml",
+        "infra/postgres/init.sql",
+        "infra/test/.env.example",
+        "infra/test/README.md",
+        "infra/test/backup-postgres.sh",
+        "infra/test/certs/README.md",
+        "infra/test/cutover-checklist.md",
+        "infra/test/cutover-int-t-results.md",
+        "infra/test/deploy.sh",
+        "infra/test/docker-compose.prod-like.yml",
+        "infra/test/gen-self-signed-cert.sh",
+        "infra/test/github-actions-deploy.md",
+        "infra/test/nginx.conf",
+        "infra/test/observability/README.md",
+        "infra/test/observability/prometheus-alerts.yml",
+        "infra/test/observability/prometheus-scrape.yml",
+        "infra/test/server-requirements.md",
+        "infra/test/sql/ensure_pgvector.sql",
+        "infra/test/verify-data-tier.sh",
+        "infra/test/verify-inference-tier.sh",
+        "infra/test/verify-support-services.sh",
+        "pytest.ini",
+        "tests/acceptance/EXPAND.md",
+        "tests/acceptance/README.md",
+        "tests/acceptance/conftest.py",
+        "tests/acceptance/fixtures.py",
+        "tests/acceptance/generate_protocol.py",
+        "tests/acceptance/harness.py",
+        "tests/acceptance/load/README.md",
+        "tests/acceptance/load/k6_suggest.js",
+        "tests/acceptance/load/locustfile.py",
+        "tests/acceptance/load/requirements.txt",
+        "tests/acceptance/load/run_load.py",
+        "tests/acceptance/load/test_load_smoke.py",
+        "tests/acceptance/test_ass_t.py",
+        "tests/acceptance/test_chat_t.py",
+        "tests/acceptance/test_doc_t.py",
+        "tests/acceptance/test_env_results.md",
+        "tests/acceptance/test_generate_protocol.py",
+        "tests/acceptance/test_int_t.py",
+        "tests/acceptance/test_smoke.py",
+        "tests/acceptance/test_suf_t.py",
+        "tests/integration/test_oktell_client.py",
+        "tests/test_api_schema.py",
+        "tests/test_asr_qa.py",
+        "tests/test_ass_reports.py",
+        "tests/test_assistant_admin.py",
+        "tests/test_assistant_chat.py",
+        "tests/test_cc_reports.py",
+        "tests/test_channel_webhooks.py",
+        "tests/test_data_tier.py",
+        "tests/test_edge_nginx.py",
+        "tests/test_health.py",
+        "tests/test_inference_tier.py",
+        "tests/test_ingest_webhook.py",
+        "tests/test_int_t_aud.py",
+        "tests/test_internal_kc_dialog.py",
+        "tests/test_kb_admin.py",
+        "tests/test_ldaps_auth.py",
+        "tests/test_metrics.py",
+        "tests/test_model_registry.py",
+        "tests/test_ocr_pipeline.py",
+        "tests/test_ocr_validation.py",
+        "tests/test_oktell_mode.py",
+        "tests/test_online_chat_sufler.py",
+        "tests/test_sufler_suggest.py",
+        "tests/test_sufler_ws.py",
+        "tests/test_support_services.py",
+        "tests/test_suz_reconcile.py",
+        "tests/ui/visual.spec.ts",
+        "tests/ui/visual/generate_from_registry.py",
+        "tests/ui/visual/helpers.ts",
+        "tests/ui/visual/test_registry_sync.py",
+        "tests/ui/widget.spec.ts"
+      ]
+    },
+    "6ee6264c-e935-492a-8ca2-8c0eb0af5872": {
+      "ts": "Wednesday, Jul 29, 2026, 1:47 PM (UTC+3)",
+      "write_ops": 0,
+      "unique_files": []
+    }
+  }
+}

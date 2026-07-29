@@ -17,6 +17,33 @@ class KnowledgeIngestEvent(models.Model):
         ordering = ("-received_at",)
 
 
+class SuzReconcileState(models.Model):
+    """Singleton cursor for INT-09 Bitrix /changes polling (Model B fallback)."""
+
+    id = models.PositiveSmallIntegerField(
+        primary_key=True,
+        default=1,
+        editable=False,
+    )
+    cursor = models.CharField(
+        max_length=64,
+        default="1970-01-01T00:00:00+00:00",
+    )
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    last_accepted = models.PositiveIntegerField(default=0)
+    last_skipped = models.PositiveIntegerField(default=0)
+    last_failed = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "SUZ reconcile state"
+        verbose_name_plural = "SUZ reconcile state"
+
+    def __str__(self) -> str:
+        return f"SuzReconcileState(cursor={self.cursor})"
+
+
 class CCProductionChunk(models.Model):
     """One searchable article fragment in the cc_production pgvector index."""
 

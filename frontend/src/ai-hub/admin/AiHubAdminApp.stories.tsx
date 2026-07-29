@@ -62,6 +62,27 @@ export const QuPreview: Story = {
   },
 }
 
+export const KnowledgeBases: Story = {
+  args: {
+    initialScreen: 'kb_admin',
+    roles: ['llm_knowledge_base_administrator'],
+  },
+}
+
+export const PromptsAssistant: Story = {
+  args: {
+    initialScreen: 'prompts_assistant',
+    roles: ['ai_assistant_module_administrator'],
+  },
+}
+
+export const CapabilitiesRegistry: Story = {
+  args: {
+    initialScreen: 'capabilities',
+    roles: ['ai_assistant_module_administrator'],
+  },
+}
+
 export const ReadOnlyAudit: Story = {
   args: {
     initialScreen: 'audit',

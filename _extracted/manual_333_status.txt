@@ -1,0 +1,46 @@
+manual_333_status
+============================================================
+
+1. Folder: C:\Users\user\Desktop\333\\
+   Rukovodstvo_po_ekspluatacii_dvuhstancionnaya_namotochnaya_mashina_ispravleno.docx	12448537 bytes	(file)
+
+2. DOCX checks (zipfile / python-docx)
+   File: Rukovodstvo_po_ekspluatacii_dvuhstancionnaya_namotochnaya_mashina_ispravleno.docx
+   Size: 12448537 bytes
+   Has pgBorders: no
+   Inline images (wp:inline): 23
+   wp:extent count: 23
+   Unique wp:extent cx values: ['3780000']
+   Unique cx (with inches): ['3780000 EMU (~4.134 in)']
+   Page size (w:pgSz): {'h': '16838', 'w': '11906', 'orient': 'portrait'}
+   Page size inches: 8.268 x 11.693 (A4 portrait)
+   Margins (w:pgMar): {'bottom': '1134', 'top': '1134', 'left': '1701', 'right': '850', 'header': '720', 'footer': '720'}
+     left: 1701 twips (~1.181 in)
+     right: 850 twips (~0.590 in)
+     top: 1134 twips (~0.787 in)
+     bottom: 1134 twips (~0.787 in)
+     header: 720 twips (~0.500 in)
+     footer: 720 twips (~0.500 in)
+   Approx paragraph count (w:p in document.xml): 447
+   Non-empty paragraphs: 396
+   'Конец документа' present: no
+   Last 5 non-empty paragraphs (document.xml):
+     - Изм.
+     - Номера листов
+     - № докум.
+     - Подп.
+     - Дата
+
+python-docx:
+  paragraphs: 309
+  nonempty paragraphs: 273
+  inline_shapes: 23
+  page width/height (inches): 8.268 x 11.693
+  margins inches L/R/T/B: 1.181/0.590/0.787/0.787
+  last 5 nonempty:
+    - Рис. 20. Вход в «Параметры намотки»
+    - Рис. 21. Автоматический режим укладки и параметры витков
+    - Рис. 22. Режим точной укладки по слоям
+    - Рис. 23. Сохранение и переход в автоматическую намотку
+    - Лист регистрации изменений
+  Konec dokumenta: no

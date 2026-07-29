@@ -17,6 +17,8 @@ const stories = [
   ['model-params-form', 'ai-hub-admin-shell--model-parameters'],
   ['ai-hub-panel-assistant', 'ai-hub-panel--default-assistant'],
   ['ai-hub-panel-call', 'ai-hub-panel--active-call'],
+  ['sufler-phone-active', 'sufler-phone-window--active-call'],
+  ['online-chat-arm-ii7', 'online-chat-arm--operator-workspace'],
 ] as const
 
 async function openStory(page: Page, storyId: string) {
@@ -89,7 +91,7 @@ test('admin sidebar exposes all groups and routable screens', async ({ page }) =
   }
 
   const links = sidebar.getByRole('link')
-  await expect(links).toHaveCount(20)
+  await expect(links).toHaveCount(21)
   await expect(page.getByTestId('admin-save-footer')).toBeVisible()
   await expect(page.getByLabel('Демо роль')).toBeVisible()
 
@@ -202,6 +204,50 @@ test('AI Hub panel hides tabs by RBAC', async ({ page }) => {
   await expect(tablist.getByRole('tab', { name: 'Суфлёр' })).toHaveCount(0)
 })
 
+test('OCR documents IV.3 upload → preview → edit with field confidence', async ({ page }) => {
+  await openStory(page, 'ai-hub-panel--documents-upload-flow')
+  await expect(page.getByTestId('ocr-documents-panel')).toBeVisible()
+
+  const subTabs = page.getByRole('tablist', { name: 'Документы' })
+  await expect(subTabs.getByRole('tab', { name: 'Очередь' })).toBeVisible()
+  await expect(subTabs.getByRole('tab', { name: 'Загрузить' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(subTabs.getByRole('tab', { name: 'Проверка' })).toBeVisible()
+
+  await expect(page.getByTestId('ocr-dropzone')).toBeVisible()
+  await page.getByTestId('ocr-file-input').setInputFiles({
+    name: 'passport_demo.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('fake-passport-scan'),
+  })
+  await expect(page.getByTestId('ocr-pending-batch')).toContainText('passport_demo.png')
+
+  await page.getByTestId('ocr-start-recognition').click()
+  await expect(page.getByTestId('ocr-review')).toBeVisible()
+  await expect(page.getByTestId('ocr-bbox-viewer')).toContainText('passport_demo.png')
+  await expect(page.getByTestId('ocr-bbox-fio')).toBeVisible()
+
+  await expect(page.getByTestId('ocr-field-editor')).toBeVisible()
+  await expect(page.getByTestId('ocr-field-confidence-fio')).toHaveText('96%')
+  await expect(page.getByTestId('ocr-field-confidence-number')).toHaveText('72%')
+  await expect(page.getByTestId('ocr-field-confidence-issued')).toHaveText('54%')
+
+  const fioInput = page.getByTestId('ocr-field-input-fio')
+  await fioInput.fill('Иванов Иван Петрович')
+  await expect(fioInput).toHaveValue('Иванов Иван Петрович')
+  await page.getByTestId('ocr-bbox-number').click()
+  await expect(page.getByTestId('ocr-bbox-number')).toHaveAttribute('aria-pressed', 'true')
+
+  await page.getByTestId('ocr-approve-export').click()
+  await expect(page.getByTestId('ocr-approved-badge')).toContainText('Утверждено')
+
+  await subTabs.getByRole('tab', { name: 'Очередь' }).click()
+  await expect(page.getByTestId('ocr-queue-table')).toContainText('passport_demo.png')
+  await expect(page.getByTestId('ocr-queue-table')).toContainText('Готово')
+})
+
 test('active call locks AI Hub to Sufler and controls work', async ({ page }) => {
   await openStory(page, 'ai-hub-panel--active-call')
   const tablist = page.getByRole('tablist', { name: 'Модули AI Hub' })
@@ -222,6 +268,118 @@ test('active call locks AI Hub to Sufler and controls work', async ({ page }) =>
   await expect(page.getByTestId('hub-panel')).toBeVisible()
   await page.getByRole('button', { name: 'Закрыть панель' }).click()
   await expect(page.getByTestId('hub-panel')).toHaveCount(0)
+})
+
+test('telephony sufler shows transcript hints with relevance and SUZ link', async ({ page }) => {
+  await openStory(page, 'sufler-phone-window--active-call')
+  await expect(page.getByTestId('sufler-phone-app')).toBeVisible()
+  await expect(page.getByText('ASR активен')).toBeVisible()
+  await expect(page.getByTestId('hints-t1')).toBeVisible()
+
+  const hint = page.getByTestId('hint-t1-1')
+  await expect(hint).toBeVisible()
+  await expect(hint.getByText('96%')).toBeVisible()
+  await hint.focus()
+  await expect(hint).toHaveAttribute('aria-expanded', 'true')
+  await expect(hint.getByRole('link', { name: /Оформление банковской карты/ })).toBeVisible()
+})
+
+test('online-chat ARM II-7 shows sufler side panel HintCard on client message', async ({ page }) => {
+  await openStory(page, 'online-chat-arm--operator-workspace')
+  await expect(page.getByTestId('chat-arm-app')).toBeVisible()
+  await expect(page.getByTestId('sufler-side-panel')).toBeVisible()
+  await expect(page.getByTestId('msg-t1-client')).toContainText('лимит снятия')
+  await expect(page.getByTestId('sufler-hints')).toBeVisible()
+
+  const hint = page.getByTestId('chat-hint-1')
+  await expect(hint).toBeVisible()
+  await expect(hint.getByText('94%')).toBeVisible()
+  await hint.focus()
+  await expect(hint).toHaveAttribute('aria-expanded', 'true')
+  await expect(hint.getByRole('link', { name: /Лимиты снятия наличных/ })).toBeVisible()
+  await expect(hint.getByRole('button', { name: 'Вставить в ответ' })).toBeVisible()
+  await hint.getByRole('button', { name: 'Вставить в ответ' }).click()
+  await expect(page.getByTestId('chat-composer')).toHaveValue(/2 000 BYN/)
+})
+
+test('online-chat operator sees queue sections and can switch 9 statuses', async ({ page }) => {
+  await openStory(page, 'online-chat-arm--operator-workspace')
+  await expect(page.getByTestId('queue-panel')).toBeVisible()
+  await expect(page.getByTestId('queue-section-waiting')).toBeVisible()
+  await expect(page.getByTestId('queue-1')).toContainText('Анна Козлова')
+  await expect(page.getByTestId('queue-total')).toContainText('в очередях: 9')
+
+  const statuses = page.getByTestId('operator-status-selector')
+  await expect(statuses).toBeVisible()
+  await expect(statuses.getByRole('radio')).toHaveCount(9)
+  await expect(page.getByTestId('operator-status-online')).toHaveAttribute(
+    'aria-checked',
+    'true',
+  )
+
+  await page.getByTestId('operator-status-lunch').click()
+  await expect(page.getByTestId('operator-status-lunch')).toHaveAttribute(
+    'aria-checked',
+    'true',
+  )
+  await expect(page.getByTestId('status-routing-hint')).toBeVisible()
+
+  await page.getByTestId('queue-m1').click()
+  await expect(page.getByTestId('chat-messages')).toContainText('SWIFT')
+  await expect(page.getByRole('heading', { name: 'Светлана Р.' })).toBeVisible()
+})
+
+test('internal KC test dialog matches II-KC layout and returns relevance', async ({ page }) => {
+  await openStory(page, 'internal-kc-test-dialog--prompt-harness')
+  await expect(page.getByTestId('internal-kc-app')).toBeVisible()
+  await expect(page.getByTestId('ikc-window')).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Тест-диалог · внутренний пользователь КЦ' }),
+  ).toBeVisible()
+  await expect(page.getByTestId('ikc-scenario')).toHaveValue('CC-SCR-008')
+  await expect(page.getByTestId('ikc-prompt')).toHaveValue('sufler_cc')
+  await expect(page.getByTestId('ikc-history')).toContainText('Запрос · 10:14')
+  await expect(page.getByTestId('relevance-turn-1')).toHaveText('91%')
+
+  await page.getByTestId('ikc-draft').fill('А какие документы нужны для открытия вклада?')
+  await page.getByTestId('ikc-send').click()
+
+  const latestRelevance = page.locator('[data-testid^="relevance-turn-"]').last()
+  await expect(latestRelevance).toHaveText('89%')
+  await expect(page.getByTestId('ikc-history')).toContainText('паспорт и заявление')
+  await expect(page.getByTestId('ikc-history')).toContainText('Эталон QU')
+})
+
+test('assistant window III.3 streams tokens, shows tools and feedback', async ({ page }) => {
+  await openStory(page, 'assistant-window--chat-with-sources')
+  await expect(page.getByTestId('assistant-window-app')).toBeVisible()
+  await expect(page.getByTestId('assistant-window')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'ИИ-ассистент' })).toBeVisible()
+  await expect(page.getByTestId('asst-lenta')).toContainText('Как оформить отпуск?')
+  await expect(page.getByTestId('asst-lenta')).toContainText('Источники (2)')
+
+  await expect(page.getByTestId('tool-state-sql')).toContainText('SQL')
+  await page.getByTestId('asst-tools-toggle').click()
+  await expect(page.getByTestId('asst-tools-panel')).toBeVisible()
+  await page.getByTestId('tool-run-sql').click()
+  await expect(page.getByTestId('tool-state-sql')).toContainText('выполняется')
+  await expect(page.getByTestId('tool-state-sql')).toContainText('выполнено', {
+    timeout: 3000,
+  })
+
+  const seedFeedback = page.locator('[data-testid^="feedback-useful-"]').first()
+  await seedFeedback.click()
+  await expect(page.getByText('Оценка сохранена')).toBeVisible()
+  await expect(seedFeedback).toBeDisabled()
+
+  await page.getByTestId('asst-draft').fill('Нужна справка о вкладе')
+  await page.getByTestId('asst-send').click()
+  await expect(page.getByTestId('asst-streaming-flag')).toBeVisible()
+  await expect(page.getByTestId('asst-lenta')).toContainText(
+    'Ответ ассистента: запрос принят',
+    { timeout: 5000 },
+  )
+  await expect(page.getByTestId('asst-streaming-flag')).toHaveCount(0)
 })
 
 for (const [snapshotName, storyId] of stories) {

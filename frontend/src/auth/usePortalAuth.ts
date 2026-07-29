@@ -45,10 +45,15 @@ export function usePortalAuth(): PortalAuthState {
         return (await response.json()) as AuthContextResponse
       })
       .then((payload) => {
+        const fallbackRoles = payload.authenticated ? [] : devRoles()
         setState({
           status: 'ready',
-          username: payload.username,
-          roles: payload.authenticated ? payload.roles : [],
+          username: payload.authenticated
+            ? payload.username
+            : fallbackRoles.length
+              ? 'Development user'
+              : null,
+          roles: payload.authenticated ? payload.roles : fallbackRoles,
           tabs: payload.authenticated ? payload.tabs : [],
         })
       })

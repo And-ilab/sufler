@@ -13,12 +13,42 @@ from auth.decorators import (
     require_permissions,
     roles_required,
 )
-from auth.roles import PERM_QU_ADMIN, role_codes_for_user
+from auth.roles import (
+    PERM_ASSISTANT_ADMIN,
+    PERM_KB_ADMIN,
+    PERM_PROMPTS_ADMIN,
+    PERM_QU_ADMIN,
+    role_codes_for_user,
+)
+from hub.assistant_admin import (
+    AssistantAdminError,
+    create_assistant_kb,
+    create_prompt,
+    delete_assistant_kb,
+    delete_prompt,
+    get_prompt,
+    list_assistant_kbs,
+    list_capabilities,
+    list_prompts,
+    update_capability,
+    update_prompt,
+)
+from hub.kb_admin import (
+    KnowledgeBaseError,
+    create_knowledge_base,
+    delete_document,
+    delete_knowledge_base,
+    get_knowledge_base,
+    list_knowledge_bases,
+    reindex_knowledge_base,
+    upload_document,
+)
 from hub.model_registry_store import (
     get_model_settings,
     serialize_model_settings,
     update_model_settings,
 )
+from hub.models import ContactCenterKnowledgeBase
 from qu.service import preview_query
 
 
@@ -193,3 +223,251 @@ def qu_preview(request: HttpRequest) -> JsonResponse:
             status=400,
         )
     return JsonResponse(result)
+
+
+def _kb_validation_error(exc: Exception) -> JsonResponse:
+    return JsonResponse(
+        {
+            "error": "validation_error",
+            "details": {"request": [str(exc)]},
+        },
+        status=400,
+    )
+
+
+@require_http_methods(["GET", "POST"])
+@require_permissions(PERM_KB_ADMIN, api=True)
+def knowledge_bases(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        return JsonResponse({"items": list_knowledge_bases()})
+    try:
+        body = json.loads(request.body or b"{}")
+        if not isinstance(body, Mapping):
+            raise KnowledgeBaseError("Request body must be a JSON object")
+        name = body.get("name")
+        if not isinstance(name, str):
+            raise KnowledgeBaseError("name must be a string")
+        scope = body.get("scope", "contact_center")
+        description = body.get("description", "")
+        if not isinstance(scope, str) or not isinstance(description, str):
+            raise KnowledgeBaseError("scope and description must be strings")
+        created = create_knowledge_base(
+            name=name,
+            scope=scope,
+            description=description,
+            username=request.user.get_username(),
+        )
+    except json.JSONDecodeError:
+        return _kb_validation_error(
+            KnowledgeBaseError("Request body must be valid JSON")
+        )
+    except KnowledgeBaseError as exc:
+        return _kb_validation_error(exc)
+    return JsonResponse(created, status=201)
+
+
+@require_http_methods(["GET", "DELETE"])
+@require_permissions(PERM_KB_ADMIN, api=True)
+def knowledge_base_detail(
+    request: HttpRequest,
+    kb_id: int,
+) -> JsonResponse:
+    try:
+        if request.method == "DELETE":
+            delete_knowledge_base(kb_id)
+            return JsonResponse({"ok": True})
+        return JsonResponse(get_knowledge_base(kb_id))
+    except ContactCenterKnowledgeBase.DoesNotExist:
+        return JsonResponse({"error": "not_found"}, status=404)
+    except KnowledgeBaseError as exc:
+        return _kb_validation_error(exc)
+
+
+@require_http_methods(["POST"])
+@require_permissions(PERM_KB_ADMIN, api=True)
+def knowledge_base_upload(
+    request: HttpRequest,
+    kb_id: int,
+) -> JsonResponse:
+    uploaded = request.FILES.get("file")
+    if uploaded is None:
+        return _kb_validation_error(KnowledgeBaseError("file is required"))
+    try:
+        result = upload_document(
+            kb_id,
+            filename=uploaded.name,
+            content_type=getattr(uploaded, "content_type", "") or "",
+            data=uploaded.read(),
+            username=request.user.get_username(),
+            reindex=True,
+        )
+    except ContactCenterKnowledgeBase.DoesNotExist:
+        return JsonResponse({"error": "not_found"}, status=404)
+    except KnowledgeBaseError as exc:
+        return _kb_validation_error(exc)
+    return JsonResponse(result, status=201)
+
+
+@require_http_methods(["DELETE"])
+@require_permissions(PERM_KB_ADMIN, api=True)
+def knowledge_base_document_detail(
+    request: HttpRequest,
+    kb_id: int,
+    document_id: int,
+) -> JsonResponse:
+    from hub.models import KnowledgeBaseDocument
+
+    try:
+        result = delete_document(kb_id, document_id)
+    except ContactCenterKnowledgeBase.DoesNotExist:
+        return JsonResponse({"error": "not_found"}, status=404)
+    except KnowledgeBaseDocument.DoesNotExist:
+        return JsonResponse({"error": "not_found"}, status=404)
+    except KnowledgeBaseError as exc:
+        return _kb_validation_error(exc)
+    return JsonResponse(result)
+
+
+@require_http_methods(["POST"])
+@require_permissions(PERM_KB_ADMIN, api=True)
+def knowledge_base_reindex(
+    request: HttpRequest,
+    kb_id: int,
+) -> JsonResponse:
+    try:
+        result = reindex_knowledge_base(kb_id)
+    except ContactCenterKnowledgeBase.DoesNotExist:
+        return JsonResponse({"error": "not_found"}, status=404)
+    except KnowledgeBaseError as exc:
+        return _kb_validation_error(exc)
+    return JsonResponse(result)
+
+
+ASSISTANT_ADMIN_PERMS = (
+    PERM_ASSISTANT_ADMIN,
+    PERM_PROMPTS_ADMIN,
+    PERM_KB_ADMIN,
+)
+
+
+def _assistant_validation_error(exc: Exception) -> JsonResponse:
+    return JsonResponse(
+        {
+            "error": "validation_error",
+            "details": {"request": [str(exc)]},
+        },
+        status=400,
+    )
+
+
+def _parse_json_object(request: HttpRequest) -> Mapping[str, Any]:
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError as exc:
+        raise AssistantAdminError("Request body must be valid JSON") from exc
+    if not isinstance(body, Mapping):
+        raise AssistantAdminError("Request body must be a JSON object")
+    return body
+
+
+@require_http_methods(["GET", "POST"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_knowledge_bases(request: HttpRequest) -> JsonResponse:
+    """assistant_* KB namespace — isolated from cc_production."""
+    if request.method == "GET":
+        return JsonResponse(
+            {
+                "items": list_assistant_kbs(),
+                "namespace": "assistant_*",
+                "isolated_from": "cc_production",
+            }
+        )
+    try:
+        body = _parse_json_object(request)
+        created = create_assistant_kb(
+            body,
+            username=request.user.get_username(),
+        )
+    except AssistantAdminError as exc:
+        return _assistant_validation_error(exc)
+    return JsonResponse(created, status=201)
+
+
+@require_http_methods(["DELETE"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_knowledge_base_detail(
+    request: HttpRequest,
+    kb_id: int,
+) -> JsonResponse:
+    try:
+        delete_assistant_kb(kb_id)
+    except AssistantAdminError as exc:
+        if str(exc) == "KB not found":
+            return JsonResponse({"error": "not_found"}, status=404)
+        return _assistant_validation_error(exc)
+    return JsonResponse({"ok": True})
+
+
+@require_http_methods(["GET", "POST"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_prompts(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        return JsonResponse({"items": list_prompts()})
+    try:
+        body = _parse_json_object(request)
+        created = create_prompt(body, username=request.user.get_username())
+    except AssistantAdminError as exc:
+        return _assistant_validation_error(exc)
+    return JsonResponse(created, status=201)
+
+
+@require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_prompt_detail(
+    request: HttpRequest,
+    prompt_id: int,
+) -> JsonResponse:
+    try:
+        if request.method == "GET":
+            return JsonResponse(get_prompt(prompt_id))
+        if request.method == "DELETE":
+            delete_prompt(prompt_id)
+            return JsonResponse({"ok": True})
+        body = _parse_json_object(request)
+        updated = update_prompt(
+            prompt_id,
+            body,
+            username=request.user.get_username(),
+        )
+    except AssistantAdminError as exc:
+        if str(exc) == "prompt not found":
+            return JsonResponse({"error": "not_found"}, status=404)
+        return _assistant_validation_error(exc)
+    return JsonResponse(updated)
+
+
+@require_http_methods(["GET"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_capabilities(request: HttpRequest) -> JsonResponse:
+    return JsonResponse(
+        {
+            "items": list_capabilities(),
+            "note": "VII.5 D4 stub registry — RPA/SQL policies in III.6.5",
+        }
+    )
+
+
+@require_http_methods(["PATCH", "PUT"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_capability_detail(
+    request: HttpRequest,
+    code: str,
+) -> JsonResponse:
+    try:
+        body = _parse_json_object(request)
+        updated = update_capability(code, body)
+    except AssistantAdminError as exc:
+        if str(exc) == "capability not found":
+            return JsonResponse({"error": "not_found"}, status=404)
+        return _assistant_validation_error(exc)
+    return JsonResponse(updated)

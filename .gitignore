@@ -9,6 +9,15 @@ venv/
 backend/services/asr/model/
 backend/var/
 
+# TEST Postgres dumps (backup stub)
+infra/test/backups/
+
+# TEST edge TLS private material (self-signed or bank CA)
+infra/test/certs/*.pem
+infra/test/certs/*.key
+infra/test/certs/*.crt
+!infra/test/certs/README.md
+
 # Django
 *.sqlite3
 db.sqlite3

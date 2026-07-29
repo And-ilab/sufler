@@ -1,0 +1,99 @@
+FILE: c:\Users\user\Downloads\Parameter settings (2).pptx
+EXISTS: True
+SLIDES: 9
+
+========================================
+ppt/slides/slide1.xml
+========================================
+1.
+触摸屏亮后，静待
+1
+分钟，屏幕出现一条
+“
+警报
+”
+内容对话框。
+可以不予理会，关闭对话框
+1. After the touch screen lights up, wait for 1 minute and a dialog box with "alarm" content will appear on the screen.
+You can ignore it and close the dialog box
+
+========================================
+ppt/slides/slide2.xml
+========================================
+2.
+点击屏幕上的
+“
+文件
+”
+，进入下一界面
+2. Click "File" on the screen to enter the next interface
+
+========================================
+ppt/slides/slide3.xml
+========================================
+3.
+出现输入密码的指令框，不必输入密码，点击确定，进入下一界面
+3. A password input box will appear. No need to enter the password. Click OK to enter the next interface.
+
+========================================
+ppt/slides/slide4.xml
+========================================
+4.
+需要新建程序，可点击右侧
+“
+新建
+”
+程序，
+如果已有编好的程序，直接选择程序名称后，继续点击
+“
+编辑模式
+”
+查看，进入下一界面
+4. If you need to create a new program, click "New" on the right. If you already have a program, select the program name and click "Edit Mode" to view it and enter the next interface.
+
+========================================
+ppt/slides/slide5.xml
+========================================
+5.
+进入编辑模式下，按上翻页，下翻页，可以查看相关内容
+需要修改，可点击重置，到下一界面
+5. Enter the edit mode, press the page up and page down to view the relevant content. If you need to modify it, click reset to go to the next interface.
+
+========================================
+ppt/slides/slide6.xml
+========================================
+6.
+重新编辑，点击
+“
+绕线参数
+”
+，进入下一界面重新设置参数
+6. Re-edit, click "Winding Parameters" to enter the next interface and reset the parameters
+
+========================================
+ppt/slides/slide7.xml
+========================================
+7.
+框选区域分别点击，有自动模式和精密排线两种模式
+自动排线下，输入线径和匝数，设置排线距离，角度和高度，在自动模式下能自动完成绕线
+7. Click on the selected area. There are two modes: automatic mode and precision wiring mode. After automatic wiring, enter the wire diameter and number of turns, set the wiring distance, angle and height. In automatic mode, the winding can be completed automatically.
+
+========================================
+ppt/slides/slide8.xml
+========================================
+8.
+切换精密排线模式
+根据定子槽数，在每一层的对应框里输入匝数，进给量，总匝数后，点击保存，进入下一界面
+8. Switch to precision wiring mode
+According to the number of stator slots, enter the number of turns, feed rate, and total number of turns in the corresponding box of each layer, click Save, and enter the next interface
+
+========================================
+ppt/slides/slide9.xml
+========================================
+9.
+确认保存后，选择
+“
+自动
+”
+模式，操作台面，同时双击两侧启动绿色按钮，进入正常绕线状态
+9. After confirming the save, select the "Automatic" mode, operate the table, and double-click the green buttons on both sides to enter the normal winding state

@@ -21,6 +21,7 @@ class BackendSmokeTest(unittest.TestCase):
         call_command("check", verbosity=0)
         client = Client()
         self.assertEqual(client.get("/").status_code, 302)
+        self.assertEqual(client.get("/health/").status_code, 200)
         self.assertEqual(client.get("/client-info/").status_code, 200)
         self.assertEqual(client.get("/chat/").status_code, 302)
 

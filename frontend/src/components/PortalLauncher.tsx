@@ -4,6 +4,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
+import { AssistantChat } from '../assistant/AssistantChat'
 import { Button } from './Button'
 import { Card } from './Card'
 import { Fab } from './Fab'
@@ -181,32 +182,8 @@ function SuflerWindowContent() {
 
 function AssistantWindowContent() {
   return (
-    <div className="portal-module-window__body">
-      <div className="portal-module-window__status-row">
-        <div>
-          <span className="portal-module-window__eyebrow">ИИ-ассистент</span>
-          <strong>Новый диалог</strong>
-        </div>
-        <StatusBadge status="info">Внутренний</StatusBadge>
-      </div>
-      <div className="portal-assistant-thread">
-        <p className="portal-assistant-thread__user">Как оформить отпуск?</p>
-        <Card>
-          <strong>Ассистент</strong>
-          <p>
-            Подайте заявление в HR-портале не позднее чем за пять рабочих дней.
-            При необходимости приложите согласование руководителя.
-          </p>
-          <small>Источник: регламент отпусков · 96%</small>
-        </Card>
-      </div>
-      <label className="portal-assistant-input">
-        <span>Ваш запрос</span>
-        <div>
-          <input type="text" placeholder="Введите сообщение" />
-          <Button aria-label="Отправить запрос">Отправить</Button>
-        </div>
-      </label>
+    <div className="portal-module-window__body portal-module-window__body--assistant">
+      <AssistantChat demoMode compact />
     </div>
   )
 }

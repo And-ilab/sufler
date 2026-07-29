@@ -1,0 +1,280 @@
+# MODIFIED tracked in c556 (content now == a7daa4f; post-20-07 edits LOST on disk)
+StrReplace  .github/workflows/ci.yml
+StrReplace  .gitignore
+StrReplace  backend/README.md
+Write       backend/audit/README.md
+StrReplace  backend/audit/__init__.py
+StrReplace  backend/audit/service.py
+StrReplace  backend/audit/sinks/http.py
+Write       backend/auth/README.md
+Write       backend/auth/ldap_config.py
+StrReplace  backend/auth/roles.py
+Write       backend/auth/urls.py
+StrReplace  backend/auth/views.py
+StrReplace  backend/config/model_registry.yaml
+StrReplace  backend/core/model_gateway.py
+StrReplace  backend/core/model_registry.py
+StrReplace  backend/hub/models.py
+Write       backend/hub/urls.py
+StrReplace  backend/hub/views.py
+StrReplace  backend/ingest/README.md
+StrReplace  backend/ingest/models.py
+StrReplace  backend/ingest/tasks.py
+Write       backend/ingest/urls.py
+Write       backend/ingest/views.py
+StrReplace  backend/qu/README.md
+StrReplace  backend/requirements.txt
+Write       backend/sufler/asgi.py
+StrReplace  backend/sufler/celery.py
+StrReplace  backend/sufler/settings.py
+StrReplace  backend/sufler/urls.py
+StrReplace  docs/README.md
+StrReplace  docs/benchmarks/asr-evaluation-report.md
+StrReplace  docs/integration/oktell-sufler-telephony/README.md
+StrReplace  docs/technical/model-selection-v1.md
+StrReplace  docs/technical/ocr-llm-pipeline.md
+Write       docs/ui/canvas-registry.yaml
+StrReplace  frontend/.storybook/main.ts
+StrReplace  frontend/README.md
+StrReplace  frontend/package.json
+StrReplace  frontend/playwright.config.ts
+StrReplace  frontend/src/App.css
+StrReplace  frontend/src/App.tsx
+StrReplace  frontend/src/ai-hub/admin/AiHubAdmin.css
+StrReplace  frontend/src/ai-hub/admin/AiHubAdminApp.stories.tsx
+StrReplace  frontend/src/ai-hub/admin/AiHubAdminApp.tsx
+StrReplace  frontend/src/ai-hub/admin/adminNav.ts
+StrReplace  frontend/src/ai-hub/panel/AiHubPanel.css
+StrReplace  frontend/src/ai-hub/panel/AiHubPanel.stories.tsx
+StrReplace  frontend/src/ai-hub/panel/AiHubPanel.tsx
+StrReplace  frontend/src/components/HintCard.stories.tsx
+StrReplace  frontend/src/components/HintCard.tsx
+StrReplace  frontend/src/components/PortalLauncher.css
+StrReplace  frontend/src/components/PortalLauncher.tsx
+StrReplace  frontend/src/components/components.css
+StrReplace  frontend/src/components/index.ts
+StrReplace  frontend/vite.config.ts
+StrReplace  infra/.env.example
+StrReplace  infra/README.md
+StrReplace  infra/docker-compose.yml
+Write       infra/postgres/init.sql
+StrReplace  tests/acceptance/test_smoke.py
+StrReplace  tests/test_ingest_webhook.py
+StrReplace  tests/test_model_registry.py
+StrReplace  tests/ui/visual.spec.ts
+
+# NEW in c556 still on disk
+StrReplace  untracked=True  .github/workflows/deploy-test.yml
+Write       untracked=True  backend/api_docs/__init__.py
+Write       untracked=True  backend/api_docs/apps.py
+Write       untracked=True  backend/api_docs/export_postman.py
+Write       untracked=True  backend/api_docs/openapi_v1.py
+Write       untracked=True  backend/assistant/__init__.py
+Write       untracked=True  backend/assistant/apps.py
+Write       untracked=True  backend/assistant/ass_reports.py
+StrReplace  untracked=True  backend/assistant/chat.py
+StrReplace  untracked=True  backend/assistant/openapi.py
+Write       untracked=True  backend/assistant/urls.py
+StrReplace  untracked=True  backend/assistant/views.py
+Write       untracked=True  backend/audit/samples.py
+Write       untracked=True  backend/auth/c2_groups.py
+StrReplace  untracked=True  backend/config/ocr_validation_rules.yaml
+StrReplace  untracked=True  backend/core/health.py
+Write       untracked=True  backend/core/metrics.py
+Write       untracked=True  backend/hub/assistant_admin.py
+StrReplace  untracked=True  backend/hub/kb_admin.py
+Write       untracked=True  backend/hub/migrations/0002_kb_admin.py
+StrReplace  untracked=True  backend/ingest/bitrix_client.py
+Write       untracked=True  backend/ingest/management/__init__.py
+Write       untracked=True  backend/ingest/management/commands/__init__.py
+Write       untracked=True  backend/ingest/management/commands/verify_data_tier.py
+Write       untracked=True  backend/ingest/migrations/0002_suzreconcilestate.py
+Write       untracked=True  backend/ingest/migrations/0003_ensure_hnsw_index.py
+Write       untracked=True  backend/ingest/reconcile.py
+Write       untracked=True  backend/integrations/channels/__init__.py
+Write       untracked=True  backend/integrations/channels/urls.py
+Write       untracked=True  backend/integrations/channels/webhooks.py
+Write       untracked=True  backend/integrations/oktell/__init__.py
+Write       untracked=True  backend/integrations/oktell/asr_pipeline.py
+StrReplace  untracked=True  backend/integrations/oktell/client.py
+Write       untracked=True  backend/integrations/oktell/config.py
+Write       untracked=True  backend/ocr/__init__.py
+Write       untracked=True  backend/ocr/apps.py
+Write       untracked=True  backend/ocr/engine.py
+Write       untracked=True  backend/ocr/export.py
+Write       untracked=True  backend/ocr/management/__init__.py
+Write       untracked=True  backend/ocr/management/commands/__init__.py
+Write       untracked=True  backend/ocr/management/commands/verify_support_services.py
+Write       untracked=True  backend/ocr/migrations/0001_initial.py
+Write       untracked=True  backend/ocr/migrations/__init__.py
+Write       untracked=True  backend/ocr/models.py
+Write       untracked=True  backend/ocr/pipeline.py
+Write       untracked=True  backend/ocr/storage.py
+Write       untracked=True  backend/ocr/tasks.py
+Write       untracked=True  backend/ocr/urls.py
+Write       untracked=True  backend/ocr/validation.py
+StrReplace  untracked=True  backend/ocr/views.py
+Write       untracked=True  backend/orchestrator/__init__.py
+Write       untracked=True  backend/orchestrator/apps.py
+Write       untracked=True  backend/orchestrator/management/__init__.py
+Write       untracked=True  backend/orchestrator/management/commands/__init__.py
+StrReplace  untracked=True  backend/orchestrator/management/commands/verify_inference_tier.py
+StrReplace  untracked=True  backend/orchestrator/sufler.py
+Write       untracked=True  backend/orchestrator/test_dialog.py
+Write       untracked=True  backend/orchestrator/urls.py
+StrReplace  untracked=True  backend/orchestrator/views.py
+Write       untracked=True  backend/reports/__init__.py
+Write       untracked=True  backend/reports/apps.py
+StrReplace  untracked=True  backend/reports/asr_qa.py
+Write       untracked=True  backend/reports/cc_analytics.py
+Write       untracked=True  backend/reports/migrations/__init__.py
+StrReplace  untracked=True  backend/reports/models.py
+StrReplace  untracked=True  backend/reports/urls.py
+StrReplace  untracked=True  backend/reports/views.py
+Write       untracked=True  backend/requirements-ldap.txt
+Write       untracked=True  backend/services/asr/Dockerfile
+Write       untracked=True  backend/services/asr/runtime.py
+Write       untracked=True  backend/telephony/__init__.py
+Write       untracked=True  backend/telephony/apps.py
+StrReplace  untracked=True  backend/telephony/consumers.py
+Write       untracked=True  backend/telephony/routing.py
+Write       untracked=True  docs/api/README.md
+StrReplace  untracked=True  docs/delivery/ptr.md
+StrReplace  untracked=True  docs/delivery/ra.md
+StrReplace  untracked=True  docs/delivery/re.md
+Write       untracked=True  docs/development/code-review-checklist.md
+Write       untracked=True  docs/development/demo-script.md
+Write       untracked=True  docs/development/vii5-decisions-tracker.md
+Write       untracked=True  docs/development/vpn-request-template.md
+Write       untracked=True  docs/runbooks/deploy-test.md
+Write       untracked=True  docs/runbooks/i10-ldaps-auth-smoke.md
+StrReplace  untracked=True  docs/runbooks/oktell-t45-smoke.md
+Write       untracked=True  docs/runbooks/qu-retrain.md
+Write       untracked=True  docs/runbooks/reindex.md
+Write       untracked=True  docs/runbooks/rollback-qu.md
+Write       untracked=True  docs/runbooks/vi3-kuma-audit-smoke.md
+StrReplace  untracked=True  docs/technical/server-requirements.md
+StrReplace  untracked=True  docs/training/admin-guide-outline.md
+Write       untracked=True  docs/training/user-guide-outline.md
+Write       untracked=True  frontend/Dockerfile.prod
+StrReplace  untracked=True  frontend/nginx.prod.conf
+Write       untracked=True  frontend/public/widget/sample.html
+Write       untracked=True  frontend/public/widget/widget.js
+Write       untracked=True  frontend/src/ai-hub/admin/AssistantAdminScreens.css
+Write       untracked=True  frontend/src/ai-hub/admin/CapabilitiesScreen.tsx
+StrReplace  untracked=True  frontend/src/ai-hub/admin/KbAdminScreen.tsx
+Write       untracked=True  frontend/src/ai-hub/admin/PromptsAssistantScreen.tsx
+Write       untracked=True  frontend/src/ai-hub/admin/api/assistantAdmin.ts
+Write       untracked=True  frontend/src/ai-hub/admin/api/kbAdmin.ts
+Write       untracked=True  frontend/src/ai-hub/ocr/OcrDocumentsPanel.css
+Write       untracked=True  frontend/src/ai-hub/ocr/OcrDocumentsPanel.tsx
+Write       untracked=True  frontend/src/ai-hub/reports/AiHubReportsApp.tsx
+StrReplace  untracked=True  frontend/src/ai-hub/reports/AsrQa.css
+Write       untracked=True  frontend/src/ai-hub/reports/AsrQaScreen.stories.tsx
+StrReplace  untracked=True  frontend/src/ai-hub/reports/AsrQaScreen.tsx
+Write       untracked=True  frontend/src/ai-hub/reports/CcReports.css
+Write       untracked=True  frontend/src/ai-hub/reports/CcReportsScreen.tsx
+Write       untracked=True  frontend/src/ai-hub/reports/api/asrQa.ts
+Write       untracked=True  frontend/src/ai-hub/reports/api/ccReports.ts
+StrReplace  untracked=True  frontend/src/ai-hub/reports/reportsAccess.ts
+Write       untracked=True  frontend/src/assistant/AssistantChat.css
+StrReplace  untracked=True  frontend/src/assistant/AssistantChat.tsx
+Write       untracked=True  frontend/src/assistant/AssistantWindowApp.css
+Write       untracked=True  frontend/src/assistant/AssistantWindowApp.stories.tsx
+Write       untracked=True  frontend/src/assistant/AssistantWindowApp.tsx
+StrReplace  untracked=True  frontend/src/assistant/api/chatStream.ts
+Write       untracked=True  frontend/src/assistant/types.ts
+Write       untracked=True  frontend/src/assistant/useAssistantChat.ts
+Write       untracked=True  frontend/src/components/Table.stories.tsx
+Write       untracked=True  frontend/src/components/Table.tsx
+Write       untracked=True  frontend/src/internal-kc/InternalKcDialogApp.css
+Write       untracked=True  frontend/src/internal-kc/InternalKcDialogApp.stories.tsx
+Write       untracked=True  frontend/src/internal-kc/InternalKcDialogApp.tsx
+Write       untracked=True  frontend/src/internal-kc/api/testDialog.ts
+Write       untracked=True  frontend/src/internal-kc/demoResponses.ts
+Write       untracked=True  frontend/src/internal-kc/internalKcAccess.ts
+StrReplace  untracked=True  frontend/src/online-chat/ChatArmApp.css
+Write       untracked=True  frontend/src/online-chat/ChatArmApp.stories.tsx
+Write       untracked=True  frontend/src/online-chat/ChatArmApp.tsx
+Write       untracked=True  frontend/src/online-chat/OperatorStatusSelector.tsx
+Write       untracked=True  frontend/src/online-chat/QueuePanel.tsx
+Write       untracked=True  frontend/src/online-chat/SuflerSidePanel.tsx
+Write       untracked=True  frontend/src/online-chat/chatArmAccess.ts
+StrReplace  untracked=True  frontend/src/online-chat/hooks/useChatSufler.ts
+Write       untracked=True  frontend/src/online-chat/operatorStatuses.ts
+Write       untracked=True  frontend/src/online-chat/sessions.ts
+Write       untracked=True  frontend/src/sufler/SuflerPhoneApp.css
+Write       untracked=True  frontend/src/sufler/SuflerPhoneApp.stories.tsx
+Write       untracked=True  frontend/src/sufler/SuflerPhoneApp.tsx
+Write       untracked=True  frontend/src/sufler/api/suggest.ts
+Write       untracked=True  frontend/src/sufler/hooks/useSuflerTranscript.ts
+StrReplace  untracked=True  infra/test/.env.example
+StrReplace  untracked=True  infra/test/README.md
+StrReplace  untracked=True  infra/test/backup-postgres.sh
+Write       untracked=True  infra/test/certs/README.md
+Write       untracked=True  infra/test/cutover-checklist.md
+Write       untracked=True  infra/test/cutover-int-t-results.md
+StrReplace  untracked=True  infra/test/deploy.sh
+StrReplace  untracked=True  infra/test/docker-compose.prod-like.yml
+StrReplace  untracked=True  infra/test/gen-self-signed-cert.sh
+StrReplace  untracked=True  infra/test/github-actions-deploy.md
+StrReplace  untracked=True  infra/test/nginx.conf
+Write       untracked=True  infra/test/observability/README.md
+Write       untracked=True  infra/test/observability/prometheus-alerts.yml
+Write       untracked=True  infra/test/observability/prometheus-scrape.yml
+StrReplace  untracked=True  infra/test/server-requirements.md
+Write       untracked=True  infra/test/sql/ensure_pgvector.sql
+Write       untracked=True  infra/test/verify-data-tier.sh
+Write       untracked=True  infra/test/verify-inference-tier.sh
+Write       untracked=True  infra/test/verify-support-services.sh
+Write       untracked=True  pytest.ini
+Write       untracked=True  tests/acceptance/EXPAND.md
+StrReplace  untracked=True  tests/acceptance/README.md
+Write       untracked=True  tests/acceptance/conftest.py
+StrReplace  untracked=True  tests/acceptance/fixtures.py
+Write       untracked=True  tests/acceptance/generate_protocol.py
+Write       untracked=True  tests/acceptance/harness.py
+Write       untracked=True  tests/acceptance/load/README.md
+Write       untracked=True  tests/acceptance/load/k6_suggest.js
+Write       untracked=True  tests/acceptance/load/locustfile.py
+Write       untracked=True  tests/acceptance/load/requirements.txt
+StrReplace  untracked=True  tests/acceptance/load/run_load.py
+Write       untracked=True  tests/acceptance/load/test_load_smoke.py
+StrReplace  untracked=True  tests/acceptance/test_ass_t.py
+Write       untracked=True  tests/acceptance/test_chat_t.py
+StrReplace  untracked=True  tests/acceptance/test_doc_t.py
+Write       untracked=True  tests/acceptance/test_env_results.md
+Write       untracked=True  tests/acceptance/test_generate_protocol.py
+StrReplace  untracked=True  tests/acceptance/test_int_t.py
+StrReplace  untracked=True  tests/acceptance/test_suf_t.py
+StrReplace  untracked=True  tests/integration/test_oktell_client.py
+StrReplace  untracked=True  tests/test_api_schema.py
+Write       untracked=True  tests/test_asr_qa.py
+StrReplace  untracked=True  tests/test_ass_reports.py
+Write       untracked=True  tests/test_assistant_admin.py
+StrReplace  untracked=True  tests/test_assistant_chat.py
+StrReplace  untracked=True  tests/test_cc_reports.py
+Write       untracked=True  tests/test_channel_webhooks.py
+StrReplace  untracked=True  tests/test_data_tier.py
+StrReplace  untracked=True  tests/test_edge_nginx.py
+Write       untracked=True  tests/test_health.py
+StrReplace  untracked=True  tests/test_inference_tier.py
+Write       untracked=True  tests/test_int_t_aud.py
+Write       untracked=True  tests/test_internal_kc_dialog.py
+Write       untracked=True  tests/test_kb_admin.py
+StrReplace  untracked=True  tests/test_ldaps_auth.py
+Write       untracked=True  tests/test_metrics.py
+StrReplace  untracked=True  tests/test_ocr_pipeline.py
+StrReplace  untracked=True  tests/test_ocr_validation.py
+StrReplace  untracked=True  tests/test_oktell_mode.py
+Write       untracked=True  tests/test_online_chat_sufler.py
+StrReplace  untracked=True  tests/test_sufler_suggest.py
+StrReplace  untracked=True  tests/test_sufler_ws.py
+Write       untracked=True  tests/test_support_services.py
+Write       untracked=True  tests/test_suz_reconcile.py
+StrReplace  untracked=True  tests/ui/visual/generate_from_registry.py
+Write       untracked=True  tests/ui/visual/helpers.ts
+StrReplace  untracked=True  tests/ui/visual/test_registry_sync.py
+Write       untracked=True  tests/ui/widget.spec.ts
+
+# NEW in c556 MISSING

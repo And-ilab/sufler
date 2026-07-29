@@ -1,0 +1,69 @@
+=== SUMMARY (title page year "2026") ===
+Paragraph index (0-based among body <w:p>): 10
+Text: "2026"
+Alignment: center (w:jc=center)
+Font: Times New Roman, 12 pt (w:sz=24)
+Spacing before: None (not set)
+Spacing after: 120 twips (= 6 pt)
+Line spacing: 240, lineRule=auto
+Empty paragraphs immediately before: 1 (p[9] empty)
+Previous non-empty: p[8] "Листов — по содержанию" (center, after=120)
+Next non-empty: p[12] "СОДЕРЖАНИЕ" (p[11] empty)
+Comment context: reviewer asked to "сместить вниз" (move year down) — currently only ~1 empty para before year and small after=120; increase spacing before (or insert empty paragraphs) to push year lower on the title page.
+
+Source: c:\Users\user\Downloads\Rukovodstvo_po_ekspluatacii_dvuhstancionnaya_namotochnaya_mashina1.docx
+Total body direct paragraphs: 254
+
+=== Title page context (first paragraphs + any with 2026) ===
+p[2] align=center spacing={'after': '120', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='ЕДИНАЯ СИСТЕМА КОНСТРУКТОРСКОЙ ДОКУМЕНТАЦИИ'
+p[3] align=center spacing={'after': '360', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='Эксплуатационный документ'
+p[4] align=center spacing={'after': '240', 'line': '240', 'lineRule': 'auto'} sz=['36'] text='ДВУХСТАНЦИОННАЯ НАМОТОЧНАЯ МАШИНА'
+p[5] align=center spacing={'after': '480', 'line': '240', 'lineRule': 'auto'} sz=['32'] text='РУКОВОДСТВО ПО ЭКСПЛУАТАЦИИ'
+p[6] align=center spacing={'after': '120', 'line': '240', 'lineRule': 'auto'} sz=[] text='Разработано в соответствии с ГОСТ Р 2.601–2019 и ГОСТ Р 2.610–2019'
+p[7] align=center spacing={'after': '720', 'line': '240', 'lineRule': 'auto'} sz=[] text='(ЕСКД. Эксплуатационные документы; Правила выполнения эксплуатационных документов)'
+p[8] align=center spacing={'after': '120', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='Листов — по содержанию'
+p[10] align=center spacing={'after': '120', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='2026'
+p[12] align=center spacing={'after': '160', 'lineRule': 'auto'} sz=['32'] text='СОДЕРЖАНИЕ'
+p[13] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='Введение'
+p[14] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='1 Описание и работа'
+p[15] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='1.1 Описание и работа изделия'
+p[16] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='1.1.1 Назначение изделия'
+p[17] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='1.1.2 Технические характеристики'
+p[18] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='1.1.3 Состав изделия'
+p[19] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='1.1.4 Устройство и работа'
+p[20] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='1.1.5 Средства измерения, инструмент и принадлежности'
+p[21] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='1.1.6 Маркировка и пломбирование'
+p[22] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='1.1.7 Упаковка'
+p[23] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='1.2 Описание и работа составных частей изделия'
+p[24] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='2 Использование по назначению'
+p[25] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='2.1 Эксплуатационные ограничения'
+p[26] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='2.2 Подготовка изделия к использованию'
+p[27] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='2.3 Использование изделия'
+p[28] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='2.4 Действия в экстремальных условиях'
+p[29] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='3 Техническое обслуживание'
+p[30] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='4 Текущий ремонт'
+p[31] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='5 Хранение'
+p[32] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='6 Транспортирование'
+p[33] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='7 Утилизация'
+p[34] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='Приложение А (обязательное). Порядок заправки проволоки (траектория проводки)'
+p[35] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='Приложение Б (справочное). Настройка параметров намотки на сенсорном экране'
+p[36] align=None (default) spacing={'after': '40', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='Лист регистрации изменений'
+p[38] align=None (default) spacing={'after': '160', 'before': '240', 'lineRule': 'auto'} sz=['28'] text='Введение'
+p[39] align=both spacing={'after': '120', 'line': '240', 'lineRule': 'auto'} sz=['24', '24', '24'] text='Настоящее руководство по эксплуатации (далее — РЭ) предназначено для изучения устройства, принципа действия и правил безопасной эксплуатации двухстанционной намоточной машины (далее — изделие, оборудование, машина).'
+p[40] align=both spacing={'after': '120', 'line': '240', 'lineRule': 'auto'} sz=['24', '24'] text='РЭ содержит сведения, необходимые для правильной и безопасной эксплуатации изделия: использования по назначению, технического обслуживания, текущего ремонта, хранения, транспортирования и утилизации, а также оценки технического состояния изделия.'
+p[41] align=both spacing={'after': '120', 'line': '240', 'lineRule': 'auto'} sz=['24'] text='Состав настоящего РЭ:'
+p[42] align=left spacing={'after': '0', 'before': '0', 'line': '276', 'lineRule': 'auto'} sz=['24'] text='часть «Описание и работа»;'
+p[43] align=left spacing={'after': '0', 'before': '0', 'line': '276', 'lineRule': 'auto'} sz=['24'] text='часть «Использование по назначению»;'
+p[44] align=left spacing={'after': '0', 'before': '0', 'line': '276', 'lineRule': 'auto'} sz=['24'] text='часть «Техническое обслуживание»;'
+
+=== Paragraphs containing 2026 (detail) ===
+Paragraph index (0-based among body <w:p>): 10
+Text: '2026'
+Alignment (w:jc): center
+Spacing attrs: {'after': '120', 'line': '240', 'lineRule': 'auto'}
+spacing before (twips): None
+spacing after (twips): 120
+  after approx 6.0 pt
+  run[0]: {'text': '2026', 'sz_half_points': '24', 'sz_pt': 12.0, 'fonts': {'ascii': 'Times New Roman', 'cs': 'Times New Roman', 'eastAsia': 'Times New Roman', 'hAnsi': 'Times New Roman'}}
+Empty paragraphs immediately before this one: 1
+Next non-empty paragraph: (12, 'СОДЕРЖАНИЕ')

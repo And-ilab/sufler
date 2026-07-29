@@ -1,6 +1,7 @@
 # OCR → LLM `docs_ocr` → validated JSON
 
-Статус: **target specification; P6-01/P6-03 implementation pending**  
+Статус: **IV.5 OCR async foundation implemented** (upload → Celery →
+MinIO/FS); P6-01 LLM structuring and P6-03 validator remain target.  
 Область: Part IV OCR pipeline и общий LLM-слой Part V
 
 ## Назначение
@@ -12,6 +13,10 @@ Pipeline преобразует загруженный PDF/изображени�
 document → OCR text → ModelGateway(docs_ocr) → proposed JSON
          → deterministic validation → valid JSON or HITL review
 ```
+
+Текущая реализация закрывает **шаги 1–2** (ingest + OCR engine stub) и
+**IV.8 validator + JSON/CSV export** (DOC-T-03/04/08). LLM structuring
+остаётся целевым этапом P6-01.
 
 LLM не является источником истины. Профиль `docs_ocr` предлагает тип документа
 и значения полей, после чего отдельный deterministic validator проверяет
@@ -72,6 +77,53 @@ sequenceDiagram
 записывает `pending_review` с причинами и создаёт HITL-задачу вместо шага
 автоматической публикации.
 
+## IV.5 async foundation (implemented)
+
+Foundation для P6-02 UI. Код: `backend/ocr/`.
+
+### Pipeline steps
+
+| Step | Component | Action | Artifact |
+| --- | --- | --- | --- |
+| 1 | `POST /api/v1/ocr/documents/` | Validate format (pdf/jpg/png/tiff), SHA-256, create `job_id`/`document_id` | `OcrJob` row `queued` |
+| 2 | Object store | Put original under `originals/{document_id}/…` | MinIO bucket `sufler-ocr` (or FS fallback) |
+| 3 | Celery `ocr.run_ocr_job` | Set `ocr_processing`, read original | — |
+| 4 | OCR engine | Resolve ModelRegistry slot `ocr` (`stub:tesseract`) | Page text + confidence |
+| 5 | Object store | Put JSON under `results/{job_id}/ocr_result.json` | OCR envelope |
+| 6 | Job update | Status `completed` | — |
+| 7 | `GET …/jobs/{id}/result/` | Fetch JSON from object store | Client payload |
+
+Not yet in this foundation: Template Registry, ModelGateway `docs_ocr`,
+deterministic validator, HITL (P6-01 / P6-03).
+
+### API
+
+| Method | Path | Permission | Response |
+| --- | --- | --- | --- |
+| POST | `/api/v1/ocr/documents/` | `ocr.use` | `202` + `job_id` |
+| GET | `/api/v1/ocr/jobs/{job_id}/` | `ocr.use` | Job status |
+| GET | `/api/v1/ocr/jobs/{job_id}/result/` | `ocr.use` | OCR JSON (`409` if not ready) |
+
+Multipart field: `file` (alias `document`).
+
+### ModelRegistry OCR slot
+
+```yaml
+slots:
+  ocr:
+    dev_model: "stub:tesseract"
+    status: evaluating
+```
+
+Engine reads `ModelRegistry.get_slot("ocr")`. Native Tesseract binary is not
+required for the stub; swap `dev_model` after P1-51 without changing the API.
+
+### Object storage
+
+- Production: MinIO (`MINIO_ENDPOINT`, credentials, `MINIO_OCR_BUCKET`).
+- Tests / offline: `OCR_OBJECT_STORE_BACKEND=fs` →
+  `OCR_OBJECT_STORE_ROOT` (default `backend/var/ocr-objects`).
+
 ## Компоненты и ответственность
 
 ### 1. OCR API / ingest
@@ -129,6 +181,7 @@ Source of truth:
 [`backend/config/model_registry.yaml`](../../backend/config/model_registry.yaml).
 Текущая конфигурация использует `stub:docs_ocr`, `gateway_mode=stub` и
 `status=evaluating`; это dev contract, а не production model selection.
+Слот `ocr` для foundation: `dev_model: stub:tesseract`, `status: evaluating`.
 
 Прямой импорт vendor SDK из OCR-модуля запрещён. Смена модели выполняется
 через ModelRegistry/ModelGateway без изменения pipeline.
@@ -147,6 +200,21 @@ Validator работает после LLM и независимо от неё:
 8. сверяет source references и confidence;
 9. формирует `valid` либо `pending_review`;
 10. сохраняет исходное предложение LLM и итог отдельно для аудита.
+
+**Implemented (IV.8 foundation):** configurable rules in
+[`backend/config/ocr_validation_rules.yaml`](../../backend/config/ocr_validation_rules.yaml),
+engine [`backend/ocr/validation.py`](../../backend/ocr/validation.py),
+export [`backend/ocr/export.py`](../../backend/ocr/export.py).
+
+| API | Purpose | DOC-T |
+| --- | --- | --- |
+| `GET /api/v1/ocr/doc-types/` | List templates / required fields | DOC-T-03/04 |
+| `POST /api/v1/ocr/validate/` | Validate fields → `valid` / `pending_review` | DOC-T-04 |
+| `POST /api/v1/ocr/export/?format=json\|csv` | Downstream export (blocked unless `valid`) | DOC-T-08 |
+
+Invalid / missing / unknown fields are **rejected** (not present in
+`fields` of a `valid` payload). Downstream systems must consume only
+`status=valid` (`validation.downstream_allowed=true`).
 
 LLM не может самостоятельно установить итоговый `validation.status=valid`.
 Поле из ответа модели считается только предложением до завершения

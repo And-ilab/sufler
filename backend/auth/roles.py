@@ -35,10 +35,32 @@ class RoleDefinition:
     mock_ad_group: str
     permissions: frozenset[str]
     tabs: tuple[str, ...]
+    # VII.5.1 C2 working default (overridable via AUTH_LDAP_ROLE_GROUP_MAP_JSON).
+    c2_ad_group: str = ""
+
+
+def _role(
+    number: int,
+    code: str,
+    contractual_name: str,
+    mock_ad_group: str,
+    permissions: frozenset[str],
+    tabs: tuple[str, ...],
+    c2_ad_group: str,
+) -> RoleDefinition:
+    return RoleDefinition(
+        number,
+        code,
+        contractual_name,
+        mock_ad_group,
+        permissions,
+        tabs,
+        c2_ad_group,
+    )
 
 
 ROLE_DEFINITIONS = (
-    RoleDefinition(
+    _role(
         1,
         "software_administrator",
         "Администратор ПО",
@@ -55,8 +77,9 @@ ROLE_DEFINITIONS = (
             "ocr",
             "reports",
         ),
+        "BB_AI_Software_Admin",
     ),
-    RoleDefinition(
+    _role(
         2,
         "llm_knowledge_base_administrator",
         "Администратор базы знаний LLM",
@@ -70,8 +93,9 @@ ROLE_DEFINITIONS = (
             }
         ),
         ("hub", "kb_llm", "qu", "prompts", "assistant_settings"),
+        "BB_AI_LLM_KB_Admin",
     ),
-    RoleDefinition(
+    _role(
         3,
         "contact_center_module_administrator",
         "Администратор модуля Контакт-центра",
@@ -84,40 +108,45 @@ ROLE_DEFINITIONS = (
             }
         ),
         ("hub", "contact_center", "chat_queues", "rbac", "integrations"),
+        "BB_CC_Module_Admin",
     ),
-    RoleDefinition(
+    _role(
         4,
         "contact_center_telephony_operator",
         "Оператор канала телефония Контакт-центра",
         "Sufler_Role_04_TelephonyOperator",
         frozenset({PERM_SUFLER_TELEPHONY, PERM_ASSISTANT_USE}),
         ("hub", "sufler_telephony", "assistant"),
+        "BB_CC_Telephony_Operator",
     ),
-    RoleDefinition(
+    _role(
         5,
         "contact_center_online_chat_operator",
         "Оператор онлайн-чата Контакт-центра",
         "Sufler_Role_05_OnlineChatOperator",
         frozenset({PERM_SUFLER_CHAT, PERM_ASSISTANT_USE}),
         ("hub", "sufler_chat", "assistant"),
+        "BB_CC_Chat_Operator",
     ),
-    RoleDefinition(
+    _role(
         6,
         "contact_center_internal_user",
         "Внутренний пользователь Контакт-центра",
         "Sufler_Role_06_ContactCenterInternal",
         frozenset({PERM_CC_TEST_DIALOG}),
         ("hub", "cc_test_dialog"),
+        "BB_CC_Internal_User",
     ),
-    RoleDefinition(
+    _role(
         7,
         "contact_center_analyst",
         "Аналитик Контакт-центра",
         "Sufler_Role_07_ContactCenterAnalyst",
         frozenset({PERM_CC_REPORTS}),
         ("hub", "cc_reports"),
+        "BB_CC_Analyst",
     ),
-    RoleDefinition(
+    _role(
         8,
         "ai_assistant_module_administrator",
         "Администратор модуля ИИ-ассистент",
@@ -130,46 +159,52 @@ ROLE_DEFINITIONS = (
             }
         ),
         ("hub", "assistant", "assistant_settings", "assistant_sources"),
+        "BB_AI_Assistant_Admin",
     ),
-    RoleDefinition(
+    _role(
         9,
         "ai_assistant_user",
         "Пользователь ИИ-ассистента",
         "Sufler_Role_09_AssistantUser",
         frozenset({PERM_ASSISTANT_USE}),
         ("hub", "assistant"),
+        "BB_AI_Assistant_User",
     ),
-    RoleDefinition(
+    _role(
         10,
         "ai_assistant_analyst",
         "Аналитик ИИ-ассистента",
         "Sufler_Role_10_AssistantAnalyst",
         frozenset({PERM_ASSISTANT_REPORTS}),
         ("hub", "assistant_reports"),
+        "BB_AI_Assistant_Analyst",
     ),
-    RoleDefinition(
+    _role(
         11,
         "document_recognition_module_administrator",
         "Администратор модуля распознавания документов",
         "Sufler_Role_11_OCRAdmin",
         frozenset({PERM_OCR_ADMIN, PERM_OCR_USE}),
         ("hub", "ocr", "ocr_settings"),
+        "BB_IDP_Admin",
     ),
-    RoleDefinition(
+    _role(
         12,
         "document_recognition_user",
         "Пользователь модуля распознавания документов",
         "Sufler_Role_12_OCRUser",
         frozenset({PERM_OCR_USE}),
         ("hub", "ocr"),
+        "BB_IDP_User",
     ),
-    RoleDefinition(
+    _role(
         13,
         "document_recognition_analyst",
         "Аналитик модуля распознавания документов",
         "Sufler_Role_13_OCRAnalyst",
         frozenset({PERM_OCR_REPORTS}),
         ("hub", "ocr_reports"),
+        "BB_IDP_Analyst",
     ),
 )
 
@@ -177,6 +212,10 @@ ROLES_BY_CODE = {role.code: role for role in ROLE_DEFINITIONS}
 ROLES_BY_GROUP = {
     role.mock_ad_group.casefold(): role for role in ROLE_DEFINITIONS
 }
+# Also index C2 AD CNs so prod mirrored groups resolve without JSON alone.
+for _role_def in ROLE_DEFINITIONS:
+    if _role_def.c2_ad_group:
+        ROLES_BY_GROUP[_role_def.c2_ad_group.casefold()] = _role_def
 ALL_PERMISSIONS = frozenset(
     permission
     for role in ROLE_DEFINITIONS
@@ -191,8 +230,14 @@ ALL_TABS = tuple(
 
 if len(ROLE_DEFINITIONS) != 13:
     raise RuntimeError("I.4 requires exactly 13 contractual roles")
-if len(ROLES_BY_CODE) != 13 or len(ROLES_BY_GROUP) != 13:
-    raise RuntimeError("I.4 role codes and mock groups must be unique")
+if len(ROLES_BY_CODE) != 13:
+    raise RuntimeError("I.4 role codes must be unique")
+_mock_groups = {role.mock_ad_group.casefold() for role in ROLE_DEFINITIONS}
+_c2_groups = {role.c2_ad_group.casefold() for role in ROLE_DEFINITIONS}
+if len(_mock_groups) != 13 or len(_c2_groups) != 13:
+    raise RuntimeError("I.4 mock and C2 AD groups must be unique")
+if _mock_groups & _c2_groups:
+    raise RuntimeError("I.4 mock and C2 AD group namespaces must not overlap")
 
 
 def role_codes_from_group_names(

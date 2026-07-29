@@ -1,0 +1,227 @@
+================================================================================
+PASSPORT WORD COMMENTS REPORT
+Source: C:\Users\user\Downloads\Паспорт_станка_GW_DS09_ГОСТ_2_601_2019_1.docx
+Size: 3869195 bytes
+================================================================================
+
+## Comment-related ZIP parts
+  - word/comments.xml  (26184 bytes)
+  - word/commentsExtended.xml  (2168 bytes)
+
+## Summary
+  Total comments: 9
+  Top-level comments: 9
+  Replies: 0
+  Authors (2): <анонимный>, Андрей Пономарев
+
+## Document structure
+  Tables count: 10
+  Images count (blip/imagedata): 11
+  Total non-empty paragraphs walked: 204
+  Headings found (by style): 16
+
+### All headings
+  1. [Heading1] ПАСПОРТ ИЗДЕЛИЯ
+  2. [Heading2] 1. Основные сведения об изделии
+  3. [Heading2] 2. Основные технические данные и характеристики
+  4. [Heading3] 2.1. Технические характеристики процесса намотки
+  5. [Heading3] 2.2. Электрические и пневматические параметры
+  6. [Heading3] 2.3. Кинематика и оси управления
+  7. [Heading3] 2.4. Габаритные размеры и внешний вид
+  8. [Heading2] 3. Комплектность и ключевые компоненты
+  9. [Heading3] 3.1. Ключевые покупные комплектующие и бренды
+  10. [Heading3] 3.2. Комплект поставки, ЗИП и документация
+  11. [Heading2] 4. Безопасность и разграничение прав доступа
+  12. [Heading3] 4.1. Устройства обеспечения безопасности
+  13. [Heading3] 4.2. Системы управления доступом (Power Management)
+  14. [Heading2] 5. Упаковка, транспортирование и хранение
+  15. [Heading2] 6. Свидетельство о приемке и консервации
+  16. [Heading2] 7. Гарантийные обязательства
+
+### First 40 non-empty paragraphs
+  1. (table) ПРОИЗВОДИТЕЛЬ:
+  2. (table) GREWIN INDUSTRIAL GROUP CO., LTD.
+  3. (table) Add: 4th floor, A-A3 zone aviation business area, Dongli Distr, Tianjin, China
+  4. (table) Tel/WhatsApp: +8618622096679
+  5. (table) Mail: admin@coilwindingmachinechina.com
+  6. (table) Web: www.coilwindingmachinechina.com
+  7. (table) ПОСТАВЩИК / ПОКУПАТЕЛЬ:
+  8. (table) Приложение к договору поставки № 3004
+  9. (table) Согласованная КД к договору № 2802/1 от 28.02.2024
+  10. (body style=Heading1) ПАСПОРТ ИЗДЕЛИЯ
+  11. (body) ГОСТ 2.601-2019 / ГОСТ 2.610-2019
+  12. (body) Станок намоточный двухстанционный для статоров (для внутренней намотки)
+  13. (body) Модель: GW-DS09
+  14. (body style=Heading2) 1. Основные сведения об изделии
+  15. (table) Наименование оборудования
+  16. (table) Двухстанционный станок для внутренней намотки статоров (Double-station stator winding machine / inner winding machine)
+  17. (table) Модель / Обозначение
+  18. (table) GW-DS09
+  19. (table) Предприятие-изготовитель
+  20. (table) GREWIN INDUSTRIAL GROUP CO., LTD. (КНР, Тяньцзинь)
+  21. (table) Назначение оборудования
+  22. (table) Автоматическая внутренняя намотка обмоток статоров электрических машин проводом заданной конфигурации. Оборудование выполняет операции намотки, перекрестной укладки провода, обрезки и формирования выводов.
+  23. (table) Соответствие стандартам и сертификация
+  24. (table) ISO9001:2015, CE, стандарты национальной безопасности (High-Tech Enterprise)
+  25. (body style=Heading2) 2. Основные технические данные и характеристики
+  26. (body style=Heading3) 2.1. Технические характеристики процесса намотки
+  27. (table) Параметр
+  28. (table) Значение / Описание
+  29. (table) Тип автоматизации
+  30. (table) Автоматический (автоматическая намотка, перекрестная укладка, 2 станции, однопроводной шпинодель/сопло)
+  31. (table) Способ намотки
+  32. (table) Внутренняя намотка статора (Internal winding)
+  33. (table) Максимальный наружный диаметр наматываемого статора
+  34. (table) ≤ 170 мм
+  35. (table) Толщина пакета пластин (пакета ротора/статора)
+  36. (table) ≤ 90 мм
+  37. (table) Диаметр используемого провода
+  38. (table) 0,2 мм – 1,5 мм
+  39. (table) Требования к качеству намотки
+  40. (table) Аккуратная и ровная укладка, отсутствие повреждений эмалевой изоляции провода в соответствии с требованиями национальных стандартов.
+
+## Manufacturer / supplier / Finselvat text
+### Finselvat matches: (none in document body/XML parts)
+### Note on similar name in comments only:
+  - Comment id=0 body mentions: ООО Финстельват (spelling Финстельват — not Finselvat/финселват)
+  - No Finselvat/финселват/Финстельват strings found in word/document.xml
+### Manufacturer/supplier keyword matches:
+  - ПРОИЗВОДИТЕЛЬ:
+  - ПОСТАВЩИК / ПОКУПАТЕЛЬ:
+  - Предприятие-изготовитель
+  - Производитель / Бренд
+  - Представитель ОТК / Поставщика:
+  - Изготовитель гарантирует соответствие станка требованиям технической документации при соблюдении потребителем условий транспортирования, хранения, монтажа и эксплуатации.
+### Nearby identity / company lines (context dump):
+  - GREWIN INDUSTRIAL GROUP CO., LTD.
+  - Add: 4th floor, A-A3 zone aviation business area, Dongli Distr, Tianjin, China
+  - Mail: admin@coilwindingmachinechina.com
+  - Web: www.coilwindingmachinechina.com
+  - ПОСТАВЩИК / ПОКУПАТЕЛЬ:
+  - Приложение к договору поставки № 3004
+  - Предприятие-изготовитель
+  - GREWIN INDUSTRIAL GROUP CO., LTD. (КНР, Тяньцзинь)
+  - 3.2. Комплект поставки, ЗИП и документация
+  - Представитель ОТК / Поставщика:
+  - Изготовитель гарантирует соответствие станка требованиям технической документации при соблюдении потребителем условий транспортирования, хранения, монтажа и эксплуатации.
+### Raw XML Finselvat snippets: (none)
+
+================================================================================
+## ALL COMMENTS (detailed)
+================================================================================
+
+----------------------------------------------------------------------
+ID: 0
+Author: <анонимный>
+Date: 2026-07-24T14:03:26Z
+ParaId: 000000ED
+Is reply: NO (top-level)
+Parent comment id: (none)
+ANCHOR text: ПОСТАВЩИК / ПОКУПАТЕЛЬ:Приложение к договору поставки № 3004Согласованная КД к договору № 2802/1 от 28.02.2024
+Comment body:
+Добавить ифнормацию :
+Официальный предсвтавить, сервисный центр на территории РБ
+Тел. +375 29 667 88 73, HelpDesk@digitranslab.com
+
+
+Покупатель — убрать
+
+Вписать адрес и реквизиты ООО Финстельват
+
+----------------------------------------------------------------------
+ID: 1
+Author: Андрей Пономарев
+Date: 2026-07-24T14:04:21Z
+ParaId: 000000FB
+Is reply: NO (top-level)
+Parent comment id: (none)
+ANCHOR text: (no text; comment attached to IMAGE)
+ANCHOR image(s): image2.png
+ANCHOR context (preceding heading): 1. Основные сведения об изделии
+Comment body:
+Рис подписать, явно с нижним колонтитулом что то не то
+
+----------------------------------------------------------------------
+ID: 2
+Author: Андрей Пономарев
+Date: 2026-07-24T14:05:01Z
+ParaId: 000000F5
+Is reply: NO (top-level)
+Parent comment id: (none)
+ANCHOR text: Двухстанционный станок для внутренней намотки статоров (Double-station stator winding machine / inner winding machine)
+Comment body:
+Здесь и далее , это же таблицы? Доделать рамку
+
+----------------------------------------------------------------------
+ID: 3
+Author: Андрей Пономарев
+Date: 2026-07-24T14:05:01Z
+ParaId: 000000F6
+Is reply: NO (top-level)
+Parent comment id: (none)
+ANCHOR text: GW-DS09
+Comment body:
+Здесь и далее , это же таблицы? Доделать рамку
+
+----------------------------------------------------------------------
+ID: 4
+Author: Андрей Пономарев
+Date: 2026-07-24T14:05:01Z
+ParaId: 000000F7
+Is reply: NO (top-level)
+Parent comment id: (none)
+ANCHOR text: GREWIN INDUSTRIAL GROUP CO., LTD. (КНР, Тяньцзинь)
+Comment body:
+Здесь и далее , это же таблицы? Доделать рамку
+
+----------------------------------------------------------------------
+ID: 5
+Author: Андрей Пономарев
+Date: 2026-07-24T14:05:01Z
+ParaId: 000000F8
+Is reply: NO (top-level)
+Parent comment id: (none)
+ANCHOR text: Автоматическая внутренняя намотка обмоток статоров электрических машин проводом заданной конфигурации. Оборудование выполняет операции намотки, перекрестной укладки провода, обрезки и формирования выводов.
+Comment body:
+Здесь и далее , это же таблицы? Доделать рамку
+
+----------------------------------------------------------------------
+ID: 6
+Author: Андрей Пономарев
+Date: 2026-07-24T14:05:01Z
+ParaId: 000000F9
+Is reply: NO (top-level)
+Parent comment id: (none)
+ANCHOR text: ISO9001:2015, CE, стандарты национальной безопасности (High-Tech Enterprise)
+Comment body:
+Здесь и далее , это же таблицы? Доделать рамку
+
+----------------------------------------------------------------------
+ID: 7
+Author: Андрей Пономарев
+Date: 2026-07-24T14:05:14Z
+ParaId: 000000FA
+Is reply: NO (top-level)
+Parent comment id: (none)
+ANCHOR text: (no text; comment attached to IMAGE)
+ANCHOR image(s): image4.png
+ANCHOR context (preceding heading): 2.4. Габаритные размеры и внешний вид
+Comment body:
+Подписать
+
+----------------------------------------------------------------------
+ID: 8
+Author: Андрей Пономарев
+Date: 2026-07-24T14:05:27Z
+ParaId: 000000FC
+Is reply: NO (top-level)
+Parent comment id: (none)
+ANCHOR text: (no text; comment attached to IMAGE)
+ANCHOR image(s): image1.png
+ANCHOR context (preceding heading): 2.4. Габаритные размеры и внешний вид
+Comment body:
+Подписать
+
+================================================================================
+END OF REPORT
+================================================================================

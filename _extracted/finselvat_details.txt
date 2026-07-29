@@ -1,0 +1,24 @@
+=== FINSELVAT DETAILS ===
+Source (letterhead header): C:\Users\user\Downloads\фирм бланк.docx
+Part: word/header3.xml
+
+Legal name: Общество с ограниченной ответственностью «ФИНСЕЛЬВАТ» (ООО «Финсельват»)
+Address: Минская обл., Минский р-н, Новодворский сельсовет, д. Большое Стиклево, д. 40, к. 2, оф. 52
+UNP: 692204462
+Phone (Приемная): +375 29 658 53 63
+Email: finselvat.info@yandex.ru
+Bank account (р/с): BY21ALFA30122C18740010270000
+Bank: ЗАО «Альфа-банк», г. Минск, ул. Сурганова, 43-47
+Bank code (SWIFT/код): ALFABY2X
+Web: www.цифровая.бел
+
+Other mentions:
+- Role in supply docs: Поставщик (договор поставки №2802/1 с ОАО «Радиоволна»)
+- Director on firm letter: Г. В. Есис (Есис Геннадий Владимирович)
+- On TZ_ERIP_v1.1.docx approval block: Директор ООО «Финсельват» — А.В. Пономарев
+- Manual Word comment requests inserting ООО "Финсельват" as поставщик / официальный представитель в РБ / сервисный центр в РБ
+
+Also found references in:
+- C:\Users\user\Downloads\Rukovodstvo_po_ekspluatacii_dvuhstancionnaya_namotochnaya_mashina1.docx (comments only)
+- C:\Users\user\Downloads\Telegram Desktop\TZ_ERIP_v1.1.docx (party name, no full реквизиты in body)
+- Project _extracted comments / analyze scripts (name only)

@@ -288,6 +288,11 @@
   overflow: auto;
 }
 
+.portal-module-window__body--assistant {
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
 .portal-module-window__status-row {
   display: flex;
   align-items: center;

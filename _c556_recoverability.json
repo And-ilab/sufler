@@ -1,0 +1,199 @@
+{
+  "c556_unique_files": 275,
+  "mod_tracked_count": 63,
+  "new_present": 212,
+  "new_missing": 0,
+  "recoverable_via_last_Write": 10,
+  "need_StrReplace_replay": 53,
+  "recover_write_sample": [
+    "backend/audit/README.md",
+    "backend/auth/README.md",
+    "backend/auth/ldap_config.py",
+    "backend/auth/urls.py",
+    "backend/hub/urls.py",
+    "backend/ingest/urls.py",
+    "backend/ingest/views.py",
+    "backend/sufler/asgi.py",
+    "docs/ui/canvas-registry.yaml",
+    "infra/postgres/init.sql"
+  ],
+  "need_replay_sample": [
+    ".github/workflows/ci.yml",
+    ".gitignore",
+    "backend/README.md",
+    "backend/audit/__init__.py",
+    "backend/audit/service.py",
+    "backend/audit/sinks/http.py",
+    "backend/auth/roles.py",
+    "backend/auth/views.py",
+    "backend/config/model_registry.yaml",
+    "backend/core/model_gateway.py",
+    "backend/core/model_registry.py",
+    "backend/hub/models.py",
+    "backend/hub/views.py",
+    "backend/ingest/README.md",
+    "backend/ingest/models.py",
+    "backend/ingest/tasks.py",
+    "backend/qu/README.md",
+    "backend/requirements.txt",
+    "backend/sufler/celery.py",
+    "backend/sufler/settings.py",
+    "backend/sufler/urls.py",
+    "docs/README.md",
+    "docs/benchmarks/asr-evaluation-report.md",
+    "docs/integration/oktell-sufler-telephony/README.md",
+    "docs/technical/model-selection-v1.md",
+    "docs/technical/ocr-llm-pipeline.md",
+    "frontend/.storybook/main.ts",
+    "frontend/README.md",
+    "frontend/package.json",
+    "frontend/playwright.config.ts",
+    "frontend/src/App.css",
+    "frontend/src/App.tsx",
+    "frontend/src/ai-hub/admin/AiHubAdmin.css",
+    "frontend/src/ai-hub/admin/AiHubAdminApp.stories.tsx",
+    "frontend/src/ai-hub/admin/AiHubAdminApp.tsx",
+    "frontend/src/ai-hub/admin/adminNav.ts",
+    "frontend/src/ai-hub/panel/AiHubPanel.css",
+    "frontend/src/ai-hub/panel/AiHubPanel.stories.tsx",
+    "frontend/src/ai-hub/panel/AiHubPanel.tsx",
+    "frontend/src/components/HintCard.stories.tsx"
+  ],
+  "new_missing_list": [],
+  "key_info": {
+    "backend/sufler/settings.py": {
+      "in_a7daa4f": true,
+      "exists": true,
+      "last_tool": "StrReplace",
+      "ops": {
+        "Write": 0,
+        "StrReplace": 21
+      },
+      "has_full_write_payload": false,
+      "write_len": 0,
+      "untracked": false
+    },
+    "backend/sufler/urls.py": {
+      "in_a7daa4f": true,
+      "exists": true,
+      "last_tool": "StrReplace",
+      "ops": {
+        "Write": 1,
+        "StrReplace": 8
+      },
+      "has_full_write_payload": true,
+      "write_len": 1277,
+      "untracked": false
+    },
+    "frontend/src/App.tsx": {
+      "in_a7daa4f": true,
+      "exists": true,
+      "last_tool": "StrReplace",
+      "ops": {
+        "Write": 0,
+        "StrReplace": 16
+      },
+      "has_full_write_payload": false,
+      "write_len": 0,
+      "untracked": false
+    },
+    "frontend/package.json": {
+      "in_a7daa4f": true,
+      "exists": true,
+      "last_tool": "StrReplace",
+      "ops": {
+        "Write": 0,
+        "StrReplace": 1
+      },
+      "has_full_write_payload": false,
+      "write_len": 0,
+      "untracked": false
+    },
+    ".github/workflows/ci.yml": {
+      "in_a7daa4f": true,
+      "exists": true,
+      "last_tool": "StrReplace",
+      "ops": {
+        "Write": 0,
+        "StrReplace": 2
+      },
+      "has_full_write_payload": false,
+      "write_len": 0,
+      "untracked": false
+    },
+    "infra/docker-compose.yml": {
+      "in_a7daa4f": true,
+      "exists": true,
+      "last_tool": "StrReplace",
+      "ops": {
+        "Write": 0,
+        "StrReplace": 8
+      },
+      "has_full_write_payload": false,
+      "write_len": 0,
+      "untracked": false
+    },
+    "backend/hub/views.py": {
+      "in_a7daa4f": true,
+      "exists": true,
+      "last_tool": "StrReplace",
+      "ops": {
+        "Write": 0,
+        "StrReplace": 5
+      },
+      "has_full_write_payload": false,
+      "write_len": 0,
+      "untracked": false
+    },
+    "backend/auth/roles.py": {
+      "in_a7daa4f": true,
+      "exists": true,
+      "last_tool": "StrReplace",
+      "ops": {
+        "Write": 0,
+        "StrReplace": 2
+      },
+      "has_full_write_payload": false,
+      "write_len": 0,
+      "untracked": false
+    },
+    ".github/workflows/deploy-test.yml": {
+      "in_a7daa4f": false,
+      "exists": true,
+      "last_tool": "StrReplace",
+      "ops": {
+        "Write": 1,
+        "StrReplace": 3
+      },
+      "has_full_write_payload": true,
+      "write_len": 7660,
+      "untracked": true
+    },
+    "backend/core/metrics.py": {
+      "in_a7daa4f": false,
+      "exists": true,
+      "last_tool": "Write",
+      "ops": {
+        "Write": 1,
+        "StrReplace": 0
+      },
+      "has_full_write_payload": true,
+      "write_len": 1254,
+      "untracked": true
+    },
+    "backend/assistant/chat.py": {
+      "in_a7daa4f": false,
+      "exists": true,
+      "last_tool": "StrReplace",
+      "ops": {
+        "Write": 1,
+        "StrReplace": 1
+      },
+      "has_full_write_payload": true,
+      "write_len": 4121,
+      "untracked": true
+    }
+  },
+  "new_present_untracked": 212,
+  "new_present_tracked_somehow": 0
+}

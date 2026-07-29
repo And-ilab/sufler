@@ -1,4 +1,4 @@
-"""Celery orchestration for FR-UND-08 knowledge-base updates."""
+"""Celery orchestration for FR-UND-08 knowledge-base updates + INT-09 reconcile."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from celery import chain, shared_task
 from celery.result import AsyncResult
+from django.conf import settings
 
 from ingest.pipeline import INDEX_NAME, ingest_payload
 from ingest.schema import SuzPayload
@@ -31,6 +32,17 @@ def reindex_kb(payload_data: Mapping[str, Any]) -> dict[str, Any]:
         "content_version": str(payload.version_id or payload.event_id),
         "trigger": REINDEX_COMPLETED_EVENT,
     }
+
+
+@shared_task(name="ingest.reconcile_suz_changes")
+def reconcile_suz_changes(limit: int | None = None) -> dict[str, Any]:
+    """INT-09 Model B polling fallback: GET Bitrix /changes and ingest events."""
+    from ingest.reconcile import run_reconciliation
+
+    page_limit = limit
+    if page_limit is None:
+        page_limit = int(getattr(settings, "SUZ_RECONCILE_LIMIT", 100))
+    return run_reconciliation(limit=page_limit)
 
 
 def enqueue_ingest_chain(payload_data: Mapping[str, Any]) -> AsyncResult:

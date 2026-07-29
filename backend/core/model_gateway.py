@@ -195,7 +195,19 @@ class ModelGateway:
         registry_path: str | Path = DEFAULT_REGISTRY_PATH,
         **kwargs: Any,
     ) -> ModelGateway:
-        return cls(ModelRegistry.load(registry_path), **kwargs)
+        registry = ModelRegistry.load(registry_path)
+        mode = kwargs.pop("mode", None)
+        if mode is None:
+            mode = os.environ.get("MODEL_GATEWAY_MODE") or None
+        if not mode:
+            profile_name = os.environ.get("AI_INFERENCE_PROFILE", "test")
+            try:
+                mode = registry.get_deployment_profile(
+                    profile_name
+                ).llm_gateway_mode
+            except KeyError:
+                mode = None
+        return cls(registry, mode=mode, **kwargs)
 
     def get_profile(self, profile: str) -> GatewayProfile:
         try:

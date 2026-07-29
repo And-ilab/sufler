@@ -1,0 +1,28 @@
+slide_num | pptx_source | suggested_russian_caption | image_filename(s)
+--------------------------------------------------------------------------------------------------------------
+NOTE: Unpacking/threading PPTX is primary for section 1.1.4 (figs 1-14). Parameter settings PPTX follows as figs 15-23.
+
+1 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 1. Подключение питания и газа, включение станка | unpacking_threading_slide01_img1.jpeg, unpacking_threading_slide01_img2.jpeg
+2 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 2. Распаковка станка и снятие опорной рамы | unpacking_threading_slide02_img1.jpeg, unpacking_threading_slide02_img2.jpeg, unpacking_threading_slide02_img3.jpeg, unpacking_threading_slide02_img4.jpeg
+3 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 3. Смещение муфт по осям X и Z (на 2–3 см) | unpacking_threading_slide03_img1.jpeg, unpacking_threading_slide03_img2.jpeg, unpacking_threading_slide03_img3.jpeg
+4 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 4. Заправка медной проволоки в акриловые бобины | unpacking_threading_slide04_img1.jpeg, unpacking_threading_slide04_img2.jpeg, unpacking_threading_slide04_img3.jpeg
+5 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 5. Проведение провода через ролики | unpacking_threading_slide05_img1.jpeg
+6 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 6. Схема заправки на натяжителе | unpacking_threading_slide06_img1.jpeg, unpacking_threading_slide06_img2.jpeg
+7 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 7. Провод через натяжитель, антинатяжитель и ролик | unpacking_threading_slide07_img1.jpeg, unpacking_threading_slide07_img2.jpeg
+8 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 8. Ввод провода в наконечник и зажим ножницами | unpacking_threading_slide08_img1.jpeg, unpacking_threading_slide08_img2.jpeg
+9 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 9. Режим AUTO и возврат в HOME (нулевое положение) | unpacking_threading_slide09_img1.jpeg
+10 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 10. Ручной режим MAN.: SCISSORS A1/A2 (BACK/OUT) | unpacking_threading_slide10_img1.jpeg, unpacking_threading_slide10_img2.jpeg
+11 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 11. Автоматический зажим провода кнопками A1 и A2 | unpacking_threading_slide11_img1.jpeg, unpacking_threading_slide11_img2.jpeg
+12 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 12. Фиксация статора (Clamp open / close) | unpacking_threading_slide12_img1.jpeg, unpacking_threading_slide12_img2.jpeg, unpacking_threading_slide12_img3.jpeg
+13 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 13. Запуск автоматической намотки (две зелёные кнопки) | unpacking_threading_slide13_img1.jpeg
+14 | Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx | Рис. 14. Датчики безопасности дверного проёма | unpacking_threading_slide14_img1.jpeg
+
+1 | Parameter settings (2).pptx | Рис. 15. Диалоговое окно аварии после включения экрана | parameter_settings_slide01_img1.jpeg
+2 | Parameter settings (2).pptx | Рис. 16. Переход в меню «Файл» | parameter_settings_slide02_img1.jpeg
+3 | Parameter settings (2).pptx | Рис. 17. Окно ввода пароля (без ввода — OK) | parameter_settings_slide03_img1.jpeg
+4 | Parameter settings (2).pptx | Рис. 18. Создание новой программы или вход в режим редактирования | parameter_settings_slide04_img1.jpeg
+5 | Parameter settings (2).pptx | Рис. 19. Режим редактирования параметров (листание страниц) | parameter_settings_slide05_img1.jpeg
+6 | Parameter settings (2).pptx | Рис. 20. Вход в «Параметры намотки» | parameter_settings_slide06_img1.jpeg
+7 | Parameter settings (2).pptx | Рис. 21. Автоматический режим укладки и параметры витков | parameter_settings_slide07_img1.jpeg
+8 | Parameter settings (2).pptx | Рис. 22. Режим точной укладки по слоям | parameter_settings_slide08_img1.jpeg
+9 | Parameter settings (2).pptx | Рис. 23. Сохранение и переход в автоматическую намотку | parameter_settings_slide09_img1.jpeg, parameter_settings_slide09_img2.jpeg

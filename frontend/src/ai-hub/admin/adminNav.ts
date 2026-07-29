@@ -17,6 +17,8 @@ export type AdminScreen =
   | 'doc_types'
   | 'doc_export'
   | 'external'
+  | 'cc_reports'
+  | 'asr_qa'
 
 export type AdminProfile = 'assistant' | 'cc'
 export type DemoAdminRole = 'kb_admin' | 'cc_admin' | 'doc_admin' | 'auditor'
@@ -68,7 +70,7 @@ export const ADMIN_NAV: readonly AdminNavItem[] = [
   { id: 'model_params', label: 'Параметры модели LLM', group: 'АССИСТЕНТ', profile: 'assistant', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
   { id: 'prompts_assistant', label: 'Промпты ассистента', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
   { id: 'capabilities', label: 'Навыки и инструменты', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
-  { id: 'kb_admin', label: 'Базы знаний', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
+  { id: 'kb_admin', label: 'Базы знаний КЦ', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
   { id: 'qu_admin', label: 'Модуль понимания', group: 'АССИСТЕНТ', roleCodes: QU_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
   { id: 'data_sources', label: 'Источники данных', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
   { id: 'assistant_tools', label: 'Инструменты ассистента', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
@@ -82,6 +84,8 @@ export const ADMIN_NAV: readonly AdminNavItem[] = [
   { id: 'doc_types', label: 'Типы документов', group: 'ДОКУМЕНТЫ', roleCodes: OCR_ADMINS, demoRoles: ['doc_admin', 'auditor'] },
   { id: 'doc_export', label: 'Экспорт документов', group: 'ДОКУМЕНТЫ', roleCodes: OCR_ADMINS, demoRoles: ['doc_admin', 'auditor'] },
   { id: 'external', label: 'Внешние системы', group: 'ССЫЛКИ', roleCodes: ALL_ADMINS, demoRoles: ALL_DEMO_ROLES },
+  { id: 'cc_reports', label: 'Отчётность КЦ', group: 'ССЫЛКИ', roleCodes: ALL_ADMINS, demoRoles: ALL_DEMO_ROLES },
+  { id: 'asr_qa', label: 'QA записей ASR', group: 'ССЫЛКИ', roleCodes: ALL_ADMINS, demoRoles: ALL_DEMO_ROLES },
 ]
 
 export const ADMIN_GROUPS = [...new Set(ADMIN_NAV.map((item) => item.group))]
@@ -91,6 +95,12 @@ export const ADMIN_SCREEN_IDS = [...new Set(ADMIN_NAV.map((item) => item.id))]
 export function adminRoute(item: AdminNavItem): string {
   if (item.id === 'model_params' && item.profile === 'cc') {
     return '/ai-hub/admin/model_params/cc'
+  }
+  if (item.id === 'cc_reports') {
+    return '/admin/reports'
+  }
+  if (item.id === 'asr_qa') {
+    return '/ai-hub/reports/asr'
   }
   return `/ai-hub/admin/${item.id}`
 }

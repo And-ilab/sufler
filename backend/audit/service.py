@@ -35,32 +35,53 @@ logger = logging.getLogger(__name__)
 def _configured_sink_names() -> tuple[str, ...]:
     configured = getattr(settings, "AUDIT_SINKS", ("file",))
     if isinstance(configured, str):
-        return tuple(
+        names = tuple(
             name.strip().lower()
             for name in configured.split(",")
             if name.strip()
         )
-    return tuple(
-        str(name).strip().lower()
-        for name in configured
-        if str(name).strip()
+    else:
+        names = tuple(
+            str(name).strip().lower()
+            for name in configured
+            if str(name).strip()
+        )
+    # Normalize alias: kuma → http (same HttpAuditSink / P2-05 JSON).
+    normalized = tuple("http" if name == "kuma" else name for name in names)
+    # INT-T-AUD-03 / §9.2.6: remote KUMA requires local file retention.
+    if "http" in normalized and "file" not in normalized:
+        logger.warning(
+            "AUDIT_SINKS includes http/kuma without file; "
+            "auto-enabling file fallback for local retention"
+        )
+        return ("file",) + normalized
+    return normalized
+
+
+def resolve_kuma_collector_url() -> str:
+    """VI.3 prod KUMA HTTP collector URL (env)."""
+    return (
+        str(getattr(settings, "AUDIT_KUMA_COLLECTOR_URL", "") or "").strip()
+        or str(getattr(settings, "AUDIT_HTTP_COLLECTOR_URL", "") or "").strip()
     )
 
 
 def configured_sinks() -> tuple[AuditSink, ...]:
     sinks: list[AuditSink] = []
+    collector_url = resolve_kuma_collector_url()
     for name in _configured_sink_names():
         if name == "file":
             sinks.append(FileAuditSink(settings.AUDIT_FILE_PATH))
         elif name == "http":
-            if not settings.AUDIT_HTTP_COLLECTOR_URL:
+            if not collector_url:
                 logger.error(
-                    "HTTP audit sink enabled without collector URL"
+                    "KUMA/HTTP audit sink enabled without collector URL "
+                    "(set AUDIT_KUMA_COLLECTOR_URL or AUDIT_HTTP_COLLECTOR_URL)"
                 )
                 continue
             sinks.append(
                 HttpAuditSink(
-                    settings.AUDIT_HTTP_COLLECTOR_URL,
+                    collector_url,
                     settings.AUDIT_HTTP_TIMEOUT_SECONDS,
                 )
             )

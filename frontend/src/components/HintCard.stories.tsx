@@ -19,4 +19,14 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Compact: Story = { args: { defaultExpanded: false } }
-export const Expanded: Story = { args: { defaultExpanded: true } }
+export const Expanded: Story = {
+  args: {
+    defaultExpanded: true,
+    relevance: '96%',
+    relevanceStatus: 'success',
+    suzLink: {
+      title: 'Оформление банковской карты',
+      href: 'https://suz.local/articles/101',
+    },
+  },
+}

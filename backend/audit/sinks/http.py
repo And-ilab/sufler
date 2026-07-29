@@ -7,7 +7,10 @@ from audit.schema import AuditEvent
 
 
 class HttpAuditSink:
-    """Minimal KUMA-compatible JSON HTTP collector sink."""
+    """KUMA-compatible JSON HTTP collector sink (VI.3 / AUDIT_KUMA_COLLECTOR_URL).
+
+    Posts the unchanged P2-05 ``AuditEvent`` JSON envelope; expects HTTP 2xx.
+    """
 
     def __init__(self, url: str, timeout_seconds: float = 5.0) -> None:
         if not url:

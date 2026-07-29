@@ -8,6 +8,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from core.model_registry import (  # noqa: E402
     ModelRegistry,
+    REQUIRED_DEPLOYMENT_PROFILES,
     REQUIRED_PROFILES,
     REQUIRED_SLOTS,
 )
@@ -19,6 +20,10 @@ class ModelRegistryTest(unittest.TestCase):
 
         self.assertEqual(set(registry.slots), set(REQUIRED_SLOTS))
         self.assertEqual(set(registry.profiles), set(REQUIRED_PROFILES))
+        self.assertEqual(
+            set(registry.deployment_profiles),
+            set(REQUIRED_DEPLOYMENT_PROFILES),
+        )
 
         asr = registry.get_slot("asr")
         self.assertEqual(asr.name, "asr")
@@ -93,6 +98,14 @@ class ModelRegistryTest(unittest.TestCase):
         self.assertEqual(llm.kpi["response_chars_max"], 500)
         self.assertEqual(llm.kpi["latency_p95_ms_max"], 2000)
         self.assertEqual(llm.kpi["hallucination_percent_max"], 3)
+
+        deploy = registry.get_deployment_profile("test")
+        self.assertEqual(deploy.name, "test")
+        self.assertEqual(deploy.status, "approved_dev")
+        self.assertFalse(deploy.gpu_required)
+        self.assertEqual(deploy.asr_mode, "stub")
+        self.assertEqual(deploy.llm_gateway_mode, "stub")
+        self.assertIn("sufler_cc", deploy.llm_profiles)
 
 
 if __name__ == "__main__":

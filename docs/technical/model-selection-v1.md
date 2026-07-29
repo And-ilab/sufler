@@ -108,7 +108,7 @@ Fallback:
   явный degraded status;
 - внешний cloud ASR не включать автоматически.
 
-Главные риски: нет реальных dual-leg WAV, MRCP/WS binding не закрыт, model
+Главные риски: нет реальных dual-leg WAV, MRCP/WS binding не закрыт (**VII.5 D1** — human tracker [`docs/development/vii5-decisions-tracker.md`](../development/vii5-decisions-tracker.md)), model
 weights RU/EN не зафиксированы, hardware sizing отсутствует.
 
 ### Embedding and `kb_cc_production`
@@ -337,6 +337,8 @@ Fallback:
 
 ## Cross-cutting risks
 
+Open contractual decisions that block production model/transport sign-off are tracked for **humans** in [`docs/development/vii5-decisions-tracker.md`](../development/vii5-decisions-tracker.md) (VII.5 **D1** MRCP vs WS, **D2** СУЗ, **D3** KUMA, **D4** Assistant tools; plus **MS-LLM** vendor gate). Do not auto-close those rows from benchmark scripts.
+
 | Risk | Slots | Impact | Required action |
 | --- | --- | --- | --- |
 | No measured JSON | All | Production choice cannot be audited | Run suites on versioned datasets and target VM |
@@ -349,6 +351,8 @@ Fallback:
 | Shared endpoint workload unknown | LLM profiles | Cross-profile starvation | Test mixed workload and quotas |
 | Rollback compatibility not proven | All | Failed model update can break runtime | Package model/config/index as compatible release |
 | Secrets/PII in logs | LLM/OCR/ASR | Security incident | Redaction tests and SIEM audit |
+| VII.5 D1 transport unresolved | ASR, telephony | FR-ASR-04 e2e not proven | Human close D1 in vii5-decisions-tracker |
+| LLM vendor / MS-LLM unresolved | LLM profiles | Cannot set `prod_candidate` | Human SIGNOFF + tracker MS-LLM row |
 
 ## Global fallback policy
 

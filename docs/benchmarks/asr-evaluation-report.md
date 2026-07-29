@@ -106,6 +106,7 @@ asr:
 [VII.5.2 D1](../modules/ai-hub/tz-unified-v1.4.md#vii52-открытые-решения-зависимости-внедрения)
 и вопросы №1–2
 [VII.5.3](../modules/ai-hub/tz-unified-v1.4.md#vii53-реестр-вопросов-согласованные-сроки-и-воркшопы).
+**Human status/owner/deadline:** [`docs/development/vii5-decisions-tracker.md`](../development/vii5-decisions-tracker.md) (do not auto-close).
 
 | Вариант | Преимущества | Риски / неизвестные | Что требуется для закрытия |
 | --- | --- | --- | --- |

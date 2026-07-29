@@ -24,6 +24,22 @@
   min-height: 100vh;
 }
 
+.portal-route__reports-entry {
+  position: relative;
+  z-index: 5;
+  max-width: 420px;
+  margin: var(--space-5);
+}
+
+.portal-route__reports-entry .ui-card {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.portal-route__reports-entry h2 {
+  margin: 0;
+}
+
 .portal-route__auth-status {
   position: fixed;
   top: var(--space-3);

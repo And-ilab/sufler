@@ -91,3 +91,183 @@ class ModelRegistrySettings(models.Model):
 
     def __str__(self) -> str:
         return self.profile
+
+
+class ContactCenterKnowledgeBase(models.Model):
+    """Admin-managed KB for contact-center sufler (FR-CC-08)."""
+
+    STATUS_IDLE = "idle"
+    STATUS_INDEXING = "indexing"
+    STATUS_READY = "ready"
+    STATUS_ERROR = "error"
+    STATUS_CHOICES = (
+        (STATUS_IDLE, "Idle"),
+        (STATUS_INDEXING, "Indexing"),
+        (STATUS_READY, "Ready"),
+        (STATUS_ERROR, "Error"),
+    )
+
+    name = models.CharField(max_length=200, unique=True)
+    slug = models.SlugField(max_length=200, unique=True)
+    scope = models.CharField(max_length=64, default="contact_center")
+    description = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_IDLE,
+        db_index=True,
+    )
+    status_message = models.CharField(max_length=500, blank=True)
+    document_count = models.PositiveIntegerField(default=0)
+    chunk_count = models.PositiveIntegerField(default=0)
+    last_reindexed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.CharField(max_length=150, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class KnowledgeBaseDocument(models.Model):
+    """Uploaded source document for a contact-center KB (FR-CC-13)."""
+
+    STATUS_UPLOADED = "uploaded"
+    STATUS_INDEXED = "indexed"
+    STATUS_ERROR = "error"
+    STATUS_CHOICES = (
+        (STATUS_UPLOADED, "Uploaded"),
+        (STATUS_INDEXED, "Indexed"),
+        (STATUS_ERROR, "Error"),
+    )
+
+    knowledge_base = models.ForeignKey(
+        ContactCenterKnowledgeBase,
+        on_delete=models.CASCADE,
+        related_name="documents",
+    )
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=128, blank=True)
+    size_bytes = models.PositiveIntegerField(default=0)
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_UPLOADED,
+        db_index=True,
+    )
+    status_message = models.CharField(max_length=500, blank=True)
+    extracted_text = models.TextField(blank=True)
+    chunk_count = models.PositiveIntegerField(default=0)
+    article_id = models.BigIntegerField(unique=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    indexed_at = models.DateTimeField(null=True, blank=True)
+    uploaded_by = models.CharField(max_length=150, blank=True)
+
+    class Meta:
+        ordering = ("-uploaded_at",)
+
+    def __str__(self) -> str:
+        return self.filename
+
+
+class AssistantKnowledgeBase(models.Model):
+    """Assistant module KB namespace ``assistant_*`` (isolated from cc_production)."""
+
+    STATUS_IDLE = "idle"
+    STATUS_READY = "ready"
+    STATUS_ERROR = "error"
+    STATUS_CHOICES = (
+        (STATUS_IDLE, "Idle"),
+        (STATUS_READY, "Ready"),
+        (STATUS_ERROR, "Error"),
+    )
+
+    name = models.CharField(max_length=200, unique=True)
+    slug = models.SlugField(max_length=200, unique=True)
+    scope = models.CharField(max_length=64, default="department")
+    description = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_IDLE,
+        db_index=True,
+    )
+    document_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.CharField(max_length=150, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self) -> str:
+        return self.slug
+
+
+class AssistantPromptTemplate(models.Model):
+    """CRUD prompt templates for assistant_bank (III.10.1 / III.6)."""
+
+    TYPE_SYSTEM = "system"
+    TYPE_TASK = "task"
+    TYPE_SCOPE = "scope"
+    TYPE_CHOICES = (
+        (TYPE_SYSTEM, "System"),
+        (TYPE_TASK, "Task"),
+        (TYPE_SCOPE, "Scope"),
+    )
+    STATUS_DRAFT = "draft"
+    STATUS_PUBLISHED = "published"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_PUBLISHED, "Published"),
+    )
+
+    name = models.CharField(max_length=200)
+    prompt_type = models.CharField(
+        max_length=16,
+        choices=TYPE_CHOICES,
+        default=TYPE_TASK,
+        db_index=True,
+    )
+    scope = models.CharField(max_length=64, default="bank")
+    body = models.TextField()
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+        db_index=True,
+    )
+    version = models.PositiveIntegerField(default=1)
+    kb_slug = models.SlugField(max_length=200, blank=True, default="")
+    updated_by = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("prompt_type", "name")
+
+    def __str__(self) -> str:
+        return f"{self.name} v{self.version}"
+
+
+class AssistantCapability(models.Model):
+    """Tools / skills registry stub for «Навыки» (III.6 / VII.5 D4)."""
+
+    code = models.SlugField(max_length=64, unique=True)
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    enabled = models.BooleanField(default=True)
+    deep_link = models.CharField(max_length=128, blank=True)
+    category = models.CharField(max_length=64, default="tool")
+    sort_order = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("sort_order", "name")
+        verbose_name_plural = "Assistant capabilities"
+
+    def __str__(self) -> str:
+        return self.code

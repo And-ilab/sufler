@@ -78,12 +78,18 @@ docker compose ps
 Основные URL:
 
 - приложение: <http://localhost:8000/>
-- текущий health URL backend: <http://localhost:8000/client-info/>
+- **health (db + redis):** <http://localhost:8000/health/>
+- legacy smoke: <http://localhost:8000/client-info/>
 - Django admin: <http://localhost:8000/admin/>
 - MinIO Console: <http://localhost:9001/>
 
-`/client-info/` используется Docker healthcheck и должен отвечать HTTP 200.
-Отдельный диагностический `/health/` в backend пока не реализован.
+`GET /health/` returns HTTP **200** with JSON body including `checks.database` and
+`checks.redis` (both `status: ok`). Used by Docker healthchecks on the TEST
+prod-like stack (`infra/test/docker-compose.prod-like.yml`). WebSocket traffic
+is served by **Daphne** via `sufler.asgi:application` (`/ws/sufler/…`).
+
+On bank TEST via nginx: `https://<fqdn>/health/` — see
+[`infra/test/README.md`](../infra/test/README.md).
 
 Логи и остановка:
 
@@ -148,7 +154,7 @@ $env:AUTH_MOCK_LDAP_DEFAULT_PASSWORD = "local-dev-secret"
 
 Аккаунты `dev-role-01`…`dev-role-13` соответствуют 13 ролям I.4.
 `dev-role-01` может войти в Django admin. Для production требуется
-`AUTH_MODE=ldap`, реальные AD-группы и human sign-off P7-03.
+`AUTH_MODE=ldap` / `AUTH_BACKEND=ldaps`, реальные AD-группы (VII.5 C2) и human sign-off.
 
 Полная конфигурация и примеры decorators:
 [`auth/README.md`](auth/README.md).
@@ -164,6 +170,14 @@ docker compose exec celery-worker celery -A sufler inspect ping --timeout=10
 ```
 
 Ожидаемый ответ содержит `pong`.
+
+На bank TEST (prod-like):
+
+```bash
+cd infra/test
+./deploy.sh support-verify
+# redis-cli PONG · celery sufler.ping → pong · MinIO upload/download
+```
 
 Для локального worker на Windows сначала запустите Redis через Docker:
 
@@ -187,6 +201,28 @@ $env:CELERY_RESULT_BACKEND = "redis://localhost:6379/1"
 ```
 
 Эти же проверки выполняет GitHub Actions.
+
+## OpenAPI / Postman
+
+- Schema: `GET /api/schema/` (Accept: `application/json`)
+- Swagger UI (DEBUG): <http://127.0.0.1:8000/api/docs/>
+- Collection: [`docs/api/postman_collection.json`](../docs/api/postman_collection.json)
+
+```powershell
+.\.venv\Scripts\python.exe -m api_docs.export_postman
+```
+
+## KB / QU ops (FR-UND-08)
+
+Admin step-by-step (no developer required):
+
+| Runbook | When |
+| --- | --- |
+| [`docs/runbooks/reindex.md`](../docs/runbooks/reindex.md) | Rebuild `cc_production` / Hub KB index |
+| [`docs/runbooks/qu-retrain.md`](../docs/runbooks/qu-retrain.md) | Verify or manually enqueue `qu.qu_retrain` |
+| [`docs/runbooks/rollback-qu.md`](../docs/runbooks/rollback-qu.md) | Recover after bad index / эталоны |
+
+Package notes: [`ingest/README.md`](ingest/README.md), [`qu/README.md`](qu/README.md).
 
 ## ASR
 
@@ -264,7 +300,8 @@ docker compose up --build -d backend celery-worker
 ```
 
 Backend стартует только после healthy PostgreSQL, Redis и MinIO. Повторяющиеся
-`GET /client-info/` со статусом 200 в логах — нормальная работа healthcheck.
+`GET /health/` со статусом 200 в логах — нормальная работа healthcheck
+(на TEST prod-like; legacy `/client-info/` остаётся для smoke).
 
 ## Legacy compatibility
 

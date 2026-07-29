@@ -1,0 +1,413 @@
+================================================================================
+PASSPORT DEEP INSPECTION
+Source: c:\Users\user\Downloads\Паспорт_станка_GW_DS09_ГОСТ_2_601_2019_1.docx
+Size: 3869195 bytes
+================================================================================
+
+## 0. FINSELVAT DETAILS SUMMARY (from finselvat_details.txt)
+------------------------------------------------------------
+=== FINSELVAT DETAILS ===
+Source (letterhead header): C:\Users\user\Downloads\фирм бланк.docx
+Part: word/header3.xml
+
+Legal name: Общество с ограниченной ответственностью «ФИНСЕЛЬВАТ» (ООО «Финсельват»)
+Address: Минская обл., Минский р-н, Новодворский сельсовет, д. Большое Стиклево, д. 40, к. 2, оф. 52
+UNP: 692204462
+Phone (Приемная): +375 29 658 53 63
+Email: finselvat.info@yandex.ru
+Bank account (р/с): BY21ALFA30122C18740010270000
+Bank: ЗАО «Альфа-банк», г. Минск, ул. Сурганова, 43-47
+Bank code (SWIFT/код): ALFABY2X
+Web: www.цифровая.бел
+
+Other mentions:
+- Role in supply docs: Поставщик (договор поставки №2802/1 с ОАО «Радиоволна»)
+- Director on firm letter: Г. В. Есис (Есис Геннадий Владимирович)
+- On TZ_ERIP_v1.1.docx approval block: Директор ООО «Финсельват» — А.В. Пономарев
+- Manual Word comment requests inserting ООО "Финсельват" as поставщик / официальный представитель в РБ / сервисный центр в РБ
+
+Also found references in:
+- C:\Users\user\Downloads\Rukovodstvo_po_ekspluatacii_dvuhstancionnaya_namotochnaya_mashina1.docx (comments only)
+- C:\Users\user\Downloads\Telegram Desktop\TZ_ERIP_v1.1.docx (party name, no full реквизиты in body)
+- Project _extracted comments / analyze scripts (name only)
+
+------------------------------------------------------------
+
+## 1. FIRST TABLE — full cell text (manufacturer / supplier / buyer)
+------------------------------------------------------------
+Dimensions: 1 rows × 2 cols
+
+--- Row 0 (2 cells) ---
+  [0,0]:
+    ПРОИЗВОДИТЕЛЬ:
+    GREWIN INDUSTRIAL GROUP CO., LTD.
+    Add: 4th floor, A-A3 zone aviation business area, Dongli Distr, Tianjin, China
+    Tel/WhatsApp: +8618622096679
+    Mail: admin@coilwindingmachinechina.com
+    Web: www.coilwindingmachinechina.com
+  [0,1]:
+    ПОСТАВЩИК / ПОКУПАТЕЛЬ:
+    Приложение к договору поставки № 3004
+    Согласованная КД к договору № 2802/1 от 28.02.2024
+
+
+## 2. EVERY TABLE — index, dims, borders, sample first row
+------------------------------------------------------------
+### Table [0] — 1×2
+  Borders complete?: NO — no tblBorders and no tcBorders
+  tblBorders present: False
+  Cells total: 2; with tcBorders: 0; incomplete tcBorders: 0
+  cell[0] tcBorders: (none — inherit tblBorders)
+  cell[1] tcBorders: (none — inherit tblBorders)
+  Sample first row cells:
+    [0] ПРОИЗВОДИТЕЛЬ: | GREWIN INDUSTRIAL GROUP CO., LTD. | Add: 4th floor, A-A3 zone aviation business area, Dongli Distr, ...
+    [1] ПОСТАВЩИК / ПОКУПАТЕЛЬ: | Приложение к договору поставки № 3004 | Согласованная КД к договору № 2802/1 от 28.02.2024
+
+### Table [1] — 5×2
+  Borders complete?: INCOMPLETE — all 10 cells have only top+bottom (left/right MISSING); no tblBorders
+  tblBorders present: False
+  Cells total: 10; with tcBorders: 10; incomplete tcBorders: 10
+  cell[0] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  cell[1] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  Sample first row cells:
+    [0] Наименование оборудования
+    [1] Двухстанционный станок для внутренней намотки статоров (Double-station stator winding machine / inner winding machine)
+
+### Table [2] — 9×2
+  Borders complete?: INCOMPLETE — all 18 cells have only top+bottom (left/right MISSING); no tblBorders
+  tblBorders present: False
+  Cells total: 18; with tcBorders: 18; incomplete tcBorders: 18
+  cell[0] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  cell[1] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  Sample first row cells:
+    [0] Параметр
+    [1] Значение / Описание
+
+### Table [3] — 4×2
+  Borders complete?: INCOMPLETE — all 8 cells have only top+bottom (left/right MISSING); no tblBorders
+  tblBorders present: False
+  Cells total: 8; with tcBorders: 8; incomplete tcBorders: 8
+  cell[0] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  cell[1] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  Sample first row cells:
+    [0] Параметр
+    [1] Значение / Требование
+
+### Table [4] — 5×2
+  Borders complete?: INCOMPLETE — all 10 cells have only top+bottom (left/right MISSING); no tblBorders
+  tblBorders present: False
+  Cells total: 10; with tcBorders: 10; incomplete tcBorders: 10
+  cell[0] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  cell[1] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  Sample first row cells:
+    [0] Ось / Механизм
+    [1] Параметры и приводы
+
+### Table [5] — 5×2
+  Borders complete?: INCOMPLETE — all 10 cells have only top+bottom (left/right MISSING); no tblBorders
+  tblBorders present: False
+  Cells total: 10; with tcBorders: 10; incomplete tcBorders: 10
+  cell[0] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  cell[1] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  Sample first row cells:
+    [0] Параметр
+    [1] Значение
+
+### Table [6] — 14×3
+  Borders complete?: INCOMPLETE — all 42 cells have only top+bottom (left/right MISSING); no tblBorders
+  tblBorders present: False
+  Cells total: 42; with tcBorders: 42; incomplete tcBorders: 42
+  cell[0] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  cell[1] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  cell[2] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  Sample first row cells:
+    [0] Категория
+    [1] Наименование компонента
+    [2] Производитель / Бренд
+
+### Table [7] — 16×4
+  Borders complete?: INCOMPLETE — all 55 cells have only top+bottom (left/right MISSING); no tblBorders
+  tblBorders present: False
+  Cells total: 55; with tcBorders: 55; incomplete tcBorders: 55
+  cell[0] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  cell[1] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  cell[2] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  cell[3] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  Sample first row cells:
+    [0] №
+    [1] Наименование
+    [2] Количество
+    [3] Примечание
+
+### Table [8] — 4×3
+  Borders complete?: INCOMPLETE — all 12 cells have only top+bottom (left/right MISSING); no tblBorders
+  tblBorders present: False
+  Cells total: 12; with tcBorders: 12; incomplete tcBorders: 12
+  cell[0] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  cell[1] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  cell[2] tcBorders: top=val=single sz=6 color=cbd5e0 space=0, left=MISSING, bottom=val=single sz=6 color=cbd5e0 space=0, right=MISSING
+    MISSING/OPEN edges: left=MISSING, right=MISSING
+  Sample first row cells:
+    [0] Уровень доступа
+    [1] Категория персонала
+    [2] Разрешенные функции и права
+
+### Table [9] — 1×2
+  Borders complete?: NO — no tblBorders and no tcBorders
+  tblBorders present: False
+  Cells total: 2; with tcBorders: 0; incomplete tcBorders: 0
+  cell[0] tcBorders: (none — inherit tblBorders)
+  cell[1] tcBorders: (none — inherit tblBorders)
+  Sample first row cells:
+    [0] Представитель ОТК / Поставщика: | Главный инженер _________________ / Пономарев А.В. / | М.П.                  Дата: ...
+    [1] Представитель Покупателя: | Директор _________________ / Бышкало С.М. / | М.П.                  Дата: «___» _________...
+
+
+## 3. EVERY IMAGE — media, size, location, caption «Рис.»?
+------------------------------------------------------------
+NOTE: image6.png is a ~0.8 mm hairline divider reused as a section rule, NOT a figure.
+Real photo/diagram figures needing captions: image2, image4, image1, image3.
+
+### Image/drawing [1] image2.png  [FIGURE]
+  rId=rId9; display size ≈ 155.0×250.3 mm
+  Preceding heading: [Heading2] 1. Основные сведения об изделии
+  Nearby paragraph text: 1. Основные сведения об изделии
+  Caption «Рис.» follows?: NO
+  Following paras: (none / next is non-text)
+
+### Image/drawing [2] (drawing without a:blip — shape/line?)  [HAIRLINE DIVIDER]
+  rId=None; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading2] 1. Основные сведения об изделии
+  Nearby paragraph text: 1. Основные сведения об изделии
+  Caption «Рис.» follows?: NO
+  Following paras: (none / next is non-text)
+
+### Image/drawing [3] image6.png  [HAIRLINE DIVIDER]
+  rId=rId10; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading2] 1. Основные сведения об изделии
+  Nearby paragraph text: 1. Основные сведения об изделии
+  Caption «Рис.» follows?: NO
+  Following paras: (none / next is non-text)
+
+### Image/drawing [4] (drawing without a:blip — shape/line?)  [HAIRLINE DIVIDER]
+  rId=None; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading3] 2.1. Технические характеристики процесса намотки
+  Nearby paragraph text: 2.1. Технические характеристики процесса намотки
+  Caption «Рис.» follows?: NO
+  Following paras: (none / next is non-text)
+
+### Image/drawing [5] image6.png  [HAIRLINE DIVIDER]
+  rId=rId10; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading3] 2.1. Технические характеристики процесса намотки
+  Nearby paragraph text: 2.1. Технические характеристики процесса намотки
+  Caption «Рис.» follows?: NO
+  Following paras: (none / next is non-text)
+
+### Image/drawing [6] image4.png  [FIGURE]
+  rId=rId11; display size ≈ 165.1×115.7 mm
+  Preceding heading: [Heading3] 2.4. Габаритные размеры и внешний вид
+  Nearby paragraph text: 2.4. Габаритные размеры и внешний вид
+  Caption «Рис.» follows?: NO
+  Following paras: (none / next is non-text)
+
+### Image/drawing [7] image1.png  [FIGURE]
+  rId=rId12; display size ≈ 96.6×139.4 mm
+  Preceding heading: [Heading3] 2.4. Габаритные размеры и внешний вид
+  Nearby paragraph text: 2.4. Габаритные размеры и внешний вид
+  Caption «Рис.» follows?: NO
+  Following paras: (none / next is non-text)
+
+### Image/drawing [8] (drawing without a:blip — shape/line?)  [HAIRLINE DIVIDER]
+  rId=None; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading3] 3.1. Ключевые покупные комплектующие и бренды
+  Nearby paragraph text: 3.1. Ключевые покупные комплектующие и бренды
+  Caption «Рис.» follows?: NO
+  Following paras: (none / next is non-text)
+
+### Image/drawing [9] image6.png  [HAIRLINE DIVIDER]
+  rId=rId10; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading3] 3.1. Ключевые покупные комплектующие и бренды
+  Nearby paragraph text: 3.1. Ключевые покупные комплектующие и бренды
+  Caption «Рис.» follows?: NO
+  Following paras: (none / next is non-text)
+
+### Image/drawing [10] (drawing without a:blip — shape/line?)  [HAIRLINE DIVIDER]
+  rId=None; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading3] 4.1. Устройства обеспечения безопасности
+  Nearby paragraph text: 4.1. Устройства обеспечения безопасности
+  Caption «Рис.» follows?: NO
+  Following paras: Двуручный запуск цикла обработки (исключает попадание рук оператора в рабочую зону). || Оптическая световая завеса (барьерный датчик безопасности Autonics) по периметру рабочей зоны. || Защитный прозрачный кабинет с блокировкой работы при открытии дверей. || 4.2. Системы управления доступом (Power Management)
+
+### Image/drawing [11] image6.png  [HAIRLINE DIVIDER]
+  rId=rId10; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading3] 4.1. Устройства обеспечения безопасности
+  Nearby paragraph text: 4.1. Устройства обеспечения безопасности
+  Caption «Рис.» follows?: NO
+  Following paras: Двуручный запуск цикла обработки (исключает попадание рук оператора в рабочую зону). || Оптическая световая завеса (барьерный датчик безопасности Autonics) по периметру рабочей зоны. || Защитный прозрачный кабинет с блокировкой работы при открытии дверей. || 4.2. Системы управления доступом (Power Management)
+
+### Image/drawing [12] (drawing without a:blip — shape/line?)  [HAIRLINE DIVIDER]
+  rId=None; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading2] 5. Упаковка, транспортирование и хранение
+  Nearby paragraph text: Оборудование упаковывается в специальный жесткий деревянный ящик с внутренним защитным пенопластовым наполнением для предотвращения повреждений от ударов и вибраций.
+  Caption «Рис.» follows?: NO
+  Following paras: На внешнюю поверхность деревянного ящика наносится маркировка манипуляционными знаками (включая указатель верха «Верх»). || Небольшие комплектующие и детали упаковываются в индивидуальные картонные коробки с амортизационным материалом. || 6. Свидетельство о приемке и консервации
+
+### Image/drawing [13] image6.png  [HAIRLINE DIVIDER]
+  rId=rId10; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading2] 5. Упаковка, транспортирование и хранение
+  Nearby paragraph text: Оборудование упаковывается в специальный жесткий деревянный ящик с внутренним защитным пенопластовым наполнением для предотвращения повреждений от ударов и вибраций.
+  Caption «Рис.» follows?: NO
+  Following paras: На внешнюю поверхность деревянного ящика наносится маркировка манипуляционными знаками (включая указатель верха «Верх»). || Небольшие комплектующие и детали упаковываются в индивидуальные картонные коробки с амортизационным материалом. || 6. Свидетельство о приемке и консервации
+
+### Image/drawing [14] image3.png  [FIGURE]
+  rId=rId13; display size ≈ 165.1×167.2 mm
+  Preceding heading: [Heading2] 5. Упаковка, транспортирование и хранение
+  Nearby paragraph text: Небольшие комплектующие и детали упаковываются в индивидуальные картонные коробки с амортизационным материалом.
+  Caption «Рис.» follows?: NO
+  Following paras: 6. Свидетельство о приемке и консервации || Станок намоточный двухстанционный модели GW-DS09, заводской номер ______________, изготовлен и принят в соответствии с требованиями технической документации и признан годным к эксплуатации.
+
+### Image/drawing [15] (drawing without a:blip — shape/line?)  [HAIRLINE DIVIDER]
+  rId=None; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading2] 6. Свидетельство о приемке и консервации
+  Nearby paragraph text: Станок намоточный двухстанционный модели GW-DS09, заводской номер ______________, изготовлен и принят в соответствии с требованиями технической документации и признан годным к эксплуатации.
+  Caption «Рис.» follows?: NO
+  Following paras: (none / next is non-text)
+
+### Image/drawing [16] image6.png  [HAIRLINE DIVIDER]
+  rId=rId10; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading2] 6. Свидетельство о приемке и консервации
+  Nearby paragraph text: Станок намоточный двухстанционный модели GW-DS09, заводской номер ______________, изготовлен и принят в соответствии с требованиями технической документации и признан годным к эксплуатации.
+  Caption «Рис.» follows?: NO
+  Following paras: (none / next is non-text)
+
+### Image/drawing [17] (drawing without a:blip — shape/line?)  [HAIRLINE DIVIDER]
+  rId=None; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading2] 7. Гарантийные обязательства
+  Nearby paragraph text: Изготовитель гарантирует соответствие станка требованиям технической документации при соблюдении потребителем условий транспортирования, хранения, монтажа и эксплуатации.
+  Caption «Рис.» follows?: NO
+  Following paras: Гарантийный срок эксплуатации составляет 12 месяцев со дня ввода оборудования в эксплуатацию.
+
+### Image/drawing [18] image6.png  [HAIRLINE DIVIDER]
+  rId=rId10; display size ≈ 165.4×0.8 mm
+  Preceding heading: [Heading2] 7. Гарантийные обязательства
+  Nearby paragraph text: Изготовитель гарантирует соответствие станка требованиям технической документации при соблюдении потребителем условий транспортирования, хранения, монтажа и эксплуатации.
+  Caption «Рис.» follows?: NO
+  Following paras: Гарантийный срок эксплуатации составляет 12 месяцев со дня ввода оборудования в эксплуатацию.
+
+Total drawings/images walked: 18
+Media files in package (5):
+  - image1.png
+  - image2.png
+  - image3.png
+  - image4.png
+  - image6.png
+
+## 4. HEADER AND FOOTER CONTENT (all sections)
+------------------------------------------------------------
+sectPr count: 1
+Header/footer ZIP parts present: NONE
+FINDING: Document has NO word/header*.xml and NO word/footer*.xml parts.
+sectPr has NO headerReference / footerReference.
+pgMar header=0, footer=0 — footer distance is zero.
+Comment 1 («с нижним колонтитулом что-то не то») is explained by:
+  (a) missing footer entirely (no page numbers / no ГОСТ footer), and/or
+  (b) image2.png ≈ 155×250 mm on Letter page (279 mm high) with 25 mm margins
+      → printable height ≈ 229 mm, so the figure overflows the page bottom.
+
+### Section [0]
+  headerReference count: 0
+  footerReference count: 0
+  pgSz: w=12240 h=15840 orient=portrait
+        ≈ 215.90 mm (12240 twips) × 279.40 mm (15840 twips)  (US Letter, not A4)
+  pgMar: top=25.40 mm (1440 twips), bottom=25.40 mm (1440 twips), left=25.40 mm (1440 twips), right=25.40 mm (1440 twips), header=0.00 mm (0 twips), footer=0.00 mm (0 twips)
+  pgBorders present?: NO
+
+### Header/footer full text
+  (none — parts absent; no text to extract)
+
+## 5. PAGE SETUP SUMMARY
+------------------------------------------------------------
+Section [0]:
+  Size: 215.90 mm (12240 twips) × 279.40 mm (15840 twips) (US Letter 8.5×11 in)
+  Margins: top=25.40 mm (1440 twips), bottom=25.40 mm (1440 twips), left=25.40 mm (1440 twips), right=25.40 mm (1440 twips)
+  Page borders (pgBorders): absent
+
+## 6. FONT SIZES USED
+------------------------------------------------------------
+Document defaults sz: 11 pt
+Style-defined sizes:
+  Heading1: 20 pt
+  Heading2: 15 pt
+  Heading3: 12 pt
+  Heading4: 12 pt
+  Heading5: 9 pt
+  Heading6: 8 pt
+  Subtitle: 24 pt
+  Title: 36 pt
+Direct w:sz / w:szCs counts in document.xml:
+  10 pt: 365
+  10 pt (szCs): 365
+  14 pt: 4
+  14 pt (szCs): 4
+  11 pt: 1
+  11 pt (szCs): 1
+
+## 7. UNIQUE TABLE BORDER STYLES FOUND
+------------------------------------------------------------
+Total unique signatures: 2
+[0] count=10 examples=['table[0]', 'table[1]', 'table[2]']
+  tblBorders{top:NO_BORDERS_ELEMENT; left:NO_BORDERS_ELEMENT; bottom:NO_BORDERS_ELEMENT; right:NO_BORDERS_ELEMENT; insideH:NO_BORDERS_ELEMENT; insideV:NO_BORDERS_ELEMENT; tl2br:NO_BORDERS_ELEMENT; tr2bl:NO_BORDERS_ELEMENT}
+
+[1] count=165 examples=['table[1]', 'table[1]', 'table[1]', 'table[1]', 'table[1]']
+  tcBorders{top:val=single sz=6 color=cbd5e0 space=0; left:MISSING; bottom:val=single sz=6 color=cbd5e0 space=0; right:MISSING; insideH:MISSING; insideV:MISSING; tl2br:MISSING; tr2bl:MISSING}
+
+
+================================================================================
+## 8. ACTIONABLE SUMMARY — comments 0–8 (what must change)
+================================================================================
+
+Comment 0 — first table right cell (ПОСТАВЩИК / ПОКУПАТЕЛЬ):
+  MUST: rename label to ПОСТАВЩИК only (убрать «Покупатель»).
+  MUST: replace contract placeholders with ООО «ФИНСЕЛЬВАТ» requisites
+        (legal name, address, УНП 692204462, р/с, банк, ALFABY2X, web) from finselvat_details.
+  MUST: add «официальный представитель / сервисный центр на территории РБ».
+  MUST: add service contacts from comment: +375 29 667 88 73, HelpDesk@digitranslab.com
+        (letterhead also has +375 29 658 53 63 / finselvat.info@yandex.ru — keep service line as in comment).
+  NOTE: comment spelling «Финстельват» → correct «ФИНСЕЛЬВАТ».
+
+Comments 2–6 — identity/data tables («Доделать рамку»):
+  MUST: add full grid borders on tables [1]…[8] (and ideally [0],[9]):
+        currently tcBorders have ONLY top+bottom single sz=6 color=cbd5e0; left/right MISSING;
+        no tblBorders anywhere. Set left/right (+ insideV) or use complete tblBorders.
+
+Comment 1 — image2.png under «1. Основные сведения…»:
+  MUST: add caption after figure («Рис. …»).
+  MUST: fix page-bottom issue: no footer parts exist; image2 is ~250 mm tall on Letter
+        (overflows printable area). Scale image down and/or add proper footer (page no / doc id).
+
+Comments 7–8 — image4.png and image1.png under «2.4. Габаритные размеры…»:
+  MUST: add «Рис.» captions after each (Подписать). Currently NO figure has a «Рис.» caption.
+
+Optional related (not in comments 0–8 but same pattern):
+  - image3.png under §5 also lacks «Рис.» caption.
+  - image6.png occurrences are hairline rules — do not caption those.
+  - Page is US Letter; ГОСТ docs often A4 — confirm if size change is required.

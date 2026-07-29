@@ -4,15 +4,15 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { Button, Card, Fab, HintCard, StatusBadge } from '../../components'
+import { Card, Fab, HintCard, StatusBadge } from '../../components'
+import { AssistantChat } from '../../assistant/AssistantChat'
+import { OcrDocumentsPanel } from '../ocr/OcrDocumentsPanel'
 import {
   getHubPanelTabs,
   isHubAdminRole,
   type HubPanelTab,
 } from './hubAccess'
 import './AiHubPanel.css'
-
-type DocumentSubTab = 'queue' | 'upload' | 'review'
 
 export interface AiHubPanelProps {
   roles: readonly string[]
@@ -22,6 +22,7 @@ export interface AiHubPanelProps {
   initialOpen?: boolean
   initialTab?: HubPanelTab
   initialPinned?: boolean
+  initialDocumentSubTab?: 'queue' | 'upload' | 'review'
 }
 
 const TAB_LABELS: Record<HubPanelTab, string> = {
@@ -38,6 +39,7 @@ export function AiHubPanel({
   initialOpen = false,
   initialTab,
   initialPinned = false,
+  initialDocumentSubTab = 'queue',
 }: AiHubPanelProps) {
   const roleTabs = useMemo(
     () => getHubPanelTabs(roles, rbacTabs),
@@ -175,7 +177,11 @@ export function AiHubPanel({
 
           <main className="hub-panel__body">
             {activeTab === 'assistant' && <AssistantPanel />}
-            {activeTab === 'documents' && <DocumentsPanel />}
+            {activeTab === 'documents' && (
+              <div className="hub-tab-content hub-tab-content--documents">
+                <OcrDocumentsPanel initialSubTab={initialDocumentSubTab} />
+              </div>
+            )}
             {activeTab === 'sufler' && <SuflerPanel callActive={callActive} />}
           </main>
 
@@ -211,75 +217,9 @@ export function AiHubPanel({
 }
 
 function AssistantPanel() {
-  const [query, setQuery] = useState('')
   return (
-    <div className="hub-tab-content">
-      <div className="hub-panel__toolbar">
-        <select aria-label="База знаний" defaultValue="bank">
-          <option value="bank">Общая база знаний</option>
-          <option value="hr">HR и внутренние процессы</option>
-        </select>
-        <Button variant="ghost">История</Button>
-      </div>
-      <div className="hub-assistant-thread">
-        <p className="hub-assistant-thread__user">Как оформить командировку?</p>
-        <Card>
-          <strong>Ассистент</strong>
-          <p>Создайте заявку в HR-портале и приложите согласование руководителя.</p>
-          <div><StatusBadge status="info">Регламент · 96%</StatusBadge><Button variant="ghost">Открыть</Button></div>
-        </Card>
-      </div>
-      <div className="hub-panel__feedback" aria-label="Оценить ответ">
-        <Button variant="ghost">Полезно</Button>
-        <Button variant="ghost">Неполный</Button>
-        <Button variant="ghost">Неверно</Button>
-      </div>
-      <label className="hub-panel__composer">
-        <span>Сообщение ассистенту</span>
-        <textarea value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Введите запрос" />
-        <Button disabled={!query.trim()}>Отправить</Button>
-      </label>
-    </div>
-  )
-}
-
-function DocumentsPanel() {
-  const [subTab, setSubTab] = useState<DocumentSubTab>('queue')
-  return (
-    <div className="hub-tab-content">
-      <div className="hub-document-tabs" role="tablist" aria-label="Документы">
-        {([
-          ['queue', 'Очередь'],
-          ['upload', 'Загрузить'],
-          ['review', 'Проверка'],
-        ] as const).map(([id, label]) => (
-          <button type="button" role="tab" aria-selected={subTab === id} key={id} onClick={() => setSubTab(id)}>
-            {label}
-          </button>
-        ))}
-      </div>
-      {subTab === 'queue' && (
-        <div className="hub-document-list">
-          <Card><strong>passport_ivanov.pdf</strong><span>Паспорт · HITL</span><StatusBadge status="warning">96%</StatusBadge></Card>
-          <Card><strong>application_042.pdf</strong><span>Кредитная заявка</span><StatusBadge status="success">Готово</StatusBadge></Card>
-          <Button onClick={() => setSubTab('upload')}>Загрузить документы</Button>
-        </div>
-      )}
-      {subTab === 'upload' && (
-        <div className="hub-document-upload">
-          <strong>Перетащите документы</strong>
-          <span>PDF, JPG, PNG, TIFF · до 10 МБ</span>
-          <Button>Выбрать файлы</Button>
-        </div>
-      )}
-      {subTab === 'review' && (
-        <Card className="hub-document-review">
-          <strong>Проверка полей</strong>
-          <label>Серия / номер<input defaultValue="MP1234567" /></label>
-          <label>Дата рождения<input defaultValue="01.01.1990" /></label>
-          <Button>Утвердить и экспортировать</Button>
-        </Card>
-      )}
+    <div className="hub-tab-content hub-tab-content--assistant">
+      <AssistantChat demoMode compact />
     </div>
   )
 }

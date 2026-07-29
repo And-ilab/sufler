@@ -1,0 +1,299 @@
+======================================================================
+Double_station_winding_machine_unpacking_steps_+_threading_operation_slides.txt
+FILE: c:\Users\user\Downloads\Double_station_winding_machine_unpacking_steps_+_threading_operation.pptx
+EXISTS: True
+SLIDES: 14
+
+========================================
+ppt/slides/slide1.xml
+========================================
+1.
+接通气源和电源，打开电源开关，等待触摸屏显示器亮
+1. Connect the gas source and power supply, turn on the power switch, and wait for the touch screen display to light up
+2.
+等待
+30s
+后，触摸屏进入欢迎界面，选择
+“
+中
+/
+英
+”
+文模式
+2. After waiting for 30 seconds, the touch screen enters the welcome interface and selects the "Chinese/English" mode
+
+========================================
+ppt/slides/slide2.xml
+========================================
+开箱操作步骤
+1.
+设备开箱，先检查是否有损坏部位。
+2.
+找到拆除图示框选部分的支撑架，螺丝松开拆除（一共两处）
+Unpacking steps
+1. Unpack the device and check if there are any damaged parts.
+2. Locate and remove the support frame of the boxed part shown in the figure, loosen the screws and remove it (two places in total)
+
+========================================
+ppt/slides/slide3.xml
+========================================
+3.
+分别转动
+X
+轴和
+Z
+轴方向的联轴器，按图示箭头方向旋转调节，前进大约
+2-3cm
+3. Rotate the couplings in the X-axis and Z-axis directions respectively, and adjust them in the direction of the arrows in the figure, and move forward about 2-3 cm.
+
+========================================
+ppt/slides/slide4.xml
+========================================
+穿线步骤
+1.
+穿线走向：把铜线分别放入亚克力桶内（
+2
+个）
+，根据图示方法进行穿线
+Threading steps
+1. Threading direction: Put the copper wires into two acrylic barrels respectively and thread them according to the method shown in the figure
+
+========================================
+ppt/slides/slide5.xml
+========================================
+2.
+按图示方法依次穿过过线轮
+2. Pass the wire through the wire wheel in sequence according to the method shown in the figure
+
+========================================
+ppt/slides/slide6.xml
+========================================
+3.
+张力器上有穿线示意图
+3. There is a threading diagram on the tensioner
+
+========================================
+ppt/slides/slide7.xml
+========================================
+4.
+铜线从
+张力器出来，接着穿过反张力器，然后绕过黑色过线轮
+4. The copper wire comes out of the tensioner, then passes through the anti-tensioner, and then passes around the black wire wheel.
+
+========================================
+ppt/slides/slide8.xml
+========================================
+5.
+铜线从过线轮下来，继续穿入线嘴支架上的线嘴中
+5. The copper wire comes down from the wire wheel and continues to be inserted into the wire mouth on the wire mouth bracket
+6.
+穿过线嘴的铜线一定要拉紧
+6. The copper wire passing through the wire mouth must be tightened
+7.
+下一步要把拉紧的线放进剪刀夹住
+7. The next step is to put the tightened wire into the scissors and clamp it
+
+========================================
+ppt/slides/slide9.xml
+========================================
+8.
+屏幕上点击
+“AUTO”
+自动模式，再按
+“
+HOME”
+回零状态。此时设备上的
+X
+和
+Z
+轴分别动作后，进入初始位置。
+8. Click "AUTO" on the screen to enter the automatic mode, and then press "HOME" to return to the zero state. At this time, the X and Z axes on the device move respectively and enter the initial position
+
+========================================
+ppt/slides/slide10.xml
+========================================
+9.
+开关打到
+“
+步进
+”
+，触摸屏上选择
+“MAN.”
+手动模式，分别点击屏幕上
+“SCISSORS A1”
+和
+“
+SCISSORS A2
+”BACK
+，这步操作是方便铜线放入剪刀气缸位置的夹紧
+BACK
+和松开
+OUT
+。
+9. Turn the switch to "step", select "MAN." manual mode on the touch screen, and click "SCISSORS A1" and "SCISSORS A2" BACK on the screen respectively. This operation is to facilitate the clamping BACK and loosening OUT of the copper wire into the scissor cylinder position
+
+========================================
+ppt/slides/slide11.xml
+========================================
+10.
+也可将操作台开关打到
+“
+自动
+”
+，触摸屏上选择
+“AUTO”
+模式，分别点击屏幕下方的绿色按钮
+“A1”
+和
+“
+A2”
+，此操作同样可以将铜线放入剪刀气缸位置，完成夹紧和松开。
+10. You can also turn the console switch to "automatic", select the "AUTO" mode on the touch screen, and click the green buttons "A1" and "A2" at the bottom of the screen respectively. This operation can also put the copper wire into the scissors cylinder position to complete clamping and loosening.
+
+========================================
+ppt/slides/slide12.xml
+========================================
+定子如何固定
+1.“
+步进
+”
+状态，点击屏幕上的
+“Clamp open”
+，放入定子，调整好位置，再次点击
+“
+Clamp open”
+，工装进入
+“close”
+夹紧状态，定子被锁定。
+2.“
+步进
+”
+状态下，所有步骤都完成后，触摸屏由
+“MAN.”
+切换到
+“AUTO”
+，操作台旋转按钮也打
+“
+自动
+”
+，这时所有准备工作完成。
+How to fix the stator
+1. In the "step" state, click "Clamp open" on the screen, put in the stator, adjust the position, and click "Clamp open" again. The tooling enters the "close" clamping state and the stator is locked.
+2. In the "step" state, after all steps are completed, the touch screen switches from "MAN." to "AUTO", and the operating table rotation button also turns to "auto". At this time, all preparations are completed.
+
+========================================
+ppt/slides/slide13.xml
+========================================
+3.
+同时按操作台上左右的两个绿色按钮，设备开始进行自动绕线工作
+3. Press the two green buttons on the left and right of the console at the same time, and the equipment will start automatic winding.
+
+========================================
+ppt/slides/slide14.xml
+========================================
+4.
+设备在正常工作中，切勿靠近门框两侧的光暮感应器，靠近后会发出警报并立即停止绕线工作，需要恢复就重复上面步骤
+3
+的操作。
+4. When the device is in normal operation, do not approach the light sensors on both sides of the door frame. If you approach, an alarm will sound and the winding work will stop immediately. If you need to resume, repeat step 3 above.
+======================================================================
+Parameter settings (2)_slides.txt
+FILE: c:\Users\user\Downloads\Parameter settings (2).pptx
+EXISTS: True
+SLIDES: 9
+
+========================================
+ppt/slides/slide1.xml
+========================================
+1.
+触摸屏亮后，静待
+1
+分钟，屏幕出现一条
+“
+警报
+”
+内容对话框。
+可以不予理会，关闭对话框
+1. After the touch screen lights up, wait for 1 minute and a dialog box with "alarm" content will appear on the screen.
+You can ignore it and close the dialog box
+
+========================================
+ppt/slides/slide2.xml
+========================================
+2.
+点击屏幕上的
+“
+文件
+”
+，进入下一界面
+2. Click "File" on the screen to enter the next interface
+
+========================================
+ppt/slides/slide3.xml
+========================================
+3.
+出现输入密码的指令框，不必输入密码，点击确定，进入下一界面
+3. A password input box will appear. No need to enter the password. Click OK to enter the next interface.
+
+========================================
+ppt/slides/slide4.xml
+========================================
+4.
+需要新建程序，可点击右侧
+“
+新建
+”
+程序，
+如果已有编好的程序，直接选择程序名称后，继续点击
+“
+编辑模式
+”
+查看，进入下一界面
+4. If you need to create a new program, click "New" on the right. If you already have a program, select the program name and click "Edit Mode" to view it and enter the next interface.
+
+========================================
+ppt/slides/slide5.xml
+========================================
+5.
+进入编辑模式下，按上翻页，下翻页，可以查看相关内容
+需要修改，可点击重置，到下一界面
+5. Enter the edit mode, press the page up and page down to view the relevant content. If you need to modify it, click reset to go to the next interface.
+
+========================================
+ppt/slides/slide6.xml
+========================================
+6.
+重新编辑，点击
+“
+绕线参数
+”
+，进入下一界面重新设置参数
+6. Re-edit, click "Winding Parameters" to enter the next interface and reset the parameters
+
+========================================
+ppt/slides/slide7.xml
+========================================
+7.
+框选区域分别点击，有自动模式和精密排线两种模式
+自动排线下，输入线径和匝数，设置排线距离，角度和高度，在自动模式下能自动完成绕线
+7. Click on the selected area. There are two modes: automatic mode and precision wiring mode. After automatic wiring, enter the wire diameter and number of turns, set the wiring distance, angle and height. In automatic mode, the winding can be completed automatically.
+
+========================================
+ppt/slides/slide8.xml
+========================================
+8.
+切换精密排线模式
+根据定子槽数，在每一层的对应框里输入匝数，进给量，总匝数后，点击保存，进入下一界面
+8. Switch to precision wiring mode
+According to the number of stator slots, enter the number of turns, feed rate, and total number of turns in the corresponding box of each layer, click Save, and enter the next interface
+
+========================================
+ppt/slides/slide9.xml
+========================================
+9.
+确认保存后，选择
+“
+自动
+”
+模式，操作台面，同时双击两侧启动绿色按钮，进入正常绕线状态
+9. After confirming the save, select the "Automatic" mode, operate the table, and double-click the green buttons on both sides to enter the normal winding state

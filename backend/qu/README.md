@@ -81,3 +81,9 @@ is read-only and does not publish settings or require a code deployment.
 The tests verify the signal contract and run an eager end-to-end webhook with
 a fake article, asserting that the index is committed before `qu_retrain`
 starts.
+
+## Ops runbooks
+
+- [Reindex](../../docs/runbooks/reindex.md)
+- [QU retrain](../../docs/runbooks/qu-retrain.md)
+- [Rollback QU](../../docs/runbooks/rollback-qu.md)

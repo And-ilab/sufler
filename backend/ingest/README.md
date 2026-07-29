@@ -12,18 +12,45 @@ X-Sufler-Event-Id: <event_id>
 X-Sufler-Signature: HMAC-SHA256(raw_body, shared_secret)
 ```
 
-Set `SUZ_WEBHOOK_HMAC_SECRET` in `infra/.env`. An empty secret disables HMAC
-only for local mock development.
+### Env (cutover)
+
+| Variable | Mock (local) | Prod / TEST |
+| --- | --- | --- |
+| `SUZ_INGEST_MODE` | `mock` | `prod` |
+| `SUZ_WEBHOOK_HMAC_SECRET` | optional | **required** |
+| `SUZ_ALLOWED_IBLOCK_IDS` | empty | Bitrix KC iblock id(s) |
+| `BITRIX_REST_BASE_URL` | empty → mock `/changes` | Bitrix host |
+| `BITRIX_SERVICE_TOKEN` | — | Bearer for INT-09 |
+| `BITRIX_CHANGES_PATH` | `/local/api/sufler/v1/changes` | same |
+| `SUZ_RECONCILE_ENABLED` | `true` for local INT-09 | `true` on TEST/PROD |
+
+Documented for TEST cutover in [`infra/test/.env.example`](../../infra/test/.env.example).
+Local defaults: [`infra/.env.example`](../../infra/.env.example).
+
+An empty HMAC secret disables signature checks **only** when `SUZ_INGEST_MODE=mock`.
 
 Responses follow INT-07:
 
 - `202 {"status":"accepted","outcome":"queued", ...}` when the event is queued;
 - `400 {"error":"validation","fields":[...]}` for invalid input;
 - `401 {"error":"auth"}` for an invalid HMAC;
-- `503 {"error":"temporary"}` when the Redis broker is unavailable.
+- `503 {"error":"temporary"}` when the Redis broker is unavailable;
+- `503 {"error":"misconfigured"}` when `prod` mode has no HMAC secret.
 
 Repeated `event_id` values are accepted by the broker but resolved
 idempotently by the worker.
+
+## INT-09 reconciliation (Model B polling fallback)
+
+```text
+GET  /api/v1/knowledge/reconcile/
+POST /api/v1/knowledge/reconcile/run/
+POST /api/v1/knowledge/reconcile/run/?async=1
+```
+
+Celery task: `ingest.reconcile_suz_changes` — polls Bitrix
+`GET {BITRIX_CHANGES_PATH}?since={cursor}&limit=` and enqueues each event
+through the same pipeline as the webhook (full body in payload, no GET article).
 
 ## INT-01..05 pipeline
 
@@ -45,31 +72,11 @@ The event mapping is:
 - **INT-04:** hard-delete all article vectors;
 - **INT-05:** replace the previous article version without duplicate chunks.
 
-`event_id` prevents repeated delivery from running twice. The unique
-`article_id + version_id + chunk_index` constraint and article replacement
-make re-ingest idempotent. A new event with an unchanged article checksum
-updates metadata/version without recalculating embeddings.
-
-The deterministic embedder is a development adapter, not a production model.
-Replace it with the approved on-prem embedding runtime before production
-sign-off; the vector schema already matches the 1024 dimensions of the
-current `multilingual-e5-large` dev profile.
-
 ## Verification
-
-From the repository root:
 
 ```powershell
 .\backend\.venv\Scripts\python.exe backend\manage.py migrate
-.\backend\.venv\Scripts\python.exe -m pytest tests\test_ingest_webhook.py -v
+.\backend\.venv\Scripts\python.exe -m pytest tests\test_ingest_webhook.py tests\test_suz_reconcile.py -v
 ```
 
-With Docker:
-
-```powershell
-cd infra
-docker compose up --build -d
-docker compose exec backend python manage.py migrate
-docker compose exec backend python manage.py check
-docker compose exec postgres psql -U sufler -d sufler -c "\d cc_production"
-```
+Ops (FR-UND-08): [reindex](../../docs/runbooks/reindex.md) · [qu-retrain](../../docs/runbooks/qu-retrain.md) · [rollback-qu](../../docs/runbooks/rollback-qu.md).

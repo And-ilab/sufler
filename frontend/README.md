@@ -8,6 +8,22 @@
 - актуальная LTS-версия Node.js;
 - npm из поставки Node.js.
 
+## Docker
+
+Вместе с backend-стеком:
+
+```powershell
+cd ../infra
+docker compose up --build -d
+```
+
+UI: <http://localhost:5173/>. Прокси `/api` → сервис `backend:8000`.
+Переменные `FRONTEND_PORT_HOST` и `VITE_DEV_RBAC_ROLES` — в `infra/.env`.
+
+Для bank TEST (prod-like): `frontend/Dockerfile.prod` + `nginx.prod.conf`
+собирают static build и проксируют `/api` на Daphne — см.
+[`infra/test/README.md`](../infra/test/README.md).
+
 ## Команды
 
 ```bash
@@ -28,19 +44,52 @@ npm run build-storybook
 
 ```bash
 npm run playwright:install
-npm run test:visual
-npm run test:visual:update
+npm run test:visual              # все UI Playwright-проекты (ui + visual)
+npm run test:visual:canvas       # только canvas-registry (P8-09 / project=visual)
+npm run test:visual:update       # обновить baseline PNG для canvas-registry
 ```
 
-`test:visual:update` разрешено запускать только после осознанной проверки
-изменений UI. Обновлённые PNG нужно просмотреть в diff и приложить к review.
+### Обновление baseline (P8-09)
+
+CI job **`ui-visual`** гоняет `playwright test --project=visual` по каждому
+экрану из [`docs/ui/canvas-registry.yaml`](../docs/ui/canvas-registry.yaml).
+Сравнение с эталоном: **`maxDiffPixelRatio = 0.001` (0.1%)** — больший diff
+валит сборку.
+
+Обновлять PNG только после осознанного изменения UI / canvas:
+
+1. Убедиться, что Storybook story из `visual.story_id` отражает целевой экран.
+2. Из `frontend/` обновить эталоны **в Linux** (как CI `ubuntu-latest`), чтобы
+   не ловить OS-diff шрифтов:
+   ```bash
+   # предпочтительно — тот же образ, что Playwright CI
+   docker run --rm -e CI=true -v "${PWD}/..:/work" -w /work/frontend `
+     mcr.microsoft.com/playwright:v1.61.1-jammy `
+     npx playwright test --project=visual --update-snapshots
+   ```
+   Локально (Windows) допустимо только для быстрой проверки:
+   ```bash
+   npm run test:visual:update
+   ```
+3. Просмотреть diff в `tests/ui/visual/__snapshots__/` (и Playwright report).
+4. Закоммитить обновлённые PNG вместе с UI-изменением.
+5. Если добавили canvas в registry — перегенерировать specs:
+   ```bash
+   python tests/ui/visual/generate_from_registry.py
+   ```
+
+`test:visual:update` без review PNG в PR считается ошибкой. Baseline для CI
+должен быть снят в Linux (Docker-команда выше).
+
+Specs: `tests/ui/visual/<task_id>.spec.ts`. Эталоны:
+`tests/ui/visual/__snapshots__/`.
 
 ## Структура
 
 - `src/tokens.css` — брендовые, семантические, spacing и shadow tokens;
 - `src/components` — компоненты, их стили, barrel export и stories;
 - `.storybook` — конфигурация каталога компонентов;
-- `../tests/ui` — Playwright visual tests и эталонные PNG;
+- `../tests/ui` — Playwright UI tests; `../tests/ui/visual` — canvas-registry baselines (P8-09);
 - `public/assets` — статические канонические assets.
 
 Обязательные брендовые значения определены только через tokens:

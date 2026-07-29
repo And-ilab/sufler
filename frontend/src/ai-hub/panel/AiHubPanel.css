@@ -217,6 +217,13 @@
   gap: var(--space-3);
 }
 
+.hub-tab-content--assistant,
+.hub-tab-content--documents {
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+}
+
 .hub-panel__toolbar {
   display: flex;
   gap: var(--space-2);

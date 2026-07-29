@@ -1,0 +1,121 @@
+.sufler-phone {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--color-primary) 12%, transparent), transparent 42%),
+    var(--color-bg);
+}
+
+.sufler-phone__header,
+.sufler-phone__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.sufler-phone__footer {
+  border-bottom: 0;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: .8125rem;
+}
+
+.sufler-phone__eyebrow {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text-muted);
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sufler-phone__header h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.sufler-phone__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: .8125rem;
+}
+
+.sufler-phone__dialogue {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  padding: var(--space-5) var(--space-6);
+  overflow: auto;
+}
+
+.sufler-phone__turn {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 920px;
+}
+
+.sufler-phone__turn--client {
+  justify-self: start;
+  width: min(100%, 720px);
+}
+
+.sufler-phone__turn--operator {
+  justify-self: end;
+  width: min(100%, 560px);
+}
+
+.sufler-phone__bubble {
+  padding: var(--space-4);
+}
+
+.sufler-phone__bubble header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.sufler-phone__bubble p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.sufler-phone__hints {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sufler-phone__hints-title {
+  color: var(--color-text-muted);
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sufler-phone__error {
+  margin: var(--space-4) var(--space-6) 0;
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.sufler-phone__empty {
+  padding: var(--space-5);
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 800px) {
+  .sufler-phone__header,
+  .sufler-phone__footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,516 @@
+================================================================================
+FAIL backend/requirements.txt
+--- OLD ---
+Django==5.0.3
+celery
+channels==4.0.0
+psycopg[binary]
+pgvector
+PyYAML
+redis
+requests==2.31.0
+websockets==12.0
+
+--- NEW ---
+channels==4.0.0
+daphne==4.1.2
+celery
+channels==4.0.0
+channels==4.0.0
+Django==5.0.3
+celery
+channels==4.0.0
+daphne==4.1.2
+channels-redis==4.2.0
+psycopg[binary]
+pgvector
+PyYAML
+redis
+requests==2.31.0
+websockets==12.0
+
+LF-normalized match=False
+new already in file=False
+================================================================================
+FAIL frontend/src/ai-hub/admin/AiHubAdminApp.tsx
+--- OLD ---
+  prompts_assistant: {
+    title: 'Промпты ассистента',
+    subtitle: 'System / task instructions для профиля assistant_bank.',
+    status: '3 колонки',
+    cards: [['Библиотека', 'System/Task', 'Фильтр + новый'], ['Редактор', 'Markdown', '{{kb}} {{user}}'], ['Preview', 'Тест', 'Ответ + %']],
+  },
+  capabilities: {
+    title: 'Навыки и инструменты',
+    subtitle: 'Агрегатор capabilities с deep-link на детальные экраны.',
+    status: '8 capabilities',
+    cards: [['RAG', 'Вкл', 'Базы знаний'], ['RPA', 'Настроить', 'Реестр'], ['SQL/код', 'ИБ', 'Политика']],
+  },
+--- NEW ---
+  prompts_assistant: {
+    title: 'Промпты ассистента',
+    subtitle: 'Библиотека system/task/scope для профиля assistant_bank (III.10.1).',
+    status: 'CRUD',
+    cards: [['Промпты', 'assistant_*', 'Изоляция от cc_production'], ['Studio', '3 колонки', 'Библиотека · Редактор · Preview'], ['Публикация', 'draft → vN', 'Журнал Общее']],
+  },
+  capabilities: {
+    title: 'Навыки и инструменты',
+    subtitle: 'Реестр capabilities (VII.5 D4): RAG, RPA, SQL, перевод — toggle + deep link.',
+    status: 'Stub registry',
+    cards: [['Capabilities', '8', 'Карточки 2×N'], ['KB', 'assistant_*', '≠ cc_production'], ['Политики', 'III.6.5', 'SQL read-only']],
+  },
+LF-normalized match=False
+new already in file=True
+================================================================================
+FAIL frontend/src/ai-hub/panel/AiHubPanel.tsx
+--- OLD ---
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
+import { Button, Card, Fab, HintCard, StatusBadge } from '../../components'
+import { AssistantChat } from '../../assistant/AssistantChat'
+import {
+  getHubPanelTabs,
+  isHubAdminRole,
+  type HubPanelTab,
+} from './hubAccess'
+import './AiHubPanel.css'
+
+type DocumentSubTab = 'queue' | 'upload' | 'review'
+
+export interface AiHubPanelProps {
+  roles: readonly string[]
+  rbacTabs?: readonly string[]
+  username?: string | null
+  callActive?: boolean
+  initialOpen?: boolean
+  initialTab?: HubPanelTab
+  initialPinned?: boolean
+}
+--- NEW ---
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
+import { Button, Card, Fab, HintCard, StatusBadge } from '../../components'
+import { AssistantChat } from '../../assistant/AssistantChat'
+import { OcrDocumentsPanel } from '../ocr/OcrDocumentsPanel'
+import {
+  getHubPanelTabs,
+  isHubAdminRole,
+  type HubPanelTab,
+} from './hubAccess'
+import './AiHubPanel.css'
+
+export interface AiHubPanelProps {
+  roles: readonly string[]
+  rbacTabs?: readonly string[]
+  username?: string | null
+  callActive?: boolean
+  initialOpen?: boolean
+  initialTab?: HubPanelTab
+  initialPinned?: boolean
+  initialDocumentSubTab?: 'queue' | 'upload' | 'review'
+}
+LF-normalized match=False
+new already in file=False
+================================================================================
+FAIL infra/.env.example
+--- OLD ---
+# Development only. Use AUTH_MODE=ldap in production after P7-03 sign-off.
+AUTH_MODE=mock_ldap
+AUTH_MOCK_LDAP_DEFAULT_PASSWORD=replace-with-dev-only-password
+
+# SUZ Model B webhook HMAC. Empty is allowed only for local mock development.
+SUZ_WEBHOOK_HMAC_SECRET=replace-with-a-shared-suz-webhook-secret
+
+# VI.2 Oktell telephony. Default points at local oktell_mock (P1-14).
+--- NEW ---
+# Development only. Use AUTH_MODE=ldap in production after P7-03 sign-off.
+AUTH_MODE=mock_ldap
+AUTH_MOCK_LDAP_DEFAULT_PASSWORD=replace-with-dev-only-password
+
+# --- SUZ Model B ingest (Bitrix → /api/v1/knowledge/events) ---
+# mock: empty HMAC allowed for local INT-T. prod: HMAC required (see infra/test/.env.example).
+SUZ_INGEST_MODE=mock
+SUZ_WEBHOOK_PATH=/api/v1/knowledge/events
+# SUZ Model B webhook HMAC. Empty is allowed only for local mock development.
+SUZ_WEBHOOK_HMAC_SECRET=replace-with-a-shared-suz-webhook-secret
+SUZ_ALLOWED_IBLOCK_IDS=
+
+# INT-09 polling fallback (optional in mock; required for prod cutover).
+BITRIX_REST_BASE_URL=
+BITRIX_SERVICE_TOKEN=
+BITRIX_CHANGES_PATH=/local/api/sufler/v1/changes
+BITRIX_HTTP_TIMEOUT_SECONDS=15
+SUZ_RECONCILE_ENABLED=false
+SUZ_RECONCILE_LIMIT=100
+SUZ_RECONCILE_INTERVAL_SECONDS=300
+
+# VI.2 Oktell telephony. Default points at local oktell_mock (P1-14).
+LF-normalized match=False
+new already in file=False
+================================================================================
+FAIL backend/core/model_registry.py
+--- OLD ---
+        return cls(
+            name=name,
+            target_index=target_index,
+            embedding_slot=embedding_slot,
+            embedding_model=model,
+            similarity_metric=similarity_metric,
+            chunk_size_tokens=chunk_size,
+            chunk_overlap_tokens=chunk_overlap,
+            context_inclusion_threshold=float(thresholds["context_inclusion"]),
+            deterministic_answer_threshold=float(
+                thresholds["deterministic_answer"]
+            ),
+            source_trace_required=bool(payload["source_trace_required"]),
+            status=status,
+            selection_basis=str(payload["selection_basis"]),
+            bench_evidence=dict(payload["bench_evidence"]),
+            change_control=dict(payload["change_control"]),
+        )
+
+
+class ModelRegistry:
+    """Collection of validated logical AI model slots."""
+
+    def __init__(
+        self,
+        slots: Mapping[str, ModelSlot],
+        profiles: Mapping[str, KnowledgeBaseProfile],
+    ) -> None:
+        self._slots = dict(slots)
+        self._profiles = dict(profiles)
+
+    @classmethod
+    def load(cls, path: str | Path = DEFAULT_REGISTRY_PATH) -> ModelRegistry:
+        registry_path = Path(path)
+        try:
+            payload = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise ModelRegistryError(
+                f"Model registry not found: {registry_path}"
+            ) from exc
+        except yaml.YAMLError as exc:
+            raise ModelRegistryError(
+                f"Invalid YAML in model registry: {registry_path}"
+            ) from exc
+
+        if not isinstance(payload, Mapping):
+            raise ModelRegistryError("Model registry root must be a mapping")
+        raw_slots = payload.get("slots")
+        if not isinstance(raw_slots, Mapping):
+            raise ModelRegistryError(
+                "Model registry must contain a 'slots' mapping"
+            )
+
+        missing_slots = REQUIRED_SLOTS - raw_slots.keys()
+        if missing_slots:
+            slots = ", ".join(sorted(missing_slots))
+            raise ModelRegistryError(
+                f"Model registry is missing required slots: {slots}"
+            )
+
+        parsed_slots: dict[str, ModelSlot] = {}
+        for name, raw_slot in raw_slots.items():
+            if not isinstance(name, str) or not isinstance(raw_slot, Mapping):
+                raise ModelRegistryError(
+                    "Each model slot must have a string name and mapping value"
+                )
+            parsed_slots[name] = ModelSlot.from_mapping(name, raw_slot)
+
+        raw_profiles = payload.get("profiles")
+        if not isinstance(raw_profiles, Mapping):
+            raise ModelRegistryError(
+                "Model registry must contain a 'profiles' mapping"
+            )
+        missing_profiles = REQUIRED_PROFILES - raw_profiles.keys()
+        if missing_profiles:
+            profiles = ", ".join(sorted(missing_profiles))
+            raise ModelRegistryError(
+                f"Model registry is missing required profiles: {profiles}"
+            )
+        parsed_profiles: dict[str, KnowledgeBaseProfile] = {}
+        for name, raw_profile in raw_profiles.items():
+            if not isinstance(name, str) or not isinstance(
+                raw_profile,
+                Mapping,
+            ):
+                raise ModelRegistryError(
+                    "Each profile must have a string name and mapping value"
+                )
+            parsed_profiles[name] = KnowledgeBaseProfile.from_mapping(
+                name,
+                raw_profile,
+                parsed_slots,
+            )
+
+        return cls(parsed_slots, parsed_profiles)
+
+    @property
+    def slots(self) -> Mapping[str, ModelSlot]:
+        return self._slots.copy()
+
+    @property
+    def profiles(self) -> Mapping[str, KnowledgeBaseProfile]:
+        return self._profiles.copy()
+
+    def get_slot(self, name: str) -> ModelSlot:
+        try:
+            return self._slots[name]
+        except KeyError as exc:
+            raise KeyError(f"Unknown model slot: {name}") from exc
+
+    def get_profile(self, name: str) -> KnowledgeBaseProfile:
+        try:
+            return self._profiles[name]
+        except KeyError as exc:
+            raise KeyError(f"Unknown model profile: {name}") from exc
+
+--- NEW ---
+        return cls(
+            name=name,
+            target_index=target_index,
+            embedding_slot=embedding_slot,
+            embedding_model=model,
+            similarity_metric=similarity_metric,
+            chunk_size_tokens=chunk_size,
+            chunk_overlap_tokens=chunk_overlap,
+            context_inclusion_threshold=float(thresholds["context_inclusion"]),
+            deterministic_answer_threshold=float(
+                thresholds["deterministic_answer"]
+            ),
+            source_trace_required=bool(payload["source_trace_required"]),
+            status=status,
+            selection_basis=str(payload["selection_basis"]),
+            bench_evidence=dict(payload["bench_evidence"]),
+            change_control=dict(payload["change_control"]),
+        )
+
+
+@dataclass(frozen=True)
+class DeploymentProfile:
+    """Bank environment inference tier (TEST/PROD) — ASR + LLM gateway binding."""
+
+    name: str
+    status: str
+    description: str
+    gpu_required: bool
+    asr_slot: str
+    asr_mode: str
+    asr_model: str | None
+    llm_gateway_mode: str
+    llm_profiles: tuple[str, ...]
+    embedding_slot: str
+
+    @classmethod
+    def from_mapping(
+        cls,
+        name: str,
+        payload: Mapping[str, Any],
+        slots: Mapping[str, ModelSlot],
+    ) -> DeploymentProfile:
+        if not isinstance(payload, Mapping):
+            raise ModelRegistryError(
+                f"Deployment profile {name!r} must be a mapping"
+            )
+        status = payload.get("status")
+        if not isinstance(status, str) or not status.strip():
+            raise ModelRegistryError(
+                f"Deployment profile {name!r} needs non-empty status"
+            )
+        asr = payload.get("asr")
+        llm = payload.get("llm")
+        embedding = payload.get("embedding")
+        if not isinstance(asr, Mapping) or not isinstance(llm, Mapping):
+            raise ModelRegistryError(
+                f"Deployment profile {name!r} needs asr and llm mappings"
+            )
+        asr_slot = asr.get("slot", "asr")
+        asr_mode = asr.get("mode", "stub")
+        if asr_mode not in {"stub", "vosk"}:
+            raise ModelRegistryError(
+                f"Deployment profile {name!r} asr.mode must be stub|vosk"
+            )
+        if asr_slot not in slots:
+            raise ModelRegistryError(
+                f"Deployment profile {name!r} references unknown asr slot "
+                f"{asr_slot!r}"
+            )
+        llm_mode = llm.get("gateway_mode", "stub")
+        if llm_mode not in {"stub", "openai"}:
+            raise ModelRegistryError(
+                f"Deployment profile {name!r} llm.gateway_mode must be "
+                "stub|openai"
+            )
+        raw_profiles = llm.get("profiles") or []
+        if not isinstance(raw_profiles, list) or not raw_profiles:
+            raise ModelRegistryError(
+                f"Deployment profile {name!r} llm.profiles must be a non-empty list"
+            )
+        llm_profiles = tuple(str(item) for item in raw_profiles)
+        embedding_slot = "embedding"
+        if isinstance(embedding, Mapping):
+            embedding_slot = str(embedding.get("slot", "embedding"))
+        if embedding_slot not in slots:
+            raise ModelRegistryError(
+                f"Deployment profile {name!r} references unknown embedding slot"
+            )
+        asr_model = asr.get("model")
+        if asr_model is not None and not isinstance(asr_model, str):
+            raise ModelRegistryError(
+                f"Deployment profile {name!r} asr.model must be a string or null"
+            )
+        return cls(
+            name=name,
+            status=status.strip(),
+            description=str(payload.get("description") or ""),
+            gpu_required=bool(payload.get("gpu_required", False)),
+            asr_slot=str(asr_slot),
+            asr_mode=str(asr_mode),
+            asr_model=asr_model,
+            llm_gateway_mode=str(llm_mode),
+            llm_profiles=llm_profiles,
+            embedding_slot=embedding_slot,
+        )
+
+
+class ModelRegistry:
+    """Collection of validated logical AI model slots."""
+
+    def __init__(
+        self,
+        slots: Mapping[str, ModelSlot],
+        profiles: Mapping[str, KnowledgeBaseProfile],
+        deployment_profiles: Mapping[str, DeploymentProfile] | None = None,
+    ) -> None:
+        self._slots = dict(slots)
+        self._profiles = dict(profiles)
+        self._deployment_profiles = dict(deployment_profiles or {})
+
+    @classmethod
+    def load(cls, path: str | Path = DEFAULT_REGISTRY_PATH) -> ModelRegistry:
+        registry_path = Path(path)
+        try:
+            payload = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise ModelRegistryError(
+                f"Model registry not found: {registry_path}"
+            ) from exc
+        except yaml.YAMLError as exc:
+            raise ModelRegistryError(
+                f"Invalid YAML in model registry: {registry_path}"
+            ) from exc
+
+        if not isinstance(payload, Mapping):
+            raise ModelRegistryError("Model registry root must be a mapping")
+        raw_slots = payload.get("slots")
+        if not isinstance(raw_slots, Mapping):
+            raise ModelRegistryError(
+                "Model registry must contain a 'slots' mapping"
+            )
+
+        missing_slots = REQUIRED_SLOTS - raw_slots.keys()
+        if missing_slots:
+            slots = ", ".join(sorted(missing_slots))
+            raise ModelRegistryError(
+                f"Model registry is missing required slots: {slots}"
+            )
+
+        parsed_slots: dict[str, ModelSlot] = {}
+        for name, raw_slot in raw_slots.items():
+            if not isinstance(name, str) or not isinstance(raw_slot, Mapping):
+                raise ModelRegistryError(
+                    "Each model slot must have a string name and mapping value"
+                )
+            parsed_slots[name] = ModelSlot.from_mapping(name, raw_slot)
+
+        raw_profiles = payload.get("profiles")
+        if not isinstance(raw_profiles, Mapping):
+            raise ModelRegistryError(
+                "Model registry must contain a 'profiles' mapping"
+            )
+        missing_profiles = REQUIRED_PROFILES - raw_profiles.keys()
+        if missing_profiles:
+            profiles = ", ".join(sorted(missing_profiles))
+            raise ModelRegistryError(
+                f"Model registry is missing required profiles: {profiles}"
+            )
+        parsed_profiles: dict[str, KnowledgeBaseProfile] = {}
+        for name, raw_profile in raw_profiles.items():
+            if not isinstance(name, str) or not isinstance(
+                raw_profile,
+                Mapping,
+            ):
+                raise ModelRegistryError(
+                    "Each profile must have a string name and mapping value"
+                )
+            parsed_profiles[name] = KnowledgeBaseProfile.from_mapping(
+                name,
+                raw_profile,
+                parsed_slots,
+            )
+
+        raw_deploy = payload.get("deployment_profiles")
+        if not isinstance(raw_deploy, Mapping):
+            raise ModelRegistryError(
+                "Model registry must contain a 'deployment_profiles' mapping"
+            )
+        missing_deploy = REQUIRED_DEPLOYMENT_PROFILES - raw_deploy.keys()
+        if missing_deploy:
+            names = ", ".join(sorted(missing_deploy))
+            raise ModelRegistryError(
+                f"Model registry is missing required deployment_profiles: {names}"
+            )
+        parsed_deploy: dict[str, DeploymentProfile] = {}
+        for name, raw_profile in raw_deploy.items():
+            if not isinstance(name, str):
+                raise ModelRegistryError(
+                    "Each deployment profile must have a string name"
+                )
+            parsed_deploy[name] = DeploymentProfile.from_mapping(
+                name,
+                raw_profile,
+                parsed_slots,
+            )
+
+        return cls(parsed_slots, parsed_profiles, parsed_deploy)
+
+    @property
+    def slots(self) -> Mapping[str, ModelSlot]:
+        return self._slots.copy()
+
+    @property
+    def profiles(self) -> Mapping[str, KnowledgeBaseProfile]:
+        return self._profiles.copy()
+
+    @property
+    def deployment_profiles(self) -> Mapping[str, DeploymentProfile]:
+        return self._deployment_profiles.copy()
+
+    def get_slot(self, name: str) -> ModelSlot:
+        try:
+            return self._slots[name]
+        except KeyError as exc:
+            raise KeyError(f"Unknown model slot: {name}") from exc
+
+    def get_profile(self, name: str) -> KnowledgeBaseProfile:
+        try:
+            return self._profiles[name]
+        except KeyError as exc:
+            raise KeyError(f"Unknown model profile: {name}") from exc
+
+    def get_deployment_profile(self, name: str) -> DeploymentProfile:
+        try:
+            return self._deployment_profiles[name]
+        except KeyError as exc:
+            raise KeyError(f"Unknown deployment profile: {name}") from exc
+LF-normalized match=False
+new already in file=False
