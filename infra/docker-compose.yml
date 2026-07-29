@@ -120,7 +120,7 @@ services:
       - -c
       - python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000
     ports:
-      - "${BACKEND_PORT_HOST:-8000}:8000"
+      - "${BACKEND_PORT_HOST:-8001}:8000"
     volumes:
       - audit_data:/var/log/sufler
     depends_on:
@@ -136,7 +136,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/client-info/', timeout=5)",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/', timeout=5)",
         ]
       interval: 10s
       timeout: 5s

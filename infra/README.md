@@ -55,7 +55,7 @@ docker compose down -v
 ## Порты
 
 - `5173` (`FRONTEND_PORT_HOST`) — Vite frontend: <http://localhost:5173/>
-- `8000` (`BACKEND_PORT_HOST`) — Django: <http://localhost:8000/>
+- `8001` (`BACKEND_PORT_HOST`) — Django: <http://localhost:8001/> (на проде за nginx — снаружи открыт только 8000, проксирующий `/api/` на 8001)
 - `5432` (`POSTGRES_PORT_HOST`) — PostgreSQL/pgvector
 - `6379` (`REDIS_PORT_HOST`) — Redis
 - `9000` (`MINIO_API_PORT_HOST`) — MinIO S3 API
