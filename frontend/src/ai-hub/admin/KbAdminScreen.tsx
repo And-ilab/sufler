@@ -103,26 +103,32 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
     setError('')
     try {
       if (forceRelogin) resetDevSessionCache()
-      const ok = await ensureDevSession()
+      let ok = await ensureDevSession()
+      if (!ok) {
+        // One automatic retry after clearing cache (common after first DEV boot).
+        resetDevSessionCache()
+        ok = await ensureDevSession()
+      }
       if (!ok) {
         setError(
-          'Нет сессии авторизации. В DEV выполняется вход как dev-role-01; проверьте, что API доступен.',
+          'Нет сессии авторизации. Нажмите «Обновить список» — в DEV выполняется вход как dev-role-01.',
         )
         setItems([])
         setSelected(null)
         return
       }
-      // Call without preferId so the first KB is auto-selected (null would clear selection).
       await refreshList()
     } catch (requestError) {
       setError(formatKbError(requestError, 'Не удалось загрузить базы знаний'))
+      setItems([])
+      setSelected(null)
     } finally {
       setLoading(false)
     }
   }, [refreshList])
 
   useEffect(() => {
-    void loadInitial()
+    void loadInitial(true)
   }, [loadInitial])
 
   // Poll while selected KB is indexing.
@@ -318,7 +324,7 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
               Повторить
             </Button>
             <Button type="button" variant="ghost" onClick={() => setError('')}>
-              Закрыть
+              Скрыть
             </Button>
           </div>
         </Card>
@@ -340,6 +346,15 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
               <h2>Базы знаний КЦ</h2>
               <p>Создание и редактирование статей БЗ</p>
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={busy || loading}
+              onClick={() => void loadInitial(true)}
+              data-testid="kb-refresh-list"
+            >
+              Обновить список
+            </Button>
           </header>
           <form className="kb-admin__create" onSubmit={(event) => void createKb(event)}>
             <label>
@@ -386,7 +401,18 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
               </li>
             ))}
             {!items.length && (
-              <li className="kb-admin__empty">Пока нет баз знаний. Создайте первую слева.</li>
+              <li className="kb-admin__empty">
+                <p>Список пуст или не загрузился с сервера.</p>
+                <p>Если документы уже залиты скриптом — нажмите «Обновить список».</p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy || loading}
+                  onClick={() => void loadInitial(true)}
+                >
+                  Обновить список
+                </Button>
+              </li>
             )}
           </ul>
         </Card>

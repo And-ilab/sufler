@@ -58,13 +58,27 @@ function csrfToken(): string {
 }
 
 async function parseJson<T>(response: Response): Promise<T> {
-  const body = (await response.json()) as T | ApiErrorPayload
+  const text = await response.text()
+  let body: T | ApiErrorPayload | null = null
+  try {
+    body = text ? (JSON.parse(text) as T | ApiErrorPayload) : null
+  } catch {
+    const snippet = text.trim().slice(0, 80)
+    throw new AssistantAdminApiError(
+      response.status === 401 || response.status === 403
+        ? 'authentication_required'
+        : `Неверный ответ API (HTTP ${response.status}): ${snippet || 'пусто'}`,
+    )
+  }
   if (!response.ok) {
-    const error = body as ApiErrorPayload
+    const error = (body ?? {}) as ApiErrorPayload
     throw new AssistantAdminApiError(
       error.error || `HTTP ${response.status}`,
       error.details || {},
     )
+  }
+  if (body == null) {
+    throw new AssistantAdminApiError('empty_response')
   }
   return body as T
 }

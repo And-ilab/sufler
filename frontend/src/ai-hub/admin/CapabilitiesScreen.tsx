@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ensureDevSession } from '../../auth/ensureDevSession'
 import { Button, Card, StatusBadge } from '../../components'
 import {
   createAssistantKb,
@@ -23,6 +24,7 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
   const [creatingKb, setCreatingKb] = useState(false)
 
   const refresh = async () => {
+    await ensureDevSession()
     const [caps, nextKbs] = await Promise.all([
       listAssistantCapabilities(),
       listAssistantKbs(),
@@ -52,6 +54,7 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
     setBusyCode(item.code)
     setError('')
     try {
+      await ensureDevSession()
       const updated = await setCapabilityEnabled(item.code, !item.enabled)
       setItems((current) =>
         current.map((row) => (row.code === updated.code ? updated : row)),
@@ -68,6 +71,7 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
     setCreatingKb(true)
     setError('')
     try {
+      await ensureDevSession()
       await createAssistantKb({ name: kbName.trim() })
       setKbName('')
       await refresh()

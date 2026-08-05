@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ensureDevSession } from '../../auth/ensureDevSession'
 import { Button, Card, StatusBadge } from '../../components'
 import {
   createAssistantPrompt,
@@ -56,6 +57,7 @@ export function PromptsAssistantScreen({
   }, [prompts, filter, typeFilter])
 
   const load = async (preferId?: number | null) => {
+    await ensureDevSession()
     const [nextPrompts, nextKbs] = await Promise.all([
       listAssistantPrompts(),
       listAssistantKbs(),

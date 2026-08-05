@@ -24,7 +24,7 @@ export async function fetchAssistantKnowledgeBases(): Promise<AssistantKbOption[
   return (body.items ?? []).map((item) => ({
     id: String(item.id),
     slug: item.slug,
-    label: (item.description || item.name || item.slug).trim(),
+    label: (item.name || item.slug).trim(),
     documentCount: item.document_count ?? 0,
   }))
 }
