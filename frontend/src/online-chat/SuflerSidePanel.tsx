@@ -1,6 +1,13 @@
+import { useState } from 'react'
 import { Button, Card, HintCard, StatusBadge } from '../components'
 import { relevanceStatusFromPercent } from '../components/hintRelevance'
 import type { SuflerHint } from '../sufler/api/suggest'
+import {
+  ACTIVE_CLIENT,
+  ACTIVE_SUMMARY_HISTORY,
+  type ClientInfoData,
+  type SummaryHistoryData,
+} from './clientContext'
 
 export interface SuflerSidePanelProps {
   hints: SuflerHint[]
@@ -10,6 +17,8 @@ export interface SuflerSidePanelProps {
   clientPreview?: string
   onInsert?: (text: string) => void
   disabled?: boolean
+  client?: ClientInfoData
+  summary?: SummaryHistoryData
 }
 
 function hintTitle(hint: SuflerHint): string {
@@ -27,57 +36,146 @@ export function SuflerSidePanel({
   loading = false,
   error = '',
   latencyMs = null,
-  clientPreview = '',
   onInsert,
   disabled = false,
+  client = ACTIVE_CLIENT,
+  summary = ACTIVE_SUMMARY_HISTORY,
 }: SuflerSidePanelProps) {
+  const [summaryOpen, setSummaryOpen] = useState(false)
+  const [clientOpen, setClientOpen] = useState(false)
+  const [phoneRevealed, setPhoneRevealed] = useState(false)
+
   return (
-    <aside className="chat-arm__sufler" data-testid="sufler-side-panel" aria-label="Суфлёр">
-      <header className="chat-arm__sufler-header">
-        <h2>Суфлёр</h2>
-        <StatusBadge status={loading ? 'info' : 'success'}>
-          {loading ? 'запрос…' : 'активен'}
-        </StatusBadge>
-      </header>
-
-      {clientPreview ? (
-        <Card className="chat-arm__client-preview" padded>
-          <p className="app-eyebrow">Сообщение клиента</p>
-          <p>{clientPreview}</p>
+    <aside className="chat-arm__sufler" data-testid="sufler-side-panel" aria-label="Клиент и суфлёр">
+      <div className="chat-arm__sufler-scroll">
+        <Card
+          className="chat-arm__context-card"
+          padded
+          onMouseEnter={() => setSummaryOpen(true)}
+          onMouseLeave={() => setSummaryOpen(false)}
+        >
+          <p className="chat-arm__context-label">Summary клиента</p>
+          {summaryOpen ? (
+            <>
+              <p className="chat-arm__context-text">{summary.summary}</p>
+              <hr className="chat-arm__context-rule" />
+              <p className="chat-arm__context-label">Детальный summary</p>
+              <p className="chat-arm__context-text chat-arm__context-text--pre">
+                {summary.detailedSummary}
+              </p>
+            </>
+          ) : (
+            <p className="chat-arm__context-preview">{summary.preview}</p>
+          )}
         </Card>
-      ) : null}
 
-      {error ? (
-        <Card className="chat-arm__error" role="alert">
-          {error}
+        <h3 className="chat-arm__sufler-h3">Клиент</h3>
+        <Card
+          className="chat-arm__context-card"
+          padded
+          onMouseEnter={() => setClientOpen(true)}
+          onMouseLeave={() => {
+            setClientOpen(false)
+            setPhoneRevealed(false)
+          }}
+        >
+          <strong>{client.name}</strong>
+          {clientOpen ? (
+            <dl className="chat-arm__client-fields">
+              <div>
+                <dt>№ диалога</dt>
+                <dd>{client.dialogNo}</dd>
+              </div>
+              <div>
+                <dt>ID посетителя</dt>
+                <dd>{client.visitorId}</dd>
+              </div>
+              <div>
+                <dt>Время визита</dt>
+                <dd>{client.visitTime}</dd>
+              </div>
+              <div>
+                <dt>Точка входа</dt>
+                <dd>
+                  {client.entryPath} · {client.entryChannel}
+                </dd>
+              </div>
+              <div>
+                <dt>Браузер / устройство</dt>
+                <dd>
+                  {client.browser} · {client.device}
+                </dd>
+              </div>
+              <div>
+                <dt>Канал</dt>
+                <dd>{client.channel}</dd>
+              </div>
+              <div>
+                <dt>E-mail</dt>
+                <dd>{client.email}</dd>
+              </div>
+              <div>
+                <dt>Телефон</dt>
+                <dd className="chat-arm__phone-row">
+                  <span>{phoneRevealed ? client.phoneFull : client.phoneMasked}</span>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setPhoneRevealed((value) => !value)}
+                  >
+                    {phoneRevealed ? 'Скрыть' : 'Показать'}
+                  </Button>
+                </dd>
+              </div>
+            </dl>
+          ) : (
+            <div className="chat-arm__phone-row">
+              <span className="app-muted">{client.phoneMasked}</span>
+              <Button variant="ghost" disabled={disabled}>
+                Изменить
+              </Button>
+            </div>
+          )}
         </Card>
-      ) : null}
 
-      <div className="chat-arm__hints" data-testid="sufler-hints">
-        {hints.length === 0 && !loading ? (
-          <p className="app-muted">Подсказки появятся после сообщения клиента.</p>
+        <header className="chat-arm__sufler-header">
+          <h2>Суфлёр</h2>
+          <StatusBadge status={loading ? 'info' : 'success'}>
+            {loading ? 'запрос…' : 'активен'}
+          </StatusBadge>
+        </header>
+
+        {error ? (
+          <Card className="chat-arm__error" role="alert">
+            {error}
+          </Card>
         ) : null}
-        {hints.map((hint, index) => (
-          <HintCard
-            key={hint.rank}
-            title={hintTitle(hint)}
-            relevance={`${hint.relevance_percent}%`}
-            relevancePercent={hint.relevance_percent}
-            relevanceStatus={relevanceStatusFromPercent(hint.relevance_percent)}
-            suzLink={hintSuz(hint)}
-            showFeedback
-            hintIndex={index + 1}
-            hintTotal={hints.length}
-            onInsert={
-              disabled || !onInsert
-                ? undefined
-                : () => onInsert(hint.text)
-            }
-            data-testid={`chat-hint-${hint.rank}`}
-          >
-            {hint.text}
-          </HintCard>
-        ))}
+
+        <div className="chat-arm__hints" data-testid="sufler-hints">
+          {hints.length === 0 && !loading ? (
+            <p className="app-muted">Подсказки появятся после сообщения клиента.</p>
+          ) : null}
+          {hints.map((hint, index) => (
+            <HintCard
+              key={hint.rank}
+              title={hintTitle(hint)}
+              relevance={`${hint.relevance_percent}%`}
+              relevancePercent={hint.relevance_percent}
+              relevanceStatus={relevanceStatusFromPercent(hint.relevance_percent)}
+              suzLink={hintSuz(hint)}
+              showFeedback
+              hintIndex={index + 1}
+              hintTotal={hints.length}
+              onInsert={
+                disabled || !onInsert
+                  ? undefined
+                  : () => onInsert(hint.text)
+              }
+              data-testid={`chat-hint-${hint.rank}`}
+            >
+              {hint.text}
+            </HintCard>
+          ))}
+        </div>
       </div>
 
       <footer className="chat-arm__sufler-footer">
