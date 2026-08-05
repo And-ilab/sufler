@@ -230,6 +230,9 @@ services:
     environment:
       VITE_API_PROXY_TARGET: http://backend:8000
       VITE_DEV_RBAC_ROLES: ${VITE_DEV_RBAC_ROLES:-contact_center_telephony_operator,ai_hub_admin}
+      # Must match AUTH_MOCK_LDAP_DEFAULT_PASSWORD so Admin/KB DEV auto-login works in browser
+      VITE_DEV_AUTH_USER: ${VITE_DEV_AUTH_USER:-dev-role-01}
+      VITE_DEV_AUTH_PASSWORD: ${AUTH_MOCK_LDAP_DEFAULT_PASSWORD:-dev-only-password}
     ports:
       - "${FRONTEND_PORT_HOST:-5173}:5173"
     volumes:
