@@ -12,18 +12,16 @@ BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "sufler.settings")
 
-import django  # noqa: E402
+import django
 
 django.setup()
 
-from django.test import Client, TestCase  # noqa: E402
+from django.test import Client, TestCase
 
-from tests.acceptance.fixtures import post_json  # noqa: E402
-from tests.acceptance.harness import mark_acceptance  # noqa: E402
+from tests.acceptance.fixtures import post_json
 
 
 class OnlineChatApiAcceptanceTest(TestCase):
-    @mark_acceptance("CHAT-OC-01")
     def test_widget_dialog_stores_first_and_last_name(self):
         client = Client()
         response = post_json(

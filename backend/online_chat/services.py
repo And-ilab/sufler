@@ -8,7 +8,6 @@ from django.utils import timezone
 
 from online_chat.models import Dialog, DialogMessage
 
-
 ARM_GROUP = "online_chat_arm"
 
 

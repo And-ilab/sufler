@@ -36,10 +36,10 @@ class Dialog(models.Model):
     closed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        ordering = ["-updated_at"]
-        indexes = [
+        ordering = ("-updated_at",)
+        indexes = (
             models.Index(fields=["status", "-updated_at"]),
-        ]
+        )
 
     def __str__(self) -> str:
         return f"{self.client_display_name()} · {self.status}"
@@ -83,7 +83,7 @@ class DialogMessage(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
-        ordering = ["created_at"]
+        ordering = ("created_at",)
 
     def __str__(self) -> str:
         return f"{self.speaker}: {self.text[:40]}"

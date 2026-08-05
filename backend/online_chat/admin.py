@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import ClassVar
+
 from django.contrib import admin
 
 from online_chat.models import Dialog, DialogMessage
@@ -21,7 +25,7 @@ class DialogAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "channel")
     search_fields = ("client_first_name", "client_last_name", "client_phone", "preview")
-    inlines = [DialogMessageInline]
+    inlines: ClassVar[list] = [DialogMessageInline]
 
 
 @admin.register(DialogMessage)
