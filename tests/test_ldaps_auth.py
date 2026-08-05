@@ -22,7 +22,7 @@ django.setup()
 from django.contrib.auth import get_user_model  # noqa: E402
 from django.contrib.auth.models import Group  # noqa: E402
 from django.core.exceptions import ImproperlyConfigured  # noqa: E402
-from django.test import Client, SimpleTestCase, TestCase, override_settings  # noqa: E402
+from django.test import Client, SimpleTestCase, TestCase  # noqa: E402
 
 from auth.c2_groups import C2_ROLE_GROUP_MAP, c2_role_group_map  # noqa: E402
 from auth.ldap_config import (  # noqa: E402

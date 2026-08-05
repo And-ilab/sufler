@@ -128,7 +128,6 @@ def run_locust_pipeline(*, users: int, duration_s: int, spawn_rate: float) -> di
         # Fallback: aggregate all.
         entry = env.stats.total
 
-    response_times = sorted(entry.response_times.keys())
     # Locust stores response_times as {ms_bucket: count}; expand approx samples.
     samples: list[float] = []
     for bucket, count in entry.response_times.items():

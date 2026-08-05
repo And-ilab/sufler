@@ -28,7 +28,6 @@ from tests.acceptance.fixtures import (  # noqa: E402
     seed_cc_chunk,
     user_for_role,
 )
-from tests.acceptance.harness import update_matrix_status  # noqa: E402
 
 __all__ = [
     "api_client_for",
