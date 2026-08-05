@@ -40,6 +40,128 @@ function clampPanelSize(width: number, height: number): { w: number; h: number }
   };
 }
 
+type FeedbackChipChoice = "used" | "not_used" | "partial";
+
+type FeedbackChipPalette = {
+  idleBg: string;
+  idleBorder: string;
+  activeBg: string;
+  activeBorder: string;
+  activeColor: string;
+};
+
+/** Разноцветные чипы оценки (как в суфлёре): зелёный / сине-серый / янтарный. */
+function feedbackChipPalette(_t: CanvasHostTheme, choice: FeedbackChipChoice): FeedbackChipPalette {
+  if (choice === "used") {
+    return {
+      idleBg: "#E6F4EA",
+      idleBorder: "#B7DFC5",
+      activeBg: "#C8EBD4",
+      activeBorder: "#1F8A65",
+      activeColor: "#1F8A65",
+    };
+  }
+  if (choice === "not_used") {
+    return {
+      idleBg: "#E8F0FA",
+      idleBorder: "#B8D4EF",
+      activeBg: "#D4E6F7",
+      activeBorder: "#3685BF",
+      activeColor: "#1565C0",
+    };
+  }
+  return {
+    idleBg: "#FFF6D6",
+    idleBorder: "#E8D090",
+    activeBg: "#FFEFB8",
+    activeBorder: "#C06028",
+    activeColor: "#8A6D00",
+  };
+}
+
+function feedbackChipStyle(
+  t: CanvasHostTheme,
+  choice: FeedbackChipChoice,
+  selected: boolean,
+  disabled: boolean,
+): CSSProperties {
+  const palette = feedbackChipPalette(t, choice);
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    fontSize: 11,
+    fontWeight: selected ? 600 : 500,
+    padding: "4px 10px",
+    borderRadius: 4,
+    border: `1px solid ${selected ? palette.activeBorder : palette.idleBorder}`,
+    background: selected ? palette.activeBg : palette.idleBg,
+    color: selected ? palette.activeColor : "#4D443C",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.55 : 1,
+    lineHeight: 1.3,
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+    boxSizing: "border-box",
+    userSelect: "none",
+  };
+}
+
+const SUFLER_FEEDBACK_OPTIONS: { id: FeedbackChipChoice; label: string }[] = [
+  { id: "used", label: "Воспользовался" },
+  { id: "not_used", label: "Не воспользовался" },
+  { id: "partial", label: "Неполный ответ" },
+];
+
+const ASSISTANT_FEEDBACK_OPTIONS: { id: FeedbackChipChoice; label: string }[] = [
+  { id: "used", label: "Полезно" },
+  { id: "partial", label: "Неполный ответ" },
+  { id: "not_used", label: "Неверно" },
+];
+
+function FeedbackChipRow({
+  t,
+  options,
+  stateKey,
+}: {
+  t: CanvasHostTheme;
+  options: { id: FeedbackChipChoice; label: string }[];
+  stateKey: string;
+}): JSX.Element {
+  const [selected, setSelected] = useCanvasState<FeedbackChipChoice | null>(stateKey, null);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 4,
+        marginTop: 6,
+        alignItems: "center",
+      }}
+    >
+      {options.map((option) => (
+        <span
+          key={option.id}
+          role="button"
+          tabIndex={0}
+          title={option.label}
+          style={feedbackChipStyle(t, option.id, selected === option.id, false)}
+          onClick={() => setSelected(selected === option.id ? null : option.id)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setSelected(selected === option.id ? null : option.id);
+            }
+          }}
+        >
+          {option.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /** Роли ПО — по Прил. 1 и планам ТЗ модулей (не вымышленные AD-группы). */
 type RoleId =
   | "system_admin"
@@ -902,11 +1024,7 @@ function AssistantTab({ theme }: { theme: CanvasHostTheme }): JSX.Element {
                   <Button variant="ghost">Открыть</Button>
                 </Row>
               </Stack>
-              <Row gap={6} style={{ marginTop: 8 }}>
-                <Button variant="ghost">Полезно</Button>
-                <Button variant="ghost">Неполный ответ</Button>
-                <Button variant="ghost">Неверно</Button>
-              </Row>
+              <FeedbackChipRow t={theme} options={ASSISTANT_FEEDBACK_OPTIONS} stateKey="assistantFeedback_demo" />
             </div>
           </Stack>
         </div>
@@ -1281,20 +1399,8 @@ function groupSuflerPairs(
     }));
 }
 
-function SuflerFeedbackRow(): JSX.Element {
-  return (
-    <Row gap={4} wrap style={{ marginTop: 6 }}>
-      <Button variant="ghost" style={{ fontSize: 11, padding: "2px 8px" }}>
-        ✓ Воспользовался
-      </Button>
-      <Button variant="ghost" style={{ fontSize: 11, padding: "2px 8px" }}>
-        ✗ Не воспользовался
-      </Button>
-      <Button variant="ghost" style={{ fontSize: 11, padding: "2px 8px" }}>
-        Неполный ответ
-      </Button>
-    </Row>
-  );
+function SuflerFeedbackRow({ t, cardId }: { t: CanvasHostTheme; cardId: string }): JSX.Element {
+  return <FeedbackChipRow t={t} options={SUFLER_FEEDBACK_OPTIONS} stateKey={`suflerFeedback_${cardId}`} />;
 }
 
 function SuflerPairBlock({
@@ -1384,7 +1490,7 @@ function SuflerPairBlock({
                   </Button>
                 )}
               </Row>
-              <SuflerFeedbackRow />
+              <SuflerFeedbackRow t={theme} cardId={hint.id} />
             </div>
           );
         })
