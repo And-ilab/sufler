@@ -219,7 +219,8 @@ export function AiHubAdminApp({
   )
 
   useEffect(() => {
-    resetDevSessionCache()
+    // Do not resetDevSessionCache here — KbAdminScreen / other screens also
+    // call ensureDevSession on mount; clearing inFlight races and can hang login.
     void ensureDevSession()
   }, [])
 

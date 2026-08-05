@@ -291,7 +291,6 @@ export function AssistantChat({
     setKbStatus('loading')
     void (async () => {
       try {
-        resetDevSessionCache()
         await ensureDevSession()
         const items = await fetchAssistantKnowledgeBases()
         if (cancelled) return

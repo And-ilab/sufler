@@ -86,9 +86,8 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
     await ensureDevSession()
     const next = await listKnowledgeBases()
     setItems(next)
-    const targetId = preferId !== undefined
-      ? preferId
-      : selectedIdRef.current ?? next[0]?.id ?? null
+    // preferId / selected / first — use ?? so null also falls through to auto-select
+    const targetId = preferId ?? selectedIdRef.current ?? next[0]?.id ?? null
     setSelectedId(targetId)
     if (targetId == null) {
       setSelected(null)
@@ -99,11 +98,11 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
     return detail
   }, [])
 
-  const loadInitial = useCallback(async () => {
+  const loadInitial = useCallback(async (forceRelogin = false) => {
     setLoading(true)
     setError('')
     try {
-      resetDevSessionCache()
+      if (forceRelogin) resetDevSessionCache()
       const ok = await ensureDevSession()
       if (!ok) {
         setError(
@@ -113,7 +112,8 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
         setSelected(null)
         return
       }
-      await refreshList(null)
+      // Call without preferId so the first KB is auto-selected (null would clear selection).
+      await refreshList()
     } catch (requestError) {
       setError(formatKbError(requestError, 'Не удалось загрузить базы знаний'))
     } finally {
@@ -251,7 +251,7 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
     if (!canEdit || !selected || busy) return
     await runKbAction(async () => {
       await deleteKnowledgeBase(selected.id)
-      await refreshList(null)
+      await refreshList()
       setNotice('База знаний удалена.')
     }, 'Не удалось удалить базу знаний')
   }
@@ -314,7 +314,7 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
             <span>{error}</span>
           </div>
           <div className="kb-admin__error-actions">
-            <Button type="button" variant="ghost" onClick={() => void loadInitial()}>
+            <Button type="button" variant="ghost" onClick={() => void loadInitial(true)}>
               Повторить
             </Button>
             <Button type="button" variant="ghost" onClick={() => setError('')}>
