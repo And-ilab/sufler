@@ -1,6 +1,6 @@
 {
-  "mockupRole": "cc_operator",
-  "mainTab": "sufler",
+  "mockupRole": "assistant_user",
+  "mainTab": "assistant",
   "ocrSubTab": "queue",
   "panelOpen": true,
   "panelWidthPx": 560,

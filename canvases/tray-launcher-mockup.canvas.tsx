@@ -366,6 +366,12 @@ const SUFLER_FEEDBACK_OPTIONS: { id: SuflerFeedbackChoice; label: string }[] = [
   { id: "partial", label: "Неполный ответ" },
 ];
 
+const ASSISTANT_FEEDBACK_OPTIONS: { id: SuflerFeedbackChoice; label: string }[] = [
+  { id: "used", label: "Полезно" },
+  { id: "partial", label: "Неполный ответ" },
+  { id: "not_used", label: "Неверно" },
+];
+
 type FeedbackChipPalette = {
   idleBg: string;
   idleBorder: string;
@@ -374,32 +380,31 @@ type FeedbackChipPalette = {
   activeColor: string;
 };
 
-function feedbackChipPalette(t: CanvasHostTheme, choice: SuflerFeedbackChoice): FeedbackChipPalette {
-  const isLight = t.kind === "light";
+function feedbackChipPalette(_t: CanvasHostTheme, choice: SuflerFeedbackChoice): FeedbackChipPalette {
   if (choice === "used") {
     return {
-      idleBg: t.diff.insertedLine,
-      idleBorder: isLight ? "#1F8A6533" : "#3FA26640",
-      activeBg: isLight ? "#1F8A6533" : "#3FA2664D",
-      activeBorder: t.diff.stripAdded,
-      activeColor: isLight ? "#1F8A65" : "#52B896",
+      idleBg: "#E6F4EA",
+      idleBorder: "#B7DFC5",
+      activeBg: "#C8EBD4",
+      activeBorder: "#1F8A65",
+      activeColor: "#1F8A65",
     };
   }
   if (choice === "not_used") {
     return {
-      idleBg: isLight ? "#3685BF12" : "#599CE71A",
-      idleBorder: isLight ? "#3685BF2E" : "#599CE738",
-      activeBg: isLight ? "#3685BF24" : "#599CE730",
-      activeBorder: isLight ? "#3685BF70" : "#599CE788",
-      activeColor: t.text.primary,
+      idleBg: "#E8F0FA",
+      idleBorder: "#B8D4EF",
+      activeBg: "#D4E6F7",
+      activeBorder: "#3685BF",
+      activeColor: "#1565C0",
     };
   }
   return {
-    idleBg: isLight ? "#E8C03014" : "#E8C0301F",
-    idleBorder: isLight ? "#E8C03040" : "#E8C03050",
-    activeBg: isLight ? "#E8C0302E" : "#E8C03042",
-    activeBorder: isLight ? "#C06028A8" : "#F0A040B3",
-    activeColor: isLight ? "#8A6D00" : "#E8C030",
+    idleBg: "#FFF6D6",
+    idleBorder: "#E8D090",
+    activeBg: "#FFEFB8",
+    activeBorder: "#C06028",
+    activeColor: "#8A6D00",
   };
 }
 
@@ -424,21 +429,20 @@ function feedbackChipStyle(
   return {
     display: "inline-flex",
     alignItems: "center",
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: selected ? 600 : 500,
-    padding: "2px 6px",
+    padding: "4px 10px",
     borderRadius: 4,
     border: `1px solid ${selected ? palette.activeBorder : palette.idleBorder}`,
     background: selected ? palette.activeBg : palette.idleBg,
-    color: selected ? palette.activeColor : t.text.secondary,
+    color: selected ? palette.activeColor : "#4D443C",
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.55 : 1,
-    lineHeight: 1.2,
+    lineHeight: 1.3,
     whiteSpace: "nowrap",
     flexShrink: 0,
-    appearance: "none",
-    fontFamily: "inherit",
-    outline: "none",
+    boxSizing: "border-box",
+    userSelect: "none",
   };
 }
 
@@ -446,10 +450,12 @@ function SuflerFeedbackRow({
   t,
   scheme,
   cardId,
+  options = SUFLER_FEEDBACK_OPTIONS,
 }: {
   t: CanvasHostTheme;
   scheme: SchemePalette;
   cardId: string;
+  options?: { id: SuflerFeedbackChoice; label: string }[];
 }): JSX.Element {
   const [selected, setSelected] = useCanvasState<SuflerFeedbackChoice | null>(`suflerFeedback_${cardId}`, null);
 
@@ -464,16 +470,23 @@ function SuflerFeedbackRow({
         alignItems: "center",
       }}
     >
-      {SUFLER_FEEDBACK_OPTIONS.map((option) => (
-        <button
+      {options.map((option) => (
+        <span
           key={option.id}
-          type="button"
+          role="button"
+          tabIndex={0}
           title={option.label}
           style={feedbackChipStyle(t, option.id, selected === option.id, false)}
           onClick={() => setSelected(selected === option.id ? null : option.id)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setSelected(selected === option.id ? null : option.id);
+            }
+          }}
         >
           {option.label}
-        </button>
+        </span>
       ))}
     </div>
   );
@@ -1227,17 +1240,12 @@ function AssistantWindow({
                 </Button>
               </Row>
             </Stack>
-            <Row style={{ gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-              <Button variant="ghost" size="sm">
-                Полезно
-              </Button>
-              <Button variant="ghost" size="sm">
-                Неполный ответ
-              </Button>
-              <Button variant="ghost" size="sm">
-                Неверно
-              </Button>
-            </Row>
+            <SuflerFeedbackRow
+              t={theme}
+              scheme={scheme}
+              cardId="assistant_demo"
+              options={ASSISTANT_FEEDBACK_OPTIONS}
+            />
           </div>
         </Stack>
       </div>
