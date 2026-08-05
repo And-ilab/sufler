@@ -9,6 +9,10 @@ import {
   type ToolRunState,
 } from './types'
 import {
+  ensureDevSession,
+  resetDevSessionCache,
+} from '../auth/ensureDevSession'
+import {
   fetchAssistantKnowledgeBases,
   type AssistantKbOption,
 } from './api/knowledgeBases'
@@ -285,19 +289,22 @@ export function AssistantChat({
 
     let cancelled = false
     setKbStatus('loading')
-    void fetchAssistantKnowledgeBases()
-      .then((items) => {
+    void (async () => {
+      try {
+        resetDevSessionCache()
+        await ensureDevSession()
+        const items = await fetchAssistantKnowledgeBases()
         if (cancelled) return
         setKbCatalog(items)
         setKbSelected(Object.fromEntries(items.map((kb) => [kb.id, true])))
         setKbStatus('ready')
-      })
-      .catch(() => {
+      } catch {
         if (cancelled) return
         setKbCatalog([])
         setKbSelected({})
         setKbStatus('error')
-      })
+      }
+    })()
     return () => {
       cancelled = true
     }

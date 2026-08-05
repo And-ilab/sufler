@@ -11,6 +11,7 @@ import { Card } from './Card'
 import { Fab } from './Fab'
 import { StatusBadge } from './StatusBadge'
 import {
+  canOpenAdminCenter,
   getAllowedLauncherModules,
   type LauncherModule,
 } from './portalLauncherAccess'
@@ -212,10 +213,12 @@ function PortalBackdrop({
   children,
   roleLabel,
   onChangeRole,
+  showAdminCenter,
 }: {
   children: ReactNode
   roleLabel?: string | null
   onChangeRole?: () => void
+  showAdminCenter?: boolean
 }) {
   return (
     <div className="portal-launcher__backdrop">
@@ -226,8 +229,28 @@ function PortalBackdrop({
           <a href="#requests">Заявки</a>
           <a href="#knowledge">База знаний</a>
           <a href="#contact-center">Контакт-центр</a>
+          {showAdminCenter && (
+            <a
+              href="/ai-hub/admin"
+              className="portal-launcher__admin-link"
+              data-testid="admin-center-link"
+            >
+              Центр настроек
+            </a>
+          )}
         </nav>
         <div className="portal-launcher__portal-user">
+          {showAdminCenter && (
+            <a
+              href="/ai-hub/admin"
+              className="portal-launcher__settings-btn"
+              aria-label="Центр настроек"
+              title="Центр настроек"
+              data-testid="admin-center-gear"
+            >
+              ≡
+            </a>
+          )}
           {roleLabel && (
             <button
               type="button"
@@ -272,6 +295,7 @@ export function PortalLauncher({
     () => getAllowedLauncherModules(roles),
     [roles],
   )
+  const showAdminCenter = useMemo(() => canOpenAdminCenter(roles), [roles])
   const [menuOpen, setMenuOpen] = useState(initialMenuOpen)
   const [openWindows, setOpenWindows] = useState<Set<LauncherModule>>(
     () => new Set(initialWindows.filter((module) => modules.includes(module))),
@@ -296,7 +320,11 @@ export function PortalLauncher({
   }
 
   return (
-    <PortalBackdrop roleLabel={roleLabel} onChangeRole={onChangeRole}>
+    <PortalBackdrop
+      roleLabel={roleLabel}
+      onChangeRole={onChangeRole}
+      showAdminCenter={showAdminCenter}
+    >
       {children}
 
       {openWindows.has('sufler') && (

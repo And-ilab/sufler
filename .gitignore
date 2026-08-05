@@ -6,6 +6,8 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.local
+**/.env.local
 backend/services/asr/model/
 backend/var/
 

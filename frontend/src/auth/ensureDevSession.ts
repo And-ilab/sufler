@@ -15,13 +15,7 @@ async function fetchAuthMe(): Promise<{ authenticated: boolean }> {
   return (await response.json()) as { authenticated: boolean }
 }
 
-async function loginDevUser(): Promise<boolean> {
-  const username = String(
-    import.meta.env.VITE_DEV_AUTH_USER ?? 'dev-role-01',
-  ).trim()
-  const password = String(
-    import.meta.env.VITE_DEV_AUTH_PASSWORD ?? 'dev-only-password',
-  )
+async function tryLogin(username: string, password: string): Promise<boolean> {
   const response = await fetch('/api/auth/login/', {
     method: 'POST',
     credentials: 'include',
@@ -31,6 +25,28 @@ async function loginDevUser(): Promise<boolean> {
   if (!response.ok) return false
   const body = (await response.json()) as { ok?: boolean; authenticated?: boolean }
   return Boolean(body.ok || body.authenticated)
+}
+
+async function loginDevUser(): Promise<boolean> {
+  const username = String(
+    import.meta.env.VITE_DEV_AUTH_USER ?? 'dev-role-01',
+  ).trim()
+  const configured = String(
+    import.meta.env.VITE_DEV_AUTH_PASSWORD ?? '',
+  ).trim()
+  // Try configured password first, then common local/docker placeholders.
+  const passwords = [
+    configured,
+    'dev-only-password',
+    'replace-with-dev-only-password',
+  ].filter(Boolean)
+  const unique = [...new Set(passwords)]
+  for (const password of unique) {
+    if (await tryLogin(username, password).catch(() => false)) {
+      return true
+    }
+  }
+  return false
 }
 
 /** Drop cached in-flight promise so the next call re-checks / re-logins. */
