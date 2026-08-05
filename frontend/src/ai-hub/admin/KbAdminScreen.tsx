@@ -424,7 +424,7 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf,.docx,.txt,.rtf,.xlsx,.pptx,.png,.jpg,.jpeg"
+                  accept=".pdf,.doc,.docx,.txt,.rtf,.xlsx,.pptx,.png,.jpg,.jpeg"
                   multiple
                   hidden
                   disabled={!canEdit || busy}

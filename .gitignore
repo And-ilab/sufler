@@ -36,5 +36,9 @@ docs/remarks/**/_tmp_check/
 **/mermaid-filter.err
 **/_pipeline_status.txt
 
-# Local scraped / seeded KB corpora (not for git)
-local/
+# Local KB drop-ins: ignore by default, keep manual seed folder in git
+local/*
+!local/kb/
+local/kb/*
+!local/kb/manual/
+!local/kb/manual/**

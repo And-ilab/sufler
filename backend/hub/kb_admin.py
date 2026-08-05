@@ -28,6 +28,7 @@ ARTICLE_ID_BASE = 2_000_000_000
 ALLOWED_EXTENSIONS = frozenset(
     {
         ".pdf",
+        ".doc",
         ".docx",
         ".txt",
         ".rtf",
@@ -171,6 +172,28 @@ def _extract_docx_text(data: bytes) -> str:
     return text
 
 
+def _extract_doc_text(filename: str, data: bytes) -> str:
+    """Best-effort text from legacy .doc (OLE) for local seed / Hub upload."""
+    stem = Path(filename).stem.replace("_", " ").replace("-", " ")
+    chunks: list[str] = []
+    for encoding in ("utf-16-le", "cp1251", "latin-1"):
+        try:
+            decoded = data.decode(encoding, errors="ignore")
+        except Exception:
+            continue
+        # Keep runs of letters/digits/punctuation (incl. Cyrillic).
+        runs = re.findall(
+            r"[\w\u0400-\u04FF][\w\u0400-\u04FF\s.,:;!?%№«»\"'()\-/]{8,}",
+            decoded,
+            flags=re.UNICODE,
+        )
+        chunks.extend(runs)
+    text = normalize_text(" ".join(chunks))
+    if len(text) >= 40:
+        return text
+    return normalize_text(f"{stem} {filename}")
+
+
 def _extract_pdf_text(data: bytes) -> str:
     try:
         from pypdf import PdfReader  # type: ignore
@@ -205,6 +228,8 @@ def extract_document_text(filename: str, data: bytes) -> str:
         return text
     if extension == ".docx":
         return _extract_docx_text(data)
+    if extension == ".doc":
+        return _extract_doc_text(filename, data)
     if extension == ".pdf":
         return _extract_pdf_text(data)
     # Binary office/image formats: keep a searchable filename marker for MVP.
