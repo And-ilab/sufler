@@ -1,5 +1,9 @@
-import { useEffect, useState } from 'react'
-import { ensureDevSession } from '../../auth/ensureDevSession'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  ensureDevSession,
+  isAuthErrorMessage,
+  resetDevSessionCache,
+} from '../../auth/ensureDevSession'
 import { Button, Card, StatusBadge } from '../../components'
 import {
   createAssistantKb,
@@ -15,6 +19,9 @@ interface CapabilitiesScreenProps {
   canEdit?: boolean
 }
 
+const AUTH_HINT =
+  'Нет сессии авторизации. Нажмите «Обновить» — в DEV выполняется вход как dev-role-01.'
+
 export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) {
   const [items, setItems] = useState<AssistantCapability[]>([])
   const [kbs, setKbs] = useState<AssistantKb[]>([])
@@ -22,45 +29,60 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
   const [error, setError] = useState('')
   const [kbName, setKbName] = useState('')
   const [creatingKb, setCreatingKb] = useState(false)
+  const [loading, setLoading] = useState(true)
 
-  const refresh = async () => {
-    await ensureDevSession()
-    const [caps, nextKbs] = await Promise.all([
-      listAssistantCapabilities(),
-      listAssistantKbs(),
-    ])
-    setItems(caps)
-    setKbs(nextKbs)
-  }
-
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        await refresh()
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Ошибка загрузки')
-        }
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      resetDevSessionCache()
+      let ok = await ensureDevSession()
+      if (!ok) {
+        resetDevSessionCache()
+        ok = await ensureDevSession()
       }
-    })()
-    return () => {
-      cancelled = true
+      if (!ok) {
+        setItems([])
+        setKbs([])
+        setError(AUTH_HINT)
+        return
+      }
+      const [caps, nextKbs] = await Promise.all([
+        listAssistantCapabilities(),
+        listAssistantKbs(),
+      ])
+      setItems(caps)
+      setKbs(nextKbs)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Ошибка загрузки'
+      setItems([])
+      setKbs([])
+      setError(isAuthErrorMessage(message) ? AUTH_HINT : message)
+    } finally {
+      setLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
 
   const toggle = async (item: AssistantCapability) => {
     if (!canEdit || busyCode) return
     setBusyCode(item.code)
     setError('')
     try {
-      await ensureDevSession()
+      if (!(await ensureDevSession())) {
+        setError(AUTH_HINT)
+        return
+      }
       const updated = await setCapabilityEnabled(item.code, !item.enabled)
       setItems((current) =>
         current.map((row) => (row.code === updated.code ? updated : row)),
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка сохранения')
+      const message = err instanceof Error ? err.message : 'Ошибка сохранения'
+      setError(isAuthErrorMessage(message) ? AUTH_HINT : message)
     } finally {
       setBusyCode('')
     }
@@ -71,12 +93,16 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
     setCreatingKb(true)
     setError('')
     try {
-      await ensureDevSession()
+      if (!(await ensureDevSession())) {
+        setError(AUTH_HINT)
+        return
+      }
       await createAssistantKb({ name: kbName.trim() })
       setKbName('')
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка создания KB')
+      const message = err instanceof Error ? err.message : 'Ошибка создания KB'
+      setError(isAuthErrorMessage(message) ? AUTH_HINT : message)
     } finally {
       setCreatingKb(false)
     }
@@ -141,30 +167,45 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
           </div>
           <StatusBadge status="info">namespace</StatusBadge>
         </header>
-        <ul className="asst-admin-kb-list">
-          {kbs.map((kb) => (
-            <li key={kb.id} data-testid={`asst-kb-${kb.slug}`}>
-              <strong>{kb.name}</strong>
-              <code>{kb.slug}</code>
-              <StatusBadge status="success">{kb.status}</StatusBadge>
-            </li>
-          ))}
-        </ul>
+        {kbs.length === 0 && !loading ? (
+          <p className="asst-admin-note" data-testid="asst-kb-empty">
+            Пока нет карточек assistant_*. Создайте ниже — они появятся в выпадашке ИИ-чата.
+          </p>
+        ) : (
+          <ul className="asst-admin-kb-list">
+            {kbs.map((kb) => (
+              <li key={kb.id} data-testid={`asst-kb-${kb.slug}`}>
+                <strong>{kb.name}</strong>
+                <code>{kb.slug}</code>
+                <StatusBadge status="success">{kb.status}</StatusBadge>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="asst-admin-kb-create">
           <input
             value={kbName}
-            disabled={!canEdit}
+            disabled={!canEdit || loading}
             placeholder="Название новой KB"
             onChange={(event) => setKbName(event.target.value)}
             data-testid="asst-kb-name"
           />
           <Button
             type="button"
-            disabled={!canEdit || creatingKb || !kbName.trim()}
+            disabled={!canEdit || creatingKb || loading || !kbName.trim()}
             onClick={() => void addKb()}
             data-testid="asst-kb-create"
           >
-            + Создать KB
+            + Создать КБ
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={loading}
+            onClick={() => void refresh()}
+            data-testid="asst-kb-refresh"
+          >
+            Обновить
           </Button>
         </div>
       </Card>

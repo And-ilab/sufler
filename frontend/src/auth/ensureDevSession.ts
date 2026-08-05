@@ -54,31 +54,34 @@ export function resetDevSessionCache(): void {
   inFlight = null
 }
 
+async function ensureDevSessionOnce(): Promise<boolean> {
+  // Always re-check /me/ — a prior success must not mask an expired cookie.
+  const me = await fetchAuthMe().catch(() => ({ authenticated: false }))
+  if (me.authenticated) return true
+
+  if (!isDevRuntime()) return false
+
+  const loggedIn = await loginDevUser().catch(() => false)
+  if (!loggedIn) return false
+
+  const again = await fetchAuthMe().catch(() => ({ authenticated: false }))
+  return again.authenticated
+}
+
 /** Returns true when the browser has an authenticated Django session (+ CSRF cookie). */
 export async function ensureDevSession(): Promise<boolean> {
   if (inFlight) return inFlight
 
-  inFlight = (async () => {
-    // GET /me/ also ensures csrftoken cookie for subsequent POST/upload.
-    const me = await fetchAuthMe().catch(() => ({ authenticated: false }))
-    if (me.authenticated) return true
-
-    if (!isDevRuntime()) return false
-
-    const loggedIn = await loginDevUser().catch(() => false)
-    if (!loggedIn) return false
-
-    const again = await fetchAuthMe().catch(() => ({ authenticated: false }))
-    return again.authenticated
-  })()
+  inFlight = ensureDevSessionOnce()
 
   try {
     const ok = await inFlight
-    if (!ok) inFlight = null
     return ok
   } catch {
-    inFlight = null
     return false
+  } finally {
+    // Only coalesce concurrent callers; never keep a sticky "logged in" cache.
+    inFlight = null
   }
 }
 

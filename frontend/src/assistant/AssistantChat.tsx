@@ -291,7 +291,17 @@ export function AssistantChat({
     setKbStatus('loading')
     void (async () => {
       try {
-        await ensureDevSession()
+        let ok = await ensureDevSession()
+        if (!ok) {
+          ok = await ensureDevSession()
+        }
+        if (!ok) {
+          if (cancelled) return
+          setKbCatalog([])
+          setKbSelected({})
+          setKbStatus('error')
+          return
+        }
         const items = await fetchAssistantKnowledgeBases()
         if (cancelled) return
         setKbCatalog(items)
