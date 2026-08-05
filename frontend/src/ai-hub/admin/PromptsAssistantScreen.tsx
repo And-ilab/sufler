@@ -18,9 +18,9 @@ interface PromptsAssistantScreenProps {
 }
 
 const TYPE_LABEL: Record<PromptType, string> = {
-  system: 'System',
-  task: 'Task',
-  scope: 'Scope',
+  system: 'Системный',
+  task: 'Рабочий',
+  scope: 'Область',
 }
 
 export function PromptsAssistantScreen({
@@ -210,9 +210,9 @@ export function PromptsAssistantScreen({
             aria-label="Тип промпта"
           >
             <option value="">Все типы</option>
-            <option value="system">System</option>
-            <option value="task">Task</option>
-            <option value="scope">Scope</option>
+            <option value="system">{TYPE_LABEL.system}</option>
+            <option value="task">{TYPE_LABEL.task}</option>
+            <option value="scope">{TYPE_LABEL.scope}</option>
           </select>
           <ul>
             {filtered.map((item) => (
@@ -269,13 +269,13 @@ export function PromptsAssistantScreen({
                     disabled={!canEdit}
                     onChange={(event) => setPromptType(event.target.value as PromptType)}
                   >
-                    <option value="system">System</option>
-                    <option value="task">Task</option>
-                    <option value="scope">Scope</option>
+                    <option value="system">{TYPE_LABEL.system}</option>
+                    <option value="task">{TYPE_LABEL.task}</option>
+                    <option value="scope">{TYPE_LABEL.scope}</option>
                   </select>
                 </label>
                 <label>
-                  Scope
+                  Область
                   <select
                     value={scope}
                     disabled={!canEdit}
@@ -329,7 +329,7 @@ export function PromptsAssistantScreen({
 
         <aside className="asst-admin-preview" data-testid="prompt-preview">
           <header>
-            <strong>Preview</strong>
+            <strong>Просмотр</strong>
             <StatusBadge status="info">stub</StatusBadge>
           </header>
           <label>

@@ -237,11 +237,11 @@ function SuflerPanel({ callActive }: { callActive: boolean }) {
         <small>Клиент · 10:16</small>
         <p>Можно ли изменить лимит международного перевода?</p>
       </Card>
-      <HintCard title="Повышение лимита перевода" relevance="94%">
+      <HintCard title="Повышение лимита перевода" relevance="94%" relevancePercent={94} showFeedback>
         Временное повышение лимита доступно после проверки операции. Постоянное
         изменение оформляется в отделении с документом.
       </HintCard>
-      <HintCard title="Лимиты международных операций" relevance="88%">
+      <HintCard title="Лимиты международных операций" relevance="88%" relevancePercent={88} showFeedback>
         Проверьте текущий лимит в разделе «Настройки» → «Лимиты».
       </HintCard>
       <p className="hub-sufler-note">Ответ озвучивает оператор. Автоотправка клиенту отключена.</p>

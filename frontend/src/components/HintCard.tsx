@@ -7,7 +7,18 @@ import {
   type ReactNode,
 } from 'react'
 import { StatusBadge, type StatusBadgeStatus } from './StatusBadge'
+import {
+  HINT_FEEDBACK_OPTIONS,
+  parseRelevancePercent,
+  relevanceStatusFromPercent,
+  relevanceTierFromPercent,
+  type HintFeedbackChoice,
+  type RelevanceTier,
+} from './hintRelevance'
 import './components.css'
+
+export type { HintFeedbackChoice, RelevanceTier }
+export { HINT_FEEDBACK_OPTIONS, parseRelevancePercent, relevanceTierFromPercent }
 
 export interface HintSuzLink {
   title: string
@@ -17,6 +28,7 @@ export interface HintSuzLink {
 export interface HintCardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title' | 'onChange'> {
   title: string
   relevance?: string
+  relevancePercent?: number
   relevanceStatus?: StatusBadgeStatus
   suzLink?: HintSuzLink | null
   defaultExpanded?: boolean
@@ -24,6 +36,12 @@ export interface HintCardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'tit
   onExpandedChange?: (expanded: boolean) => void
   onInsert?: () => void
   insertLabel?: string
+  /** §4.3.1.9 — show ОС buttons when expanded (telephony / online-chat). */
+  showFeedback?: boolean
+  feedbackValue?: HintFeedbackChoice | null
+  onFeedback?: (choice: HintFeedbackChoice) => void
+  hintIndex?: number
+  hintTotal?: number
   children?: ReactNode
 }
 
@@ -32,7 +50,8 @@ export const HintCard = forwardRef<HTMLDivElement, HintCardProps>(
     {
       title,
       relevance = 'Высокая релевантность',
-      relevanceStatus = 'info',
+      relevancePercent,
+      relevanceStatus,
       suzLink = null,
       children,
       defaultExpanded = false,
@@ -40,6 +59,11 @@ export const HintCard = forwardRef<HTMLDivElement, HintCardProps>(
       onExpandedChange,
       onInsert,
       insertLabel = 'Вставить в ответ',
+      showFeedback = false,
+      feedbackValue,
+      onFeedback,
+      hintIndex,
+      hintTotal,
       className = '',
       onClick,
       onMouseEnter,
@@ -53,8 +77,17 @@ export const HintCard = forwardRef<HTMLDivElement, HintCardProps>(
   ) => {
     const [internalExpanded, setInternalExpanded] = useState(defaultExpanded)
     const [hoverExpanded, setHoverExpanded] = useState(false)
+    const [localFeedback, setLocalFeedback] = useState<HintFeedbackChoice | null>(null)
     const contentId = useId()
     const isExpanded = expanded ?? (internalExpanded || hoverExpanded)
+    const feedbackControlled = feedbackValue !== undefined
+    const selectedFeedback = feedbackControlled ? feedbackValue : localFeedback
+
+    const percent = relevancePercent ?? parseRelevancePercent(relevance)
+    const tier = percent == null ? null : relevanceTierFromPercent(percent)
+    const badgeStatus =
+      relevanceStatus
+      ?? (percent == null ? 'info' : relevanceStatusFromPercent(percent))
 
     const setExpanded = (next: boolean) => {
       if (expanded === undefined) setInternalExpanded(next)
@@ -71,6 +104,17 @@ export const HintCard = forwardRef<HTMLDivElement, HintCardProps>(
       onKeyDown?.(event)
     }
 
+    const selectFeedback = (choice: HintFeedbackChoice) => {
+      const next = selectedFeedback === choice ? null : choice
+      if (!feedbackControlled) setLocalFeedback(next)
+      if (next) onFeedback?.(next)
+    }
+
+    const indexLabel =
+      hintIndex != null && hintTotal != null
+        ? `Подсказка ${hintIndex} из ${hintTotal}`
+        : null
+
     return (
       <div
         ref={ref}
@@ -78,7 +122,13 @@ export const HintCard = forwardRef<HTMLDivElement, HintCardProps>(
         tabIndex={0}
         aria-expanded={isExpanded}
         aria-controls={contentId}
-        className={`ui-hint ${className}`.trim()}
+        className={[
+          'ui-hint',
+          tier ? `ui-hint--relevance-${tier}` : '',
+          className,
+        ]
+          .filter(Boolean)
+          .join(' ')}
         onMouseEnter={(event) => {
           setHoverExpanded(true)
           onMouseEnter?.(event)
@@ -106,8 +156,11 @@ export const HintCard = forwardRef<HTMLDivElement, HintCardProps>(
         {...props}
       >
         <span className="ui-hint__header">
-          <strong className="ui-hint__title">{title}</strong>
-          <StatusBadge status={relevanceStatus}>{relevance}</StatusBadge>
+          <span className="ui-hint__titles">
+            <strong className="ui-hint__title">{title}</strong>
+            {indexLabel ? <small className="ui-hint__index">{indexLabel}</small> : null}
+          </span>
+          <StatusBadge status={badgeStatus}>{relevance}</StatusBadge>
         </span>
         <span
           id={contentId}
@@ -126,6 +179,42 @@ export const HintCard = forwardRef<HTMLDivElement, HintCardProps>(
           >
             {suzLink.title} ↗
           </a>
+        ) : null}
+        {isExpanded && showFeedback ? (
+          <div
+            className="ui-hint__feedback"
+            role="group"
+            aria-label="Обратная связь по подсказке"
+            onClick={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            {HINT_FEEDBACK_OPTIONS.map((option) => {
+              const active = selectedFeedback === option.id
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={[
+                    'ui-hint__feedback-btn',
+                    `ui-hint__feedback-btn--${option.id}`,
+                    active ? 'is-active' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  aria-pressed={active}
+                  title={option.label}
+                  data-testid={`hint-feedback-${option.id}`}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    selectFeedback(option.id)
+                  }}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
         ) : null}
         {isExpanded && onInsert ? (
           <button

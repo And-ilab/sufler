@@ -44,6 +44,8 @@ class AssistantAdminApiTest(TestCase):
         payload = listed.json()
         self.assertEqual(payload["namespace"], "assistant_*")
         self.assertEqual(payload["isolated_from"], "cc_production")
+        # Empty Hub → empty catalog (no stub KB rows).
+        self.assertEqual(payload["items"], [])
         self.assertTrue(
             all(item["slug"].startswith("assistant_") for item in payload["items"])
         )

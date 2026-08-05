@@ -32,3 +32,13 @@ export const Unauthorized: Story = {
     initialMenuOpen: true,
   },
 }
+
+export const CompactMenu: Story = {
+  args: {
+    roles: ['contact_center_telephony_operator'],
+    menuVariant: 'compact',
+    initialMenuOpen: true,
+    roleLabel: 'Оператор канала телефония Контакт-центра',
+    username: 'Иванова М.П.',
+  },
+}

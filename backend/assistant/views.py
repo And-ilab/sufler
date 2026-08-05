@@ -25,6 +25,7 @@ from assistant.chat import (
 from assistant.openapi import build_openapi_document
 from auth.decorators import require_permissions
 from auth.roles import PERM_ASSISTANT_REPORTS, PERM_ASSISTANT_USE
+from hub.assistant_admin import list_assistant_kbs
 
 
 def _validation_error(exc: AssistantChatError) -> JsonResponse:
@@ -44,6 +45,19 @@ def _reports_validation_error(exc: AssReportsError) -> JsonResponse:
             "details": {"request": [str(exc)]},
         },
         status=400,
+    )
+
+
+@require_http_methods(["GET"])
+@require_permissions(PERM_ASSISTANT_USE, api=True)
+def assistant_knowledge_bases(request: HttpRequest) -> JsonResponse:
+    """GET /api/v1/assistant/kbs/ — actual assistant_* KB catalog for the chat UI."""
+    return JsonResponse(
+        {
+            "items": list_assistant_kbs(seed=False),
+            "namespace": "assistant_*",
+            "isolated_from": "cc_production",
+        }
     )
 
 

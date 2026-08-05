@@ -1,4 +1,5 @@
-import { Button, Card, HintCard, StatusBadge, type StatusBadgeStatus } from '../components'
+import { Button, Card, HintCard, StatusBadge } from '../components'
+import { relevanceStatusFromPercent } from '../components/hintRelevance'
 import type { SuflerHint } from '../sufler/api/suggest'
 
 export interface SuflerSidePanelProps {
@@ -9,13 +10,6 @@ export interface SuflerSidePanelProps {
   clientPreview?: string
   onInsert?: (text: string) => void
   disabled?: boolean
-}
-
-function relevanceStatus(percent: number): StatusBadgeStatus {
-  if (percent >= 90) return 'success'
-  if (percent >= 80) return 'info'
-  if (percent >= 70) return 'warning'
-  return 'neutral'
 }
 
 function hintTitle(hint: SuflerHint): string {
@@ -63,13 +57,17 @@ export function SuflerSidePanel({
         {hints.length === 0 && !loading ? (
           <p className="app-muted">Подсказки появятся после сообщения клиента.</p>
         ) : null}
-        {hints.map((hint) => (
+        {hints.map((hint, index) => (
           <HintCard
             key={hint.rank}
             title={hintTitle(hint)}
             relevance={`${hint.relevance_percent}%`}
-            relevanceStatus={relevanceStatus(hint.relevance_percent)}
+            relevancePercent={hint.relevance_percent}
+            relevanceStatus={relevanceStatusFromPercent(hint.relevance_percent)}
             suzLink={hintSuz(hint)}
+            showFeedback
+            hintIndex={index + 1}
+            hintTotal={hints.length}
             onInsert={
               disabled || !onInsert
                 ? undefined

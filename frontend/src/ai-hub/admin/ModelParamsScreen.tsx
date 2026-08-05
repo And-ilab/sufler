@@ -1,11 +1,17 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
   useState,
 } from 'react'
-import { Card, StatusBadge } from '../../components'
+import {
+  ensureDevSession,
+  isAuthErrorMessage,
+  resetDevSessionCache,
+} from '../../auth/ensureDevSession'
+import { Button, Card, StatusBadge } from '../../components'
 import {
   loadModelParams,
   ModelParamsApiError,
@@ -37,6 +43,44 @@ type FieldErrors = Record<string, string>
 
 function apiProfile(profile: AdminProfile): ModelParamsProfile {
   return profile === 'cc' ? 'sufler_cc' : 'assistant_bank'
+}
+
+function registryStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    approved_dev: 'Утверждено (тест)',
+    pending: 'Ожидает',
+    evaluating: 'На оценке',
+    approved_prod: 'Утверждено (prod)',
+  }
+  return labels[status] ?? status
+}
+
+function profileLabel(profile: ModelParamsProfile): string {
+  return profile === 'sufler_cc' ? 'Профиль суфлёра КЦ' : 'Профиль ассистента'
+}
+
+function formatLoadError(error: unknown): string {
+  const message = error instanceof Error
+    ? error.message
+    : 'Не удалось загрузить настройки'
+  if (isAuthErrorMessage(message)) {
+    return 'Нет сессии авторизации. В DEV выполняется вход как dev-role-01; проверьте, что API доступен.'
+  }
+  return message
+}
+
+async function withDevSession<T>(action: () => Promise<T>): Promise<T> {
+  await ensureDevSession()
+  try {
+    return await action()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (!isAuthErrorMessage(message)) throw error
+    resetDevSessionCache()
+    const ok = await ensureDevSession()
+    if (!ok) throw error
+    return action()
+  }
 }
 
 function editablePayload(data: ModelParamsData): ModelParamsPayload {
@@ -74,13 +118,13 @@ function validate(
     errors.response_chars_max = 'Максимум 500 символов'
   }
   if (form.rag.chunk_size_tokens <= 0) {
-    errors.chunk_size_tokens = 'Размер chunk должен быть положительным'
+    errors.chunk_size_tokens = 'Размер фрагмента должен быть положительным'
   }
   if (
     form.rag.chunk_overlap_tokens < 0
     || form.rag.chunk_overlap_tokens >= form.rag.chunk_size_tokens
   ) {
-    errors.chunk_overlap_tokens = 'Overlap должен быть меньше размера chunk'
+    errors.chunk_overlap_tokens = 'Перекрытие должно быть меньше размера фрагмента'
   }
   for (const [field, value] of [
     ['context_inclusion', form.rag.context_inclusion],
@@ -109,7 +153,7 @@ export const ModelParamsScreen = forwardRef<
   const [serverErrors, setServerErrors] = useState<FieldErrors>({})
   const [message, setMessage] = useState('')
 
-  useEffect(() => {
+  const loadSettings = useCallback(async () => {
     if (initialData && initialData.profile === selectedProfile) {
       setData(initialData)
       setForm(editablePayload(initialData))
@@ -117,29 +161,35 @@ export const ModelParamsScreen = forwardRef<
       setLoadError('')
       return
     }
-    let active = true
     setLoading(true)
     setLoadError('')
-    void loadModelParams(selectedProfile)
-      .then((loaded) => {
-        if (!active) return
-        setData(loaded)
-        setForm(editablePayload(loaded))
-        setMessage('')
-      })
-      .catch((error: unknown) => {
-        if (!active) return
+    try {
+      resetDevSessionCache()
+      const ok = await ensureDevSession()
+      if (!ok) {
         setLoadError(
-          error instanceof Error ? error.message : 'Не удалось загрузить настройки',
+          'Нет сессии авторизации. В DEV выполняется вход как dev-role-01; проверьте, что API доступен.',
         )
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-    return () => {
-      active = false
+        setData(null)
+        setForm(null)
+        return
+      }
+      const loaded = await withDevSession(() => loadModelParams(selectedProfile))
+      setData(loaded)
+      setForm(editablePayload(loaded))
+      setMessage('')
+    } catch (error: unknown) {
+      setLoadError(formatLoadError(error))
+      setData(null)
+      setForm(null)
+    } finally {
+      setLoading(false)
     }
   }, [initialData, selectedProfile])
+
+  useEffect(() => {
+    void loadSettings()
+  }, [loadSettings])
 
   const clientErrors = useMemo(
     () => form && data ? validate(form, data) : {},
@@ -161,24 +211,30 @@ export const ModelParamsScreen = forwardRef<
     setServerErrors({})
     setMessage('')
     try {
-      const saved = await saveModelParams(selectedProfile, form)
+      const saved = await withDevSession(
+        () => saveModelParams(selectedProfile, form),
+      )
       setData(saved)
       setForm(editablePayload(saved))
-      setMessage(`Сохранено · revision ${saved.revision}`)
+      setMessage(`Сохранено · ревизия ${saved.revision}`)
       return true
     } catch (error) {
       if (error instanceof ModelParamsApiError) {
-        setServerErrors(
-          Object.fromEntries(
-            Object.entries(error.details).map(([field, values]) => [
-              field.replace('_threshold', ''),
-              values.join(' '),
-            ]),
-          ),
-        )
-        setMessage('Исправьте ошибки формы')
+        if (isAuthErrorMessage(error.message)) {
+          setMessage(formatLoadError(error))
+        } else {
+          setServerErrors(
+            Object.fromEntries(
+              Object.entries(error.details).map(([field, values]) => [
+                field.replace('_threshold', ''),
+                values.join(' '),
+              ]),
+            ),
+          )
+          setMessage('Исправьте ошибки формы')
+        }
       } else {
-        setMessage('Не удалось сохранить настройки')
+        setMessage(formatLoadError(error))
       }
       return false
     } finally {
@@ -196,13 +252,18 @@ export const ModelParamsScreen = forwardRef<
   useImperativeHandle(ref, () => ({ save, reset }))
 
   if (loading) {
-    return <Card className="model-params-loading" aria-busy="true">Загрузка ModelRegistry…</Card>
+    return <Card className="model-params-loading" aria-busy="true">Загрузка реестра моделей…</Card>
   }
   if (loadError || !data || !form) {
     return (
       <Card className="model-params-error" role="alert">
-        <strong>ModelRegistry недоступен</strong>
+        <strong>Реестр моделей недоступен</strong>
         <span>{loadError || 'Пустой ответ API'}</span>
+        <div>
+          <Button variant="ghost" onClick={() => void loadSettings()}>
+            Повторить
+          </Button>
+        </div>
       </Card>
     )
   }
@@ -232,19 +293,19 @@ export const ModelParamsScreen = forwardRef<
     <div className="model-params" data-testid="model-params-form">
       <section className="model-params__summary">
         <Card>
-          <span>Dev model</span>
+          <span>Тестовая модель</span>
           <strong>{data.read_only.dev_model ?? 'Не назначена'}</strong>
-          <small>Slot: {data.slot}</small>
+          <small>Слот: {data.slot}</small>
         </Card>
         <Card>
           <span>Статус</span>
-          <StatusBadge status="success">{data.read_only.status}</StatusBadge>
-          <small>Revision {data.revision}</small>
+          <StatusBadge status="success">{registryStatusLabel(data.read_only.status)}</StatusBadge>
+          <small>Ревизия {data.revision}</small>
         </Card>
         <Card>
-          <span>Production candidate</span>
+          <span>Кандидат для production</span>
           <strong>{data.read_only.prod_candidate ?? 'Не утверждён'}</strong>
-          <small>Только после human SIGNOFF</small>
+          <small>Только после ручного утверждения</small>
         </Card>
       </section>
 
@@ -254,13 +315,13 @@ export const ModelParamsScreen = forwardRef<
             <h2>Генерация ответа</h2>
             <p>Параметры профиля {data.profile}; изменения сохраняются в БД.</p>
           </div>
-          <StatusBadge status="info">{data.profile}</StatusBadge>
+          <StatusBadge status="info">{profileLabel(data.profile)}</StatusBadge>
         </header>
         <div className="model-params__fields">
           <label className="model-params__slider">
-            <span>Temperature <output>{form.generation.temperature.toFixed(2)}</output></span>
+            <span>Температура <output>{form.generation.temperature.toFixed(2)}</output></span>
             <input
-              aria-label="Temperature"
+              aria-label="Температура"
               type="range"
               min={data.constraints.temperature.min}
               max={data.constraints.temperature.max}
@@ -285,7 +346,7 @@ export const ModelParamsScreen = forwardRef<
             />
             {errors.top_p && <small role="alert">{errors.top_p}</small>}
           </label>
-          <NumberField label="Max tokens" value={form.generation.max_tokens} error={errors.max_tokens} disabled={!canEdit} onChange={(value) => setGeneration('max_tokens', value)} />
+          <NumberField label="Макс. токенов" value={form.generation.max_tokens} error={errors.max_tokens} disabled={!canEdit} onChange={(value) => setGeneration('max_tokens', value)} />
           <NumberField label="Максимум символов ответа" value={form.generation.response_chars_max} error={errors.response_chars_max} disabled={!canEdit} onChange={(value) => setGeneration('response_chars_max', value)} />
         </div>
       </Card>
@@ -293,16 +354,16 @@ export const ModelParamsScreen = forwardRef<
       <Card className="model-params__section">
         <header>
           <div>
-            <h2>Chunking и retrieval</h2>
+            <h2>Фрагментация и поиск</h2>
             <p>Калибровка фрагментов и порогов включения контекста.</p>
           </div>
           <StatusBadge status="warning">kb_cc_production</StatusBadge>
         </header>
         <div className="model-params__fields">
-          <NumberField label="Chunk size, tokens" value={form.rag.chunk_size_tokens} error={errors.chunk_size_tokens} disabled={!canEdit} onChange={(value) => setRag('chunk_size_tokens', value)} />
-          <NumberField label="Chunk overlap, tokens" value={form.rag.chunk_overlap_tokens} error={errors.chunk_overlap_tokens} disabled={!canEdit} onChange={(value) => setRag('chunk_overlap_tokens', value)} />
-          <NumberField label="Context inclusion" value={form.rag.context_inclusion} error={errors.context_inclusion} disabled={!canEdit} step={0.01} onChange={(value) => setRag('context_inclusion', value)} />
-          <NumberField label="Deterministic answer" value={form.rag.deterministic_answer} error={errors.deterministic_answer} disabled={!canEdit} step={0.01} onChange={(value) => setRag('deterministic_answer', value)} />
+          <NumberField label="Размер фрагмента, токены" value={form.rag.chunk_size_tokens} error={errors.chunk_size_tokens} disabled={!canEdit} onChange={(value) => setRag('chunk_size_tokens', value)} />
+          <NumberField label="Перекрытие фрагментов, токены" value={form.rag.chunk_overlap_tokens} error={errors.chunk_overlap_tokens} disabled={!canEdit} onChange={(value) => setRag('chunk_overlap_tokens', value)} />
+          <NumberField label="Включение контекста" value={form.rag.context_inclusion} error={errors.context_inclusion} disabled={!canEdit} step={0.01} onChange={(value) => setRag('context_inclusion', value)} />
+          <NumberField label="Детерминированный ответ" value={form.rag.deterministic_answer} error={errors.deterministic_answer} disabled={!canEdit} step={0.01} onChange={(value) => setRag('deterministic_answer', value)} />
         </div>
       </Card>
     </div>

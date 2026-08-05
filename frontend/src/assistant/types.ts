@@ -28,27 +28,12 @@ export interface AssistantToolState {
   detail?: string
 }
 
-export const KNOWLEDGE_BASES = [
-  { id: 'hr', label: 'Корпоративные регламенты HR' },
-  { id: 'legal', label: 'Юридические документы' },
-  { id: 'it', label: 'ИТ-инструкции и доступы' },
-  { id: 'retail', label: 'Продукты для физлиц' },
-  { id: 'corporate', label: 'Продукты для юрлиц' },
-  { id: 'security', label: 'Политики ИБ и compliance' },
-  { id: 'suz', label: 'СУЗ · справочник знаний' },
-] as const
+/** @deprecated Stub catalog — UI loads live KBs from `/api/v1/assistant/kbs/`. */
+export const KNOWLEDGE_BASES: readonly { id: string; label: string }[] = []
 
-export type KbId = (typeof KNOWLEDGE_BASES)[number]['id']
+export type KbId = string
 
-export const DEFAULT_KB_SELECTION: Record<KbId, boolean> = {
-  hr: true,
-  legal: true,
-  it: true,
-  retail: true,
-  corporate: true,
-  security: true,
-  suz: true,
-}
+export const DEFAULT_KB_SELECTION: Record<string, boolean> = {}
 
 export const DEFAULT_TOOLS: AssistantToolState[] = [
   { id: 'code', label: 'Код', state: 'ready' },

@@ -154,18 +154,11 @@ class AssistantAdminError(ValueError):
 
 
 def ensure_assistant_seed(username: str = "system") -> None:
-    """Idempotent seed for stub admin screens."""
-    for item in DEFAULT_KBS:
-        AssistantKnowledgeBase.objects.get_or_create(
-            slug=item["slug"],
-            defaults={
-                "name": item["name"],
-                "scope": item["scope"],
-                "description": item["description"],
-                "status": AssistantKnowledgeBase.STATUS_READY,
-                "created_by": username,
-            },
-        )
+    """Idempotent seed for stub admin screens.
+
+    Knowledge bases are NOT auto-created — the assistant chat catalog must
+    mirror real Hub data (empty DB → empty dropdown).
+    """
     if not AssistantPromptTemplate.objects.exists():
         for item in DEFAULT_PROMPTS:
             AssistantPromptTemplate.objects.create(
@@ -256,8 +249,10 @@ def serialize_capability(item: AssistantCapability) -> dict[str, Any]:
     }
 
 
-def list_assistant_kbs() -> list[dict[str, Any]]:
-    ensure_assistant_seed()
+def list_assistant_kbs(*, seed: bool = False) -> list[dict[str, Any]]:
+    """Return assistant_* KBs. Do not invent stub rows unless seed=True (tests/demo)."""
+    if seed:
+        ensure_assistant_seed()
     return [serialize_kb(item) for item in AssistantKnowledgeBase.objects.all()]
 
 

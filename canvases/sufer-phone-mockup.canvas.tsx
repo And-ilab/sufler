@@ -18,9 +18,9 @@ import type { CanvasHostTheme } from "cursor/canvas";
 import { useEffect, useState } from "react";
 import type { CSSProperties, JSX } from "react";
 
-// sufer-phone-mockup v1.4.18 — 2026-07-09 18:05 UTC+3
-// Changelog: header — только PinIcon (без «Скрыть контекст»); панель «Контекст» закреплена по умолчанию; _canvasBuild reset.
-const CANVAS_MOCKUP_VERSION = "v1.4.18";
+// sufer-phone-mockup v1.4.23 — 2026-08-02
+// Changelog: RU по умолчанию — 1 подсказка (замечание ID=76, слайд 4).
+const CANVAS_MOCKUP_VERSION = "v1.4.23";
 
 const RADIUS = 8;
 const WINDOW_CONTROLS_WIDTH = 108;
@@ -915,23 +915,37 @@ function ClosedWindowCallout({
 
 export default function SuferPhoneMockup(): JSX.Element {
   const t = useHostTheme();
-  const [colorScheme, setColorScheme] = useCanvasState<ColorScheme>("suflerPhoneColorScheme", "default");
+  const [colorScheme, setColorScheme] = useCanvasState<ColorScheme>("suflerPhoneColorScheme", "belarusbank_emerald");
   const [windowOpen, setWindowOpen] = useCanvasState("suflerWindowOpen", true);
   const [maximized, setMaximized] = useCanvasState("suflerWindowMaximized", false);
   const [drawerOpen, setDrawerOpen] = useCanvasState("suflerContextDrawerOpen", true);
   const [drawerPinned, setDrawerPinned] = useCanvasState("suflerContextDrawerPinned", true);
-  const [previewWidth, setPreviewWidth] = useCanvasState("suflerPhonePreviewWidth", 900);
-  const [previewHeight, setPreviewHeight] = useCanvasState("suflerPhonePreviewHeight", 720);
+  const [previewWidth, setPreviewWidth] = useCanvasState("suflerPhonePreviewWidth", 1100);
+  const [previewHeight, setPreviewHeight] = useCanvasState("suflerPhonePreviewHeight", 780);
+  const [demoLang, setDemoLang] = useCanvasState<"ru" | "en">("suflerPhoneDemoLang", "ru");
   const [canvasBuild, setCanvasBuild] = useCanvasState("_canvasBuild", "");
-  const scheme = getSchemePalette(t, colorScheme);
+  const scheme = getSchemePalette(t, "belarusbank_emerald");
 
   useEffect(() => {
     if (canvasBuild !== CANVAS_MOCKUP_VERSION) {
       setCanvasBuild(CANVAS_MOCKUP_VERSION);
+      setColorScheme("belarusbank_emerald");
+      setDemoLang("ru");
       setDrawerOpen(true);
       setDrawerPinned(true);
+      setPreviewWidth(1100);
+      setPreviewHeight(780);
     }
-  }, [canvasBuild, setCanvasBuild, setDrawerOpen, setDrawerPinned]);
+  }, [
+    canvasBuild,
+    setCanvasBuild,
+    setColorScheme,
+    setDemoLang,
+    setDrawerOpen,
+    setDrawerPinned,
+    setPreviewWidth,
+    setPreviewHeight,
+  ]);
   const boundedWidth = Math.max(680, Math.min(1200, previewWidth));
   const boundedHeight = Math.max(maximized ? 820 : 480, Math.min(900, previewHeight));
 
@@ -971,44 +985,7 @@ export default function SuferPhoneMockup(): JSX.Element {
   }
 
   return (
-    <Stack style={{ padding: 20, maxWidth: 1100, margin: "0 auto", borderRadius: 10, border: `1px solid ${scheme.accentWeak}`, background: scheme.panelBg }}>
-      <H1>Суфлёр · телефония</H1>
-      <Row style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-        <Text style={{ color: t.text.tertiary, fontSize: 11 }}>Превью ·</Text>
-        <Text style={{ color: t.text.secondary, fontSize: 12 }}>Схема:</Text>
-        <Pill active={colorScheme === "default"} onClick={() => setColorScheme("default")}>
-          Текущая
-        </Pill>
-        <Pill active={colorScheme === "belarusbank_classic"} onClick={() => setColorScheme("belarusbank_classic")}>
-          Classic
-        </Pill>
-        <Pill active={colorScheme === "belarusbank_soft"} onClick={() => setColorScheme("belarusbank_soft")}>
-          Soft
-        </Pill>
-        <Pill active={colorScheme === "belarusbank_emerald"} onClick={() => setColorScheme("belarusbank_emerald")}>
-          Emerald
-        </Pill>
-        <Pill active={colorScheme === "belarusbank_night"} onClick={() => setColorScheme("belarusbank_night")}>
-          Night
-        </Pill>
-        <Spacer />
-        <Button variant="ghost" size="sm" onClick={() => setWindowOpen(false)} title="Демо закрытия окна">
-          Закрыть окно (×)
-        </Button>
-        <Button variant={drawerOpen ? "primary" : "secondary"} size="sm" onClick={() => setDrawerOpen(true)}>
-          Панель: открыта
-        </Button>
-        <Button variant={!drawerOpen ? "primary" : "secondary"} size="sm" onClick={() => setDrawerOpen(false)}>
-          Панель: скрыта
-        </Button>
-        <Pill active={drawerPinned} onClick={() => setDrawerPinned(true)} size="sm">
-          Закреплена
-        </Pill>
-        <Pill active={!drawerPinned} onClick={() => setDrawerPinned(false)} size="sm">
-          Поверх окна
-        </Pill>
-      </Row>
-
+    <Stack style={{ padding: 8, maxWidth: 1140, margin: "0 auto", background: "transparent" }}>
       <div
         style={{
           position: "relative",
@@ -1033,6 +1010,12 @@ export default function SuferPhoneMockup(): JSX.Element {
           <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
             <Text weight="semibold">Суфлёр · активный звонок</Text>
             <Row style={{ gap: 8, alignItems: "center" }}>
+              <Pill active={demoLang === "ru"} onClick={() => setDemoLang("ru")} size="sm">
+                RU
+              </Pill>
+              <Pill active={demoLang === "en"} onClick={() => setDemoLang("en")} size="sm">
+                EN
+              </Pill>
               <IconButton
                 title={drawerPinned ? "Открепить панель контекста" : "Закрепить панель контекста"}
                 variant={drawerPinned ? "circle" : "default"}
@@ -1065,100 +1048,93 @@ export default function SuferPhoneMockup(): JSX.Element {
 
         <div style={{ flex: 1, display: "flex", minHeight: 0, overflow: "hidden", position: "relative" }}>
           <div style={{ flex: 1, padding: 16, overflow: "auto", minWidth: 0, position: "relative", zIndex: 5 }}>
-            <DialogueBlock
-              t={t}
-              scheme={scheme}
-              client="Подскажите, как оформить перевод в Россию через мобильный банк?"
-              clientTime="10:14"
-              operator="Хорошо, сейчас посмотрю условия перевода за рубеж."
-              operatorTime="10:15"
-              operatorReply="Перевод в РФ доступен через «Платежи» → «За рубеж» при наличии лимита. Уточните, пожалуйста, сумму перевода."
-              operatorReplyTime="10:16"
-              hints={[
-                {
-                  id: "phone-hint-transfer-rf",
-                  title: "Переводы в РФ — лимиты",
-                  preview: "Перевод в РФ доступен через «Платежи» → «За рубеж»…",
-                  fullText:
-                    "Перевод в РФ доступен через «Платежи» → «За рубеж» при наличии лимита. Уточните сумму и валюту.",
-                  relevance: "92%",
-                  relevanceTone: "success",
-                  suzTitle: "Переводы в РФ — лимиты",
-                  highlighted: true,
-                },
-                {
-                  id: "phone-hint-intl-limits",
-                  title: "Лимиты международных переводов",
-                  preview: "Для перевода нужен действующий лимит на международные операции…",
-                  fullText:
-                    "Для перевода нужен действующий лимит на международные операции; проверьте в «Настройки» → «Лимиты».",
-                  relevance: "87%",
-                  relevanceTone: "warning",
-                  suzTitle: "Лимиты международных переводов",
-                },
-                {
-                  id: "phone-hint-transfer-fees",
-                  title: "Комиссии за переводы за рубеж",
-                  preview: "Комиссия зависит от суммы и валюты; актуальные тарифы…",
-                  fullText:
-                    "Комиссия зависит от суммы и валюты; актуальные тарифы — в разделе «Тарифы» мобильного банка.",
-                  relevance: "81%",
-                  relevanceTone: "warning",
-                  suzTitle: "Комиссии за переводы за рубеж",
-                },
-              ]}
-            />
-            <DialogueBlock
-              t={t}
-              scheme={scheme}
-              client="А если лимит превышен?"
-              clientTime="10:16"
-              operator="Понял, уточню варианты при превышении лимита."
-              operatorTime="10:17"
-              operatorReply="При превышении лимита можно обратиться в отделение с паспортом — оформим постоянное или временное повышение лимита на международные переводы."
-              operatorReplyTime="10:18"
-              hints={[
-                {
-                  id: "phone-hint-limit-exceeded",
-                  title: "Повышение лимита перевода",
-                  preview: "При превышении лимита — обращение в отделение с документом…",
-                  fullText:
-                    "При превышении лимита — обращение в отделение с документом или повышение лимита через отделение.",
-                  relevance: "88%",
-                  relevanceTone: "warning",
-                  suzTitle: "Повышение лимита перевода",
-                },
-                {
-                  id: "phone-hint-temp-limit",
-                  title: "Временное повышение лимита",
-                  preview: "Временное повышение лимита возможно через отделение…",
-                  fullText:
-                    "Временное повышение лимита возможно через отделение при предъявлении документа, удостоверяющего личность.",
-                  relevance: "79%",
-                  relevanceTone: "neutral",
-                  suzTitle: "Временное повышение лимита",
-                },
-              ]}
-            />
-            <DialogueBlock
-              t={t}
-              scheme={scheme}
-              client="Сколько по времени занимает зачисление?"
-              clientTime="10:18"
-              operatorReply="Срок зачисления — до 3 рабочих дней, в зависимости от банка получателя."
-              operatorReplyTime="10:19"
-              hints={[
-                {
-                  id: "phone-hint-transfer-timing",
-                  title: "Сроки международных переводов",
-                  preview: "Срок зачисления — до 3 рабочих дней…",
-                  fullText: "Срок зачисления — до 3 рабочих дней в зависимости от банка получателя.",
-                  relevance: "76%",
-                  relevanceTone: "neutral",
-                  suzTitle: "Сроки международных переводов",
-                },
-              ]}
-            />
+            {demoLang === "en" ? (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    flexWrap: "wrap",
+                    marginBottom: 10,
+                    alignItems: "center",
+                  }}
+                >
+                  <Pill tone="info" size="sm" active>
+                    Язык клиента: EN
+                  </Pill>
+                  <Pill size="sm">Определено ≥99%</Pill>
+                </div>
+                <DialogueBlock
+                  t={t}
+                  scheme={scheme}
+                  client="How can I transfer money to Russia via the mobile bank?"
+                  clientTime="10:14"
+                  operator="One moment — I'll check the cross-border transfer conditions."
+                  operatorTime="10:15"
+                  operatorReply="You can transfer to Russia via Payments → Abroad if a limit is available. What amount do you need?"
+                  operatorReplyTime="10:16"
+                  hints={[
+                    {
+                      id: "phone-en-q-translate",
+                      title: "① Вопрос + перевод",
+                      preview: "EN: How can I transfer… → RU: Как оформить перевод…",
+                      fullText:
+                        "EN: How can I transfer money to Russia via the mobile bank?\nRU: Как оформить перевод денег в Россию через мобильный банк?",
+                      relevance: "96%",
+                      relevanceTone: "success",
+                      suzTitle: "Переводы в РФ — лимиты",
+                      highlighted: true,
+                    },
+                    {
+                      id: "phone-en-answer-en",
+                      title: "② Ответ EN (для клиента)",
+                      preview: "You can transfer to Russia via Payments → Abroad…",
+                      fullText:
+                        "You can transfer to Russia via «Payments» → «Abroad» if an international transfer limit is available. Please specify the amount and currency.",
+                      relevance: "93%",
+                      relevanceTone: "success",
+                      suzTitle: "Переводы в РФ — лимиты",
+                      highlighted: true,
+                    },
+                    {
+                      id: "phone-en-answer-ru",
+                      title: "③ Ответ RU (для проверки)",
+                      preview: "Перевод в РФ доступен через «Платежи» → «За рубеж»…",
+                      fullText:
+                        "Перевод в РФ доступен через «Платежи» → «За рубеж» при наличии лимита. Уточните сумму и валюту.",
+                      relevance: "93%",
+                      relevanceTone: "success",
+                      suzTitle: "Переводы в РФ — лимиты",
+                      highlighted: true,
+                    },
+                  ]}
+                />
+              </>
+            ) : (
+              <DialogueBlock
+                t={t}
+                scheme={scheme}
+                client="Подскажите, как оформить перевод в Россию через мобильный банк?"
+                clientTime="10:14"
+                operator="Хорошо, сейчас посмотрю условия перевода за рубеж."
+                operatorTime="10:15"
+                operatorReply="Перевод в РФ доступен через «Платежи» → «За рубеж» при наличии лимита. Уточните, пожалуйста, сумму перевода."
+                operatorReplyTime="10:16"
+                hints={[
+                  {
+                    id: "phone-hint-transfer-rf",
+                    title: "Переводы в РФ — лимиты",
+                    preview: "Перевод в РФ доступен через «Платежи» → «За рубеж»…",
+                    fullText:
+                      "Перевод в РФ доступен через «Платежи» → «За рубеж» при наличии лимита. Уточните сумму и валюту.",
+                    relevance: "92%",
+                    relevanceTone: "success",
+                    suzTitle: "Переводы в РФ — лимиты",
+                    highlighted: true,
+                  },
+                ]}
+              />
+            )}
           </div>
           <SideContextDock
             t={t}

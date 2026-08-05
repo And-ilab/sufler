@@ -1,0 +1,9 @@
+II61 FR-RPT table — comment coverage
+
+Addresses comment IDs:
+1612, 1613, 1618, 1658, 1661, 1665, 1667, 1671, 1676, 1678, 1679, 1680,
+1687, 1688, 1691, 1692, 1693, 1694, 1695, 1696, 1697, 1700, 1703, 1706
+
+OUT of this FR-RPT table:
+- 1624 — chat stats stay in module online-chat (not this reporting FR table)
+- 1710 / 1712 / 1719 — UC-REP / ASR acceptance scope, not this FR table

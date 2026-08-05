@@ -1,16 +1,17 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Button, Card, StatusBadge, type StatusBadgeStatus } from '../components'
 import {
   FEEDBACK_LABELS,
-  KNOWLEDGE_BASES,
-  DEFAULT_KB_SELECTION,
   type AssistantMessage,
   type AssistantToolState,
   type FeedbackKind,
-  type KbId,
   type ToolId,
   type ToolRunState,
 } from './types'
+import {
+  fetchAssistantKnowledgeBases,
+  type AssistantKbOption,
+} from './api/knowledgeBases'
 import { useAssistantChat } from './useAssistantChat'
 import './AssistantChat.css'
 
@@ -30,12 +31,19 @@ function toolStateLabel(state: ToolRunState): string {
   return 'ожидание'
 }
 
-function kbSummary(selected: Record<KbId, boolean>): string {
-  const count = KNOWLEDGE_BASES.filter((kb) => selected[kb.id]).length
-  if (count === KNOWLEDGE_BASES.length) return 'Все базы знаний'
+function kbSummary(
+  bases: readonly AssistantKbOption[],
+  selected: Record<string, boolean>,
+  status: 'loading' | 'ready' | 'error',
+): string {
+  if (status === 'loading') return 'Загрузка баз знаний…'
+  if (status === 'error') return 'Базы знаний недоступны'
+  if (bases.length === 0) return 'Нет баз знаний'
+  const count = bases.filter((kb) => selected[kb.id]).length
+  if (count === bases.length) return 'Все базы знаний'
   if (count === 0) return 'Выберите базы знаний'
   if (count === 1) {
-    return KNOWLEDGE_BASES.find((kb) => selected[kb.id])?.label ?? '1 база'
+    return bases.find((kb) => selected[kb.id])?.label ?? '1 база'
   }
   return `${count} базы выбрано`
 }
@@ -158,61 +166,63 @@ function MessageLenta({
 function ToolsPanel({
   tools,
   open,
-  onToggle,
+  onClose,
   onRun,
 }: {
   tools: AssistantToolState[]
   open: boolean
-  onToggle: () => void
+  onClose: () => void
   onRun: (id: ToolId) => void
 }) {
+  if (!open) return null
+
   return (
-    <div className="asst-tools" data-testid="asst-tools">
+    <div
+      id="asst-tools-panel"
+      className="asst-tools"
+      data-testid="asst-tools-panel"
+      role="region"
+      aria-label="Инструменты ассистента"
+    >
       <div className="asst-tools__header">
+        <strong>Инструменты ассистента</strong>
         <Button
           type="button"
           variant="ghost"
-          aria-expanded={open}
-          onClick={onToggle}
-          data-testid="asst-tools-toggle"
+          onClick={onClose}
+          aria-label="Закрыть инструменты"
+          data-testid="asst-tools-close"
         >
-          Инструменты
+          ×
         </Button>
-        <div className="asst-tools__states" aria-label="Состояния инструментов">
-          {tools.map((tool) => (
+      </div>
+      <p className="asst-tools__hint">
+        Для SQL и RPA требуется role-based доступ и аудит действий. SQL — только read-only.
+      </p>
+      <div className="asst-tools__actions">
+        {tools.map((tool) => (
+          <button
+            key={tool.id}
+            type="button"
+            className="asst-tools__action"
+            disabled={tool.state === 'running'}
+            data-testid={`tool-run-${tool.id}`}
+            onClick={() => onRun(tool.id)}
+          >
+            <span className="asst-tools__action-label">{tool.label}</span>
             <StatusBadge
-              key={tool.id}
               status={toolBadgeStatus(tool.state)}
               data-testid={`tool-state-${tool.id}`}
               title={tool.detail || toolStateLabel(tool.state)}
             >
-              {tool.label}: {toolStateLabel(tool.state)}
+              {toolStateLabel(tool.state)}
             </StatusBadge>
-          ))}
-        </div>
+            {tool.detail ? (
+              <small className="asst-tools__action-detail">{tool.detail}</small>
+            ) : null}
+          </button>
+        ))}
       </div>
-      {open ? (
-        <div className="asst-tools__body" data-testid="asst-tools-panel">
-          <p className="asst-tools__hint">
-            Для SQL и RPA требуется role-based доступ и аудит действий. SQL — только read-only.
-          </p>
-          <div className="asst-tools__actions">
-            {tools.map((tool) => (
-              <Button
-                key={tool.id}
-                type="button"
-                variant={tool.state === 'running' ? 'secondary' : 'ghost'}
-                disabled={tool.state === 'running'}
-                data-testid={`tool-run-${tool.id}`}
-                onClick={() => onRun(tool.id)}
-              >
-                {tool.label}
-                {tool.detail ? ` · ${tool.detail}` : ''}
-              </Button>
-            ))}
-          </div>
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -222,12 +232,15 @@ export interface AssistantChatProps {
   compact?: boolean
   username?: string
   initialDraft?: string
+  /** Optional override (Storybook); otherwise loaded from `/api/v1/assistant/kbs/`. */
+  knowledgeBases?: readonly AssistantKbOption[]
 }
 
 export function AssistantChat({
   demoMode = true,
   compact = false,
   initialDraft = '',
+  knowledgeBases: knowledgeBasesProp,
 }: AssistantChatProps) {
   const {
     messages,
@@ -245,11 +258,62 @@ export function AssistantChat({
 
   const [draft, setDraft] = useState(initialDraft)
   const [kbOpen, setKbOpen] = useState(false)
-  const [kbSelected, setKbSelected] = useState(DEFAULT_KB_SELECTION)
+  const [kbCatalog, setKbCatalog] = useState<AssistantKbOption[]>(
+    () => (knowledgeBasesProp ? [...knowledgeBasesProp] : []),
+  )
+  const [kbStatus, setKbStatus] = useState<'loading' | 'ready' | 'error'>(
+    () => (knowledgeBasesProp ? 'ready' : 'loading'),
+  )
+  const [kbSelected, setKbSelected] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries((knowledgeBasesProp ?? []).map((kb) => [kb.id, true])),
+  )
   const maxChars = 500
   const charCount = draft.length
+  const charProgress = Math.max(0, Math.min(100, Math.round((charCount / maxChars) * 100)))
+  const charMeterTone =
+    charCount >= maxChars ? 'danger' : charCount >= maxChars * 0.8 ? 'warn' : 'ok'
 
-  const selectedLabel = useMemo(() => kbSummary(kbSelected), [kbSelected])
+  useEffect(() => {
+    if (knowledgeBasesProp) {
+      setKbCatalog([...knowledgeBasesProp])
+      setKbSelected(
+        Object.fromEntries(knowledgeBasesProp.map((kb) => [kb.id, true])),
+      )
+      setKbStatus('ready')
+      return
+    }
+
+    let cancelled = false
+    setKbStatus('loading')
+    void fetchAssistantKnowledgeBases()
+      .then((items) => {
+        if (cancelled) return
+        setKbCatalog(items)
+        setKbSelected(Object.fromEntries(items.map((kb) => [kb.id, true])))
+        setKbStatus('ready')
+      })
+      .catch(() => {
+        if (cancelled) return
+        setKbCatalog([])
+        setKbSelected({})
+        setKbStatus('error')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [knowledgeBasesProp])
+
+  const selectedLabel = useMemo(
+    () => kbSummary(kbCatalog, kbSelected, kbStatus),
+    [kbCatalog, kbSelected, kbStatus],
+  )
+  const allKbSelected =
+    kbCatalog.length > 0 && kbCatalog.every((kb) => kbSelected[kb.id])
+  const someKbSelected = kbCatalog.some((kb) => kbSelected[kb.id])
+
+  const toggleAllKb = (checked: boolean) => {
+    setKbSelected(Object.fromEntries(kbCatalog.map((kb) => [kb.id, checked])))
+  }
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
@@ -278,21 +342,45 @@ export function AssistantChat({
           </button>
           {kbOpen ? (
             <div className="asst-kb__menu" role="listbox" aria-label="Базы знаний">
-              {KNOWLEDGE_BASES.map((kb) => (
-                <label key={kb.id} className="asst-kb__option">
-                  <input
-                    type="checkbox"
-                    checked={kbSelected[kb.id]}
-                    onChange={(event) =>
-                      setKbSelected((current) => ({
-                        ...current,
-                        [kb.id]: event.target.checked,
-                      }))
-                    }
-                  />
-                  {kb.label}
-                </label>
-              ))}
+              {kbCatalog.length > 0 ? (
+                <>
+                  <label className="asst-kb__option asst-kb__option--all">
+                    <input
+                      type="checkbox"
+                      checked={allKbSelected}
+                      ref={(node) => {
+                        if (node) node.indeterminate = someKbSelected && !allKbSelected
+                      }}
+                      onChange={(event) => toggleAllKb(event.target.checked)}
+                      data-testid="asst-kb-select-all"
+                    />
+                    Выбрать все
+                  </label>
+                  {kbCatalog.map((kb) => (
+                    <label key={kb.id} className="asst-kb__option">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(kbSelected[kb.id])}
+                        onChange={(event) =>
+                          setKbSelected((current) => ({
+                            ...current,
+                            [kb.id]: event.target.checked,
+                          }))
+                        }
+                      />
+                      {kb.label}
+                    </label>
+                  ))}
+                </>
+              ) : (
+                <p className="asst-kb__empty" data-testid="asst-kb-empty">
+                  {kbStatus === 'loading'
+                    ? 'Загрузка…'
+                    : kbStatus === 'error'
+                      ? 'Не удалось загрузить базы знаний'
+                      : 'Базы знаний не созданы. Добавьте их в Центре настроек (assistant_*).'}
+                </p>
+              )}
             </div>
           ) : null}
         </div>
@@ -314,7 +402,7 @@ export function AssistantChat({
       <ToolsPanel
         tools={tools}
         open={toolsOpen}
-        onToggle={() => setToolsOpen((value) => !value)}
+        onClose={() => setToolsOpen(false)}
         onRun={runTool}
       />
 
@@ -335,8 +423,10 @@ export function AssistantChat({
           </Button>
           <Button
             type="button"
-            variant="ghost"
-            onClick={() => setToolsOpen(true)}
+            variant={toolsOpen ? 'secondary' : 'ghost'}
+            aria-expanded={toolsOpen}
+            aria-controls="asst-tools-panel"
+            onClick={() => setToolsOpen((value) => !value)}
             data-testid="asst-composer-tools"
           >
             Инструменты
@@ -352,7 +442,7 @@ export function AssistantChat({
           onChange={(event) => setDraft(event.target.value)}
         />
         <div className="asst-composer__footer">
-          <span>
+          <span data-testid="asst-char-count">
             {charCount} / {maxChars} символов
           </span>
           <Button
@@ -362,6 +452,20 @@ export function AssistantChat({
           >
             {streaming ? 'Стриминг…' : 'Отправить'}
           </Button>
+        </div>
+        <div
+          className={`asst-composer__meter asst-composer__meter--${charMeterTone}`}
+          role="meter"
+          aria-valuemin={0}
+          aria-valuemax={maxChars}
+          aria-valuenow={charCount}
+          aria-label="Индикатор количества введённых символов"
+          data-testid="asst-char-meter"
+        >
+          <div
+            className="asst-composer__meter-fill"
+            style={{ width: `${charProgress}%` }}
+          />
         </div>
       </form>
     </div>

@@ -5,21 +5,29 @@ import {
   type ReactNode,
 } from 'react'
 import { AssistantChat } from '../assistant/AssistantChat'
+import { SuflerPhoneApp } from '../sufler/SuflerPhoneApp'
 import { Button } from './Button'
 import { Card } from './Card'
 import { Fab } from './Fab'
-import { HintCard } from './HintCard'
 import { StatusBadge } from './StatusBadge'
-import { getAllowedLauncherModules } from './portalLauncherAccess'
+import {
+  getAllowedLauncherModules,
+  type LauncherModule,
+} from './portalLauncherAccess'
 import './PortalLauncher.css'
 
-export type LauncherModule = 'sufler' | 'assistant'
+export type { LauncherModule }
 
 export interface PortalLauncherProps {
   roles: readonly string[]
+  username?: string | null
+  roleLabel?: string | null
+  menuVariant?: 'card' | 'compact'
   initialMenuOpen?: boolean
   initialWindows?: readonly LauncherModule[]
   onOpenModule?: (module: LauncherModule) => void
+  onChangeRole?: () => void
+  children?: ReactNode
 }
 
 const MODULE_LABELS: Record<LauncherModule, string> = {
@@ -27,25 +35,38 @@ const MODULE_LABELS: Record<LauncherModule, string> = {
   assistant: 'Ассистент',
 }
 
+const MODULE_GLYPH: Record<LauncherModule, string> = {
+  sufler: 'S',
+  assistant: 'A',
+}
+
 function ModuleGlyph({ module }: { module: LauncherModule }) {
   return (
     <span className={`portal-launcher__glyph portal-launcher__glyph--${module}`}>
-      {module === 'sufler' ? 'S' : 'A'}
+      {MODULE_GLYPH[module]}
     </span>
   )
 }
 
 interface ModuleWindowProps {
   module: LauncherModule
+  username?: string | null
+  roleLabel?: string | null
   onClose: () => void
   onMinimize: () => void
 }
 
-function ModuleWindow({ module, onClose, onMinimize }: ModuleWindowProps) {
+function ModuleWindow({
+  module,
+  username,
+  roleLabel,
+  onClose,
+  onMinimize,
+}: ModuleWindowProps) {
   const initialSize =
     module === 'sufler'
-      ? { width: 620, height: 390 }
-      : { width: 410, height: 520 }
+      ? { width: 960, height: 580 }
+      : { width: 420, height: 560 }
   const [size, setSize] = useState(initialSize)
   const [maximized, setMaximized] = useState(false)
 
@@ -88,6 +109,13 @@ function ModuleWindow({ module, onClose, onMinimize }: ModuleWindowProps) {
         height: `${size.height}px`,
       }
 
+  const title =
+    module === 'sufler' ? 'Суфлёр · активный звонок' : 'Беларусбанк AI'
+  const subtitle =
+    module === 'sufler'
+      ? `Консультация · ${username || 'Оператор КЦ'}`
+      : `${username || 'Пользователь'} · ${roleLabel || 'Пользователь ИИ-ассистента'}`
+
   return (
     <section
       className={`portal-module-window portal-module-window--${module} ${
@@ -95,15 +123,15 @@ function ModuleWindow({ module, onClose, onMinimize }: ModuleWindowProps) {
       }`}
       style={style}
       role="dialog"
-      aria-label={`${MODULE_LABELS[module]} — стартовое окно`}
+      aria-label={title}
       data-testid={`${module}-window`}
     >
       <header className="portal-module-window__header">
         <div className="portal-module-window__identity">
           <ModuleGlyph module={module} />
           <div>
-            <strong>{MODULE_LABELS[module]}</strong>
-            <span>{module === 'sufler' ? 'Активный звонок' : 'Корпоративный помощник'}</span>
+            <strong>{title}</strong>
+            <span>{subtitle}</span>
           </div>
         </div>
         <div className="portal-module-window__controls">
@@ -126,7 +154,17 @@ function ModuleWindow({ module, onClose, onMinimize }: ModuleWindowProps) {
         </div>
       </header>
 
-      {module === 'sufler' ? <SuflerWindowContent /> : <AssistantWindowContent />}
+      {module === 'sufler' ? (
+        <div className="portal-module-window__body portal-module-window__body--sufler-app">
+          <SuflerPhoneApp
+            demoMode
+            embedded
+            operatorName={username || 'Иванова М.П.'}
+          />
+        </div>
+      ) : (
+        <AssistantWindowContent username={username} roleLabel={roleLabel} />
+      )}
 
       {!maximized && (
         <button
@@ -148,47 +186,37 @@ function ModuleWindow({ module, onClose, onMinimize }: ModuleWindowProps) {
   )
 }
 
-function SuflerWindowContent() {
-  return (
-    <div className="portal-module-window__body">
-      <div className="portal-module-window__status-row">
-        <div>
-          <span className="portal-module-window__eyebrow">Клиент</span>
-          <strong>Иван Петров · 03:42</strong>
-        </div>
-        <StatusBadge status="success">В эфире</StatusBadge>
-      </div>
-      <div className="portal-transcript">
-        <p>
-          <span>Клиент</span>
-          Подскажите, можно ли изменить лимит международного перевода?
-        </p>
-        <p>
-          <span>Оператор</span>
-          Сейчас проверю доступные варианты.
-        </p>
-      </div>
-      <HintCard title="Повышение лимита перевода" relevance="94%">
-        Временное повышение лимита доступно после проверки операции. Для постоянного
-        изменения клиент может обратиться в отделение с документом.
-      </HintCard>
-      <div className="portal-module-window__actions">
-        <Button>Использовать ответ</Button>
-        <Button variant="ghost">Открыть источник</Button>
-      </div>
-    </div>
-  )
-}
-
-function AssistantWindowContent() {
+function AssistantWindowContent({
+  username,
+  roleLabel,
+}: {
+  username?: string | null
+  roleLabel?: string | null
+}) {
   return (
     <div className="portal-module-window__body portal-module-window__body--assistant">
+      <nav className="portal-assistant-tabs" aria-label="Модули окна">
+        <span className="is-active">Ассистент</span>
+        <span aria-disabled="true">Документы</span>
+      </nav>
+      <p className="portal-assistant-userline">
+        {username || 'Пользователь'}
+        {roleLabel ? ` · ${roleLabel}` : ''}
+      </p>
       <AssistantChat demoMode compact />
     </div>
   )
 }
 
-function PortalBackdrop({ children }: { children: ReactNode }) {
+function PortalBackdrop({
+  children,
+  roleLabel,
+  onChangeRole,
+}: {
+  children: ReactNode
+  roleLabel?: string | null
+  onChangeRole?: () => void
+}) {
   return (
     <div className="portal-launcher__backdrop">
       <header className="portal-launcher__portal-header">
@@ -199,10 +227,24 @@ function PortalBackdrop({ children }: { children: ReactNode }) {
           <a href="#knowledge">База знаний</a>
           <a href="#contact-center">Контакт-центр</a>
         </nav>
-        <span>Алексей Морозов</span>
+        <div className="portal-launcher__portal-user">
+          {roleLabel && (
+            <button
+              type="button"
+              className="portal-launcher__role-chip"
+              onClick={onChangeRole}
+              data-testid="change-role-button"
+            >
+              Роль: {roleLabel}
+            </button>
+          )}
+          <span>Алексей Морозов</span>
+        </div>
       </header>
       <main className="portal-launcher__portal-content">
-        <p className="portal-launcher__portal-eyebrow">Корпоративный портал</p>
+        <p className="portal-launcher__portal-eyebrow">
+          Внутренний корпоративный портал банка · компактная кнопка AI, по клику выезжают иконки модулей
+        </p>
         <h1>Добрый день, Алексей</h1>
         <div className="portal-launcher__portal-grid" aria-hidden="true">
           <Card><span>Мои задачи</span><strong>8</strong></Card>
@@ -217,9 +259,14 @@ function PortalBackdrop({ children }: { children: ReactNode }) {
 
 export function PortalLauncher({
   roles,
+  username = null,
+  roleLabel = null,
+  menuVariant = 'card',
   initialMenuOpen = false,
   initialWindows = [],
   onOpenModule,
+  onChangeRole,
+  children,
 }: PortalLauncherProps) {
   const modules = useMemo(
     () => getAllowedLauncherModules(roles),
@@ -229,10 +276,6 @@ export function PortalLauncher({
   const [openWindows, setOpenWindows] = useState<Set<LauncherModule>>(
     () => new Set(initialWindows.filter((module) => modules.includes(module))),
   )
-
-  if (modules.length === 0) {
-    return <PortalBackdrop>{null}</PortalBackdrop>
-  }
 
   const openModule = (module: LauncherModule) => {
     setOpenWindows((current) => new Set(current).add(module))
@@ -248,11 +291,19 @@ export function PortalLauncher({
     })
   }
 
+  const handleFabClick = () => {
+    setMenuOpen((value) => !value)
+  }
+
   return (
-    <PortalBackdrop>
+    <PortalBackdrop roleLabel={roleLabel} onChangeRole={onChangeRole}>
+      {children}
+
       {openWindows.has('sufler') && (
         <ModuleWindow
           module="sufler"
+          username={username}
+          roleLabel={roleLabel}
           onClose={() => closeModule('sufler')}
           onMinimize={() => closeModule('sufler')}
         />
@@ -260,12 +311,14 @@ export function PortalLauncher({
       {openWindows.has('assistant') && (
         <ModuleWindow
           module="assistant"
+          username={username}
+          roleLabel={roleLabel}
           onClose={() => closeModule('assistant')}
           onMinimize={() => closeModule('assistant')}
         />
       )}
 
-      {menuOpen && (
+      {modules.length > 0 && menuVariant === 'card' && menuOpen && (
         <Card
           className="portal-launcher__menu"
           role="menu"
@@ -296,18 +349,71 @@ export function PortalLauncher({
         </Card>
       )}
 
-      <div className="portal-launcher__fab">
-        <Fab
-          aria-label="Открыть меню Суфлёр и Ассистент"
-          aria-expanded={menuOpen}
-          aria-controls="portal-launcher-menu"
-          badge={modules.length}
-          onClick={() => setMenuOpen((value) => !value)}
-          data-testid="launcher-button"
+      {modules.length > 0 && (
+        <div
+          className={`portal-launcher__fab portal-launcher__fab--${menuVariant}${
+            menuOpen && menuVariant === 'compact' ? ' is-expanded' : ''
+          }`}
         >
-          <span aria-hidden="true">AI</span>
-        </Fab>
-      </div>
+          {menuVariant === 'compact' && menuOpen && (
+            <div
+              className="portal-launcher__compact-rail"
+              role="menu"
+              aria-label="Модули AI"
+              id="portal-launcher-menu"
+              data-testid="launcher-menu"
+            >
+              {modules.map((module) => (
+                <button
+                  key={module}
+                  type="button"
+                  role="menuitem"
+                  className={`portal-launcher__compact-item${
+                    openWindows.has(module) ? ' is-active' : ''
+                  }`}
+                  onClick={() => openModule(module)}
+                  title={MODULE_LABELS[module]}
+                  data-testid={`launcher-module-${module}`}
+                >
+                  <span className="portal-launcher__compact-label">
+                    {MODULE_LABELS[module]}
+                  </span>
+                  <span className="portal-launcher__compact-icon" aria-hidden="true">
+                    <span>{MODULE_GLYPH[module]}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <Fab
+            aria-label="Открыть меню Суфлёр и Ассистент"
+            aria-expanded={menuOpen}
+            aria-controls="portal-launcher-menu"
+            badge={menuVariant === 'card' ? modules.length : undefined}
+            onClick={handleFabClick}
+            data-testid="launcher-button"
+            className={menuOpen ? 'is-open' : undefined}
+          >
+            <span aria-hidden="true">AI</span>
+          </Fab>
+        </div>
+      )}
+
+      {modules.length === 0 && (
+        <div className="portal-launcher__empty-modules" role="status">
+          <Card>
+            <StatusBadge status="warning">Нет модулей S/A</StatusBadge>
+            <p>
+              У выбранной роли нет доступа к Суфлёру и Ассистенту.
+              Выберите другую роль или откройте отчёты / админку по правам I.4.
+            </p>
+            {onChangeRole && (
+              <Button onClick={onChangeRole}>Сменить роль</Button>
+            )}
+          </Card>
+        </div>
+      )}
     </PortalBackdrop>
   )
 }

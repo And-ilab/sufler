@@ -1,4 +1,4 @@
-import type { LauncherModule } from './PortalLauncher'
+export type LauncherModule = 'sufler' | 'assistant'
 
 const SUFLER_ROLES = new Set([
   'software_administrator',
@@ -26,4 +26,8 @@ export function getAllowedLauncherModules(
     modules.push('assistant')
   }
   return modules
+}
+
+export function roleHasLauncherModules(roles: readonly string[]): boolean {
+  return getAllowedLauncherModules(roles).length > 0
 }

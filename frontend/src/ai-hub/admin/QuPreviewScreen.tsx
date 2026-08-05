@@ -23,7 +23,7 @@ export function QuPreviewScreen() {
       setError(
         requestError instanceof Error
           ? requestError.message
-          : 'Не удалось выполнить Preview',
+          : 'Не удалось выполнить предпросмотр',
       )
     } finally {
       setLoading(false)
@@ -54,7 +54,7 @@ export function QuPreviewScreen() {
           <div className="qu-preview__actions">
             <span>Индекс: <strong>cc_production</strong></span>
             <Button type="submit" disabled={!query.trim() || loading}>
-              {loading ? 'Поиск…' : 'Preview'}
+              {loading ? 'Поиск…' : 'Предпросмотр'}
             </Button>
           </div>
         </form>
@@ -62,7 +62,7 @@ export function QuPreviewScreen() {
 
       {error && (
         <Card className="qu-preview__error" role="alert">
-          <strong>QU Preview недоступен</strong>
+          <strong>Предпросмотр недоступен</strong>
           <span>{error}</span>
         </Card>
       )}

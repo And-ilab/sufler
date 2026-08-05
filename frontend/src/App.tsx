@@ -1,7 +1,7 @@
 import { usePortalAuth } from './auth/usePortalAuth'
 import { AiHubAdminApp } from './ai-hub/admin/AiHubAdminApp'
 import { isAdminCenterRole } from './ai-hub/admin/adminNav'
-import { AiHubPanelHost } from './ai-hub/panel/AiHubPanel'
+import { AiHubPortalHost } from './ai-hub/panel/AiHubPortalHost'
 import { AiHubReportsApp } from './ai-hub/reports/AiHubReportsApp'
 import { canAccessCcReports } from './ai-hub/reports/reportsAccess'
 import { InternalKcDialogApp } from './internal-kc/InternalKcDialogApp'
@@ -48,8 +48,8 @@ function StandaloneModule({
   if (module === 'sufler') {
     return (
       <SuflerPhoneApp
-        demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
-        operatorName="Оператор КЦ"
+        demoMode={import.meta.env.VITE_SUFLER_DEMO === '1' || import.meta.env.DEV}
+        operatorName="Иванова М.П."
       />
     )
   }
@@ -132,14 +132,7 @@ function App() {
   }
 
   if (route === '/ai-hub') {
-    return (
-      <AiHubPanelHost
-        roles={auth.roles}
-        rbacTabs={auth.tabs}
-        username={auth.username}
-        initialOpen
-      />
-    )
+    return <AiHubPortalHost username={auth.username} />
   }
 
   if (route === '/ai-hub/admin' || route.startsWith('/ai-hub/admin/')) {

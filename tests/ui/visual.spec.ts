@@ -138,17 +138,17 @@ test('model params validates and saves through API', async ({ page }) => {
   })
   await openStory(page, 'ai-hub-admin-shell--model-parameters')
 
-  const overlap = page.getByLabel('Chunk overlap, tokens')
+  const overlap = page.getByLabel('Перекрытие фрагментов, токены')
   await overlap.fill('600')
-  await expect(page.getByText('Overlap должен быть меньше размера chunk')).toBeVisible()
+  await expect(page.getByText('Перекрытие должно быть меньше размера фрагмента')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Сохранить' })).toBeDisabled()
 
   await overlap.fill('120')
-  await page.getByLabel('Max tokens').fill('1536')
+  await page.getByLabel('Макс. токенов').fill('1536')
   await page.getByRole('button', { name: 'Сохранить' }).click()
 
-  await expect(page.getByText('Сохранено · revision 2')).toBeVisible()
-  await expect(page.getByLabel('Max tokens')).toHaveValue('1536')
+  await expect(page.getByText('Сохранено · ревизия 2')).toBeVisible()
+  await expect(page.getByLabel('Макс. токенов')).toHaveValue('1536')
 })
 
 test('QU admin previews ranked results with matched example', async ({ page }) => {
@@ -185,7 +185,7 @@ test('QU admin previews ranked results with matched example', async ({ page }) =
   await openStory(page, 'ai-hub-admin-shell--qu-preview')
 
   await page.getByLabel('Запрос пользователя').fill('оформление отпуска сотруднику')
-  await page.getByRole('button', { name: 'Preview' }).click()
+  await page.getByRole('button', { name: 'Предпросмотр' }).click()
 
   const results = page.getByRole('table')
   await expect(results).toBeVisible()
@@ -358,14 +358,17 @@ test('assistant window III.3 streams tokens, shows tools and feedback', async ({
   await expect(page.getByTestId('asst-lenta')).toContainText('Как оформить отпуск?')
   await expect(page.getByTestId('asst-lenta')).toContainText('Источники (2)')
 
-  await expect(page.getByTestId('tool-state-sql')).toContainText('SQL')
-  await page.getByTestId('asst-tools-toggle').click()
+  await expect(page.getByTestId('asst-tools-panel')).toHaveCount(0)
+  await page.getByTestId('asst-composer-tools').click()
   await expect(page.getByTestId('asst-tools-panel')).toBeVisible()
+  await expect(page.getByTestId('tool-state-sql')).toContainText('SQL')
   await page.getByTestId('tool-run-sql').click()
   await expect(page.getByTestId('tool-state-sql')).toContainText('выполняется')
   await expect(page.getByTestId('tool-state-sql')).toContainText('выполнено', {
     timeout: 3000,
   })
+  await page.getByTestId('asst-tools-close').click()
+  await expect(page.getByTestId('asst-tools-panel')).toHaveCount(0)
 
   const seedFeedback = page.locator('[data-testid^="feedback-useful-"]').first()
   await seedFeedback.click()

@@ -54,13 +54,22 @@ function csrfToken(): string {
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
-  const body = await response.json() as T | ApiErrorPayload
+  let body: T | ApiErrorPayload | null = null
+  const text = await response.text()
+  try {
+    body = text ? (JSON.parse(text) as T | ApiErrorPayload) : null
+  } catch {
+    body = null
+  }
   if (!response.ok) {
-    const error = body as ApiErrorPayload
-    throw new KnowledgeBaseApiError(
-      error.error ?? `Request failed with status ${response.status}`,
-      error.details ?? {},
-    )
+    const error = (body ?? {}) as ApiErrorPayload
+    const code =
+      error.error
+      ?? (response.status === 403 ? 'authentication_required' : `http_${response.status}`)
+    throw new KnowledgeBaseApiError(code, error.details ?? {})
+  }
+  if (body == null) {
+    throw new KnowledgeBaseApiError('empty_response')
   }
   return body as T
 }

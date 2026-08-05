@@ -7,7 +7,7 @@ import json
 from django.contrib.auth import authenticate, login, logout
 from django.conf import settings
 from django.http import HttpRequest, JsonResponse
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods
 
 from auth.roles import role_codes_for_user, tabs_for_user
@@ -28,7 +28,9 @@ def _auth_payload(request: HttpRequest) -> dict:
 
 
 @require_GET
+@ensure_csrf_cookie
 def auth_context(request: HttpRequest) -> JsonResponse:
+    """Also sets csrftoken cookie for SPA mutating calls (KB upload, create)."""
     return JsonResponse(_auth_payload(request))
 
 

@@ -7,13 +7,19 @@
     var(--color-bg);
 }
 
+.sufler-phone--embedded {
+  min-height: 0;
+  height: 100%;
+  background: var(--color-surface);
+}
+
 .sufler-phone__header,
 .sufler-phone__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-4) var(--space-6);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
 }
@@ -35,7 +41,7 @@
 
 .sufler-phone__header h1 {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: 1.125rem;
 }
 
 .sufler-phone__meta {
@@ -47,32 +53,49 @@
   font-size: .8125rem;
 }
 
+.sufler-phone__workspace {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  overflow: hidden;
+}
+
 .sufler-phone__dialogue {
   display: grid;
   gap: var(--space-4);
   align-content: start;
-  padding: var(--space-5) var(--space-6);
+  padding: var(--space-4);
   overflow: auto;
 }
 
-.sufler-phone__turn {
+.sufler-phone__pair {
   display: grid;
   gap: var(--space-3);
   max-width: 920px;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--color-surface-muted) 65%, var(--color-surface));
 }
 
-.sufler-phone__turn--client {
-  justify-self: start;
-  width: min(100%, 720px);
-}
-
-.sufler-phone__turn--operator {
+.sufler-phone__pair--operator {
+  max-width: 640px;
   justify-self: end;
-  width: min(100%, 560px);
+  background: transparent;
+  border-style: dashed;
 }
 
 .sufler-phone__bubble {
-  padding: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.sufler-phone__bubble--operator {
+  font-style: italic;
+}
+
+.sufler-phone__bubble--operator.is-draft {
+  border: 1px solid var(--color-primary);
+  background: var(--color-surface);
 }
 
 .sufler-phone__bubble header {
@@ -91,6 +114,7 @@
 .sufler-phone__hints {
   display: grid;
   gap: var(--space-2);
+  margin-left: var(--space-4);
 }
 
 .sufler-phone__hints-title {
@@ -100,8 +124,77 @@
   text-transform: uppercase;
 }
 
+.sufler-phone__context {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+}
+
+.sufler-phone__context-header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+  font-size: .8125rem;
+}
+
+.sufler-phone__summary {
+  padding: var(--space-3);
+  outline: none;
+}
+
+.sufler-phone__summary-card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.sufler-phone__summary-card strong {
+  font-size: .8125rem;
+}
+
+.sufler-phone__summary-preview {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: .8125rem;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.sufler-phone__summary-body {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sufler-phone__summary-body p {
+  margin: 0;
+  font-size: .8125rem;
+  line-height: 1.5;
+}
+
+.sufler-phone__summary-body hr {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.sufler-phone__summary-body small {
+  color: var(--color-text-muted);
+  font-size: .6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sufler-phone__summary-detailed {
+  white-space: pre-line;
+}
+
 .sufler-phone__error {
-  margin: var(--space-4) var(--space-6) 0;
+  margin: var(--space-3) var(--space-4) 0;
   color: var(--color-danger);
   border-color: var(--color-danger);
   background: var(--color-danger-bg);
@@ -112,10 +205,23 @@
   color: var(--color-text-muted);
 }
 
-@media (max-width: 800px) {
+@media (max-width: 900px) {
+  .sufler-phone__workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .sufler-phone__context {
+    border-left: 0;
+    border-top: 1px solid var(--color-border);
+  }
+
   .sufler-phone__header,
   .sufler-phone__footer {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .sufler-phone__hints {
+    margin-left: 0;
   }
 }

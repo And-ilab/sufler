@@ -23,10 +23,29 @@ export const Expanded: Story = {
   args: {
     defaultExpanded: true,
     relevance: '96%',
+    relevancePercent: 96,
     relevanceStatus: 'success',
     suzLink: {
       title: 'Оформление банковской карты',
       href: 'https://suz.local/articles/101',
     },
+  },
+}
+
+export const WithFeedbackAndShades: Story = {
+  args: {
+    defaultExpanded: true,
+    title: 'Переводы в РФ — лимиты',
+    relevance: '92%',
+    relevancePercent: 92,
+    showFeedback: true,
+    hintIndex: 1,
+    hintTotal: 3,
+    suzLink: {
+      title: 'Переводы в РФ — лимиты',
+      href: 'https://suz.local/articles/201',
+    },
+    children:
+      'Перевод в РФ доступен через «Платежи» → «За рубеж». Проверьте суточный лимит клиента и статус карты.',
   },
 }
