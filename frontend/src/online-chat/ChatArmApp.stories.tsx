@@ -14,7 +14,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div style={{ width: 1280, height: 800, overflow: 'hidden' }}>
+      <div style={{ width: 1280, height: 860, overflow: 'hidden' }}>
         <Story />
       </div>
     ),
@@ -24,7 +24,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** II-7 operator workplace: queues, sessions, 9 statuses, Sufler panel. */
+/** Canvas-identical operator ARM (online-chat-mockups · АРМ оператора). */
 export const OperatorWorkspace: Story = {}
 
 export const OnBreak: Story = {

@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     'telephony.apps.TelephonyConfig',
     'reports.apps.ReportsConfig',
     'api_docs.apps.ApiDocsConfig',
+    'online_chat.apps.OnlineChatConfig',
 ]
 
 MIDDLEWARE = [
@@ -216,6 +217,7 @@ else:
 RBAC_PATH_PERMISSIONS = {}
 RBAC_PUBLIC_PATH_PREFIXES = (
     "/api/v1/knowledge/",
+    "/api/v1/online-chat/",
     "/api/auth/login/",
     "/api/auth/logout/",
     "/api/schema/",

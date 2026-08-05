@@ -6,7 +6,6 @@ import json
 import re
 import threading
 from pathlib import Path
-from typing import Any
 
 from tests.acceptance.generate_matrix import render_markdown
 

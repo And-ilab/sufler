@@ -22,6 +22,7 @@ urlpatterns = [
     path("api/v1/assistant/", include("assistant.urls")),
     path("api/v1/ocr/", include("ocr.urls")),
     path("api/v1/channels/", include("integrations.channels.urls")),
+    path("api/v1/online-chat/", include("online_chat.urls")),
     path(
         "api/schema/",
         SpectacularAPIView.as_view(),
