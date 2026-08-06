@@ -1,3 +1,5 @@
+import { ensureCsrfToken, ensureDevSession } from '../../../auth/ensureDevSession'
+
 export type PromptType = 'system' | 'task' | 'scope'
 export type PromptStatus = 'draft' | 'published'
 
@@ -52,30 +54,38 @@ export class AssistantAdminApiError extends Error {
   }
 }
 
-function csrfToken(): string {
-  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/)
-  return match ? decodeURIComponent(match[1]) : ''
-}
-
 async function parseJson<T>(response: Response): Promise<T> {
   const text = await response.text()
   let body: T | ApiErrorPayload | null = null
   try {
     body = text ? (JSON.parse(text) as T | ApiErrorPayload) : null
   } catch {
-    const snippet = text.trim().slice(0, 80)
+    if (
+      response.status === 403
+      && /csrf|CSRF verification failed/i.test(text)
+    ) {
+      throw new AssistantAdminApiError('csrf_failed')
+    }
     throw new AssistantAdminApiError(
-      response.status === 401 || response.status === 403
+      response.status === 401
         ? 'authentication_required'
-        : `Неверный ответ API (HTTP ${response.status}): ${snippet || 'пусто'}`,
+        : response.status === 403
+          ? 'permission_denied'
+          : `Неверный ответ API (HTTP ${response.status}): ${text.trim().slice(0, 80) || 'пусто'}`,
     )
   }
   if (!response.ok) {
     const error = (body ?? {}) as ApiErrorPayload
-    throw new AssistantAdminApiError(
-      error.error || `HTTP ${response.status}`,
-      error.details || {},
-    )
+    if (error.error) {
+      throw new AssistantAdminApiError(error.error, error.details || {})
+    }
+    if (response.status === 401) {
+      throw new AssistantAdminApiError('authentication_required')
+    }
+    if (response.status === 403) {
+      throw new AssistantAdminApiError('permission_denied')
+    }
+    throw new AssistantAdminApiError(`HTTP ${response.status}`)
   }
   if (body == null) {
     throw new AssistantAdminApiError('empty_response')
@@ -83,9 +93,30 @@ async function parseJson<T>(response: Response): Promise<T> {
   return body as T
 }
 
-export async function listAssistantKbs(): Promise<AssistantKb[]> {
-  const response = await fetch('/api/admin/assistant/kb/', {
+async function authedFetch(
+  input: string,
+  init: RequestInit & { csrf?: boolean } = {},
+): Promise<Response> {
+  const { csrf = false, headers: initHeaders, ...rest } = init
+  await ensureDevSession()
+  const headers = new Headers(initHeaders)
+  if (csrf) {
+    const token = await ensureCsrfToken()
+    if (!token) {
+      throw new AssistantAdminApiError('csrf_failed')
+    }
+    headers.set('X-CSRFToken', token)
+  }
+  return fetch(input, {
+    ...rest,
     credentials: 'include',
+    headers,
+  })
+}
+
+export async function listAssistantKbs(): Promise<AssistantKb[]> {
+  const response = await authedFetch('/api/admin/assistant/kb/', {
+    method: 'GET',
   })
   const body = await parseJson<{ items: AssistantKb[] }>(response)
   return body.items
@@ -97,21 +128,18 @@ export async function createAssistantKb(payload: {
   scope?: string
   description?: string
 }): Promise<AssistantKb> {
-  const response = await fetch('/api/admin/assistant/kb/', {
+  const response = await authedFetch('/api/admin/assistant/kb/', {
     method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRFToken': csrfToken(),
-    },
+    csrf: true,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
   return parseJson(response)
 }
 
 export async function listAssistantPrompts(): Promise<AssistantPrompt[]> {
-  const response = await fetch('/api/admin/assistant/prompts/', {
-    credentials: 'include',
+  const response = await authedFetch('/api/admin/assistant/prompts/', {
+    method: 'GET',
   })
   const body = await parseJson<{ items: AssistantPrompt[] }>(response)
   return body.items
@@ -124,13 +152,10 @@ export async function createAssistantPrompt(payload: {
   scope?: string
   kb_slug?: string
 }): Promise<AssistantPrompt> {
-  const response = await fetch('/api/admin/assistant/prompts/', {
+  const response = await authedFetch('/api/admin/assistant/prompts/', {
     method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRFToken': csrfToken(),
-    },
+    csrf: true,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
   return parseJson(response)
@@ -147,30 +172,26 @@ export async function updateAssistantPrompt(
     status: PromptStatus
   }>,
 ): Promise<AssistantPrompt> {
-  const response = await fetch(`/api/admin/assistant/prompts/${id}/`, {
+  const response = await authedFetch(`/api/admin/assistant/prompts/${id}/`, {
     method: 'PUT',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRFToken': csrfToken(),
-    },
+    csrf: true,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
   return parseJson(response)
 }
 
 export async function deleteAssistantPrompt(id: number): Promise<void> {
-  const response = await fetch(`/api/admin/assistant/prompts/${id}/`, {
+  const response = await authedFetch(`/api/admin/assistant/prompts/${id}/`, {
     method: 'DELETE',
-    credentials: 'include',
-    headers: { 'X-CSRFToken': csrfToken() },
+    csrf: true,
   })
   await parseJson<{ ok: boolean }>(response)
 }
 
 export async function listAssistantCapabilities(): Promise<AssistantCapability[]> {
-  const response = await fetch('/api/admin/assistant/capabilities/', {
-    credentials: 'include',
+  const response = await authedFetch('/api/admin/assistant/capabilities/', {
+    method: 'GET',
   })
   const body = await parseJson<{ items: AssistantCapability[] }>(response)
   return body.items
@@ -180,14 +201,14 @@ export async function setCapabilityEnabled(
   code: string,
   enabled: boolean,
 ): Promise<AssistantCapability> {
-  const response = await fetch(`/api/admin/assistant/capabilities/${code}/`, {
-    method: 'PATCH',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRFToken': csrfToken(),
+  const response = await authedFetch(
+    `/api/admin/assistant/capabilities/${code}/`,
+    {
+      method: 'PATCH',
+      csrf: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
     },
-    body: JSON.stringify({ enabled }),
-  })
+  )
   return parseJson(response)
 }

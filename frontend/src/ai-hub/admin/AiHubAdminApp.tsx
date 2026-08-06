@@ -21,6 +21,8 @@ import {
   ADMIN_GROUPS,
   ADMIN_NAV,
   adminRoute,
+  defaultAdminScreen,
+  isAdminReportsOnlyRole,
   resolveAdminRoute,
   type AdminNavItem,
   type AdminProfile,
@@ -173,6 +175,12 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
     status: 'Отчёты КЦ',
     cards: [['Аналитика', 'Черновой ETL', 'Статистика ASR'], ['Экспорт', 'CSV / XLSX', 'UTF-8'], ['Графики', 'Качество ASR', 'Распознавание']],
   },
+  ocr_reports: {
+    title: 'Отчётность OCR',
+    subtitle: 'Сводки по объёму, качеству HITL и экспорту документов (§6.2).',
+    status: 'Отчёты OCR',
+    cards: [['Документы', '1 240', 'За период'], ['HITL', '4.2%', 'Доля ручной проверки'], ['Экспорт', 'CSV / PDF', 'Конструктор']],
+  },
 }
 
 const DEMO_ROLE_LABELS: Record<DemoAdminRole, string> = {
@@ -202,7 +210,12 @@ export function AiHubAdminApp({
   demoRoleSwitcher = false,
 }: AiHubAdminAppProps) {
   const resolved = resolveAdminRoute(window.location.pathname)
-  const [screen, setScreen] = useState(initialScreen ?? resolved.screen)
+  const pathIsAdminRoot =
+    window.location.pathname.replace(/\/+$/, '') === '/ai-hub/admin'
+  const fallbackScreen = pathIsAdminRoot
+    ? defaultAdminScreen(roles)
+    : resolved.screen
+  const [screen, setScreen] = useState(initialScreen ?? fallbackScreen)
   const [profile, setProfile] = useState(initialProfile ?? resolved.profile)
   const [demoRole, setDemoRole] = useState<DemoAdminRole>('kb_admin')
   const [saved, setSaved] = useState(false)
@@ -218,10 +231,33 @@ export function AiHubAdminApp({
     [],
   )
 
+  const [sessionReady, setSessionReady] = useState(false)
+  const [sessionError, setSessionError] = useState('')
+
   useEffect(() => {
-    // Do not resetDevSessionCache here — KbAdminScreen / other screens also
-    // call ensureDevSession on mount; clearing inFlight races and can hang login.
-    void ensureDevSession()
+    let cancelled = false
+    void (async () => {
+      // Single bootstrap for the admin shell — child screens share the session.
+      const ok = await ensureDevSession()
+      if (cancelled) return
+      if (!ok) {
+        resetDevSessionCache()
+        const retry = await ensureDevSession()
+        if (cancelled) return
+        if (!retry) {
+          setSessionError(
+            'Не удалось войти в Django (dev-role-01). Проверьте API :8001 и что VITE_DEV_AUTH_PASSWORD = AUTH_MOCK_LDAP_DEFAULT_PASSWORD.',
+          )
+          setSessionReady(false)
+          return
+        }
+      }
+      setSessionError('')
+      setSessionReady(true)
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const visibleNav = useMemo(
@@ -231,9 +267,24 @@ export function AiHubAdminApp({
   const activeItem = ADMIN_NAV.find(
     (item) => item.id === screen && (item.profile === undefined || item.profile === profile),
   )
+  const reportsOnly = !demoRoleSwitcher && isAdminReportsOnlyRole(roles)
   const canEdit = demoRoleSwitcher
     ? demoCanEdit(demoRole, activeItem)
-    : Boolean(activeItem && hasRole(roles, activeItem))
+    : Boolean(activeItem && hasRole(roles, activeItem) && !reportsOnly)
+
+  useEffect(() => {
+    if (demoRoleSwitcher || !visibleNav.length) return
+    const allowed = visibleNav.some(
+      (item) =>
+        item.id === screen
+        && (item.profile === undefined || item.profile === profile),
+    )
+    if (!allowed) {
+      const first = visibleNav[0]
+      setScreen(first.id)
+      setProfile(first.profile ?? 'assistant')
+    }
+  }, [demoRoleSwitcher, visibleNav, screen, profile])
   const copy = SCREEN_COPY[screen]
   const screenBadge = activeItem?.label ?? copy.title
   const profileBadge = screen === 'model_params'
@@ -251,6 +302,44 @@ export function AiHubAdminApp({
     setSaved(false)
     setModelFormState({ dirty: false, valid: false, saving: false, message: '' })
     window.history.pushState({}, '', adminRoute(item))
+  }
+
+  if (!sessionReady) {
+    return (
+      <div className="admin-center admin-center--boot" data-testid="admin-shell-boot">
+        <Card>
+          <StatusBadge status={sessionError ? 'danger' : 'info'}>
+            {sessionError ? 'Ошибка входа' : 'Вход…'}
+          </StatusBadge>
+          <h1>Центр настроек AI Hub</h1>
+          <p>
+            {sessionError
+              || 'Устанавливаем сессию Django и CSRF для API админки…'}
+          </p>
+          {sessionError ? (
+            <Button
+              onClick={() => {
+                setSessionError('')
+                setSessionReady(false)
+                resetDevSessionCache()
+                void (async () => {
+                  const ok = await ensureDevSession()
+                  if (ok) {
+                    setSessionReady(true)
+                    return
+                  }
+                  setSessionError(
+                    'Не удалось войти в Django (dev-role-01). Проверьте API :8001 и пароль mock LDAP.',
+                  )
+                })()
+              }}
+            >
+              Повторить вход
+            </Button>
+          ) : null}
+        </Card>
+      </div>
+    )
   }
 
   return (

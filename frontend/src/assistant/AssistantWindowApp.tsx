@@ -6,12 +6,14 @@ import './AssistantWindowApp.css'
 export interface AssistantWindowAppProps {
   username?: string
   demoMode?: boolean
+  readOnly?: boolean
   initiallyOpen?: boolean
 }
 
 export function AssistantWindowApp({
   username = 'Пользователь ИИ-ассистента',
   demoMode = true,
+  readOnly = false,
   initiallyOpen = true,
 }: AssistantWindowAppProps) {
   const [open, setOpen] = useState(initiallyOpen)
@@ -69,7 +71,7 @@ export function AssistantWindowApp({
         </nav>
 
         <div className="asst-window__body">
-          <AssistantChat demoMode={demoMode} username={username} />
+          <AssistantChat demoMode={demoMode} username={username} readOnly={readOnly} />
         </div>
 
         <footer className="asst-window__status">

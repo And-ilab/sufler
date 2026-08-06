@@ -46,7 +46,10 @@ function statusLabel(status: KnowledgeBaseStatus): string {
 function formatKbError(error: unknown, fallback: string): string {
   if (error instanceof KnowledgeBaseApiError) {
     if (error.message === 'authentication_required') {
-      return 'Нет сессии авторизации. Нажмите «Повторить» — будет выполнен вход и обновление списка.'
+      return 'Нет сессии Django. Нажмите «Повторить» — в DEV выполнится вход как dev-role-01 (проверьте VITE_DEV_AUTH_PASSWORD = AUTH_MOCK_LDAP_DEFAULT_PASSWORD).'
+    }
+    if (error.message === 'csrf_failed') {
+      return 'Сбой CSRF-токена после входа. Нажмите «Повторить» — сессия и токен обновятся автоматически.'
     }
     if (error.message === 'permission_denied') {
       return 'Недостаточно прав (kb.admin) для этой операции.'
@@ -83,7 +86,6 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
   }, [selectedId])
 
   const refreshList = useCallback(async (preferId?: number | null) => {
-    await ensureDevSession()
     const next = await listKnowledgeBases()
     setItems(next)
     // preferId / selected / first — use ?? so null also falls through to auto-select
@@ -111,7 +113,7 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
       }
       if (!ok) {
         setError(
-          'Нет сессии авторизации. Нажмите «Обновить список» — в DEV выполняется вход как dev-role-01.',
+          'Нет сессии Django. Проверьте, что API на :8001 запущен и VITE_DEV_AUTH_PASSWORD совпадает с AUTH_MOCK_LDAP_DEFAULT_PASSWORD из infra/.env.',
         )
         setItems([])
         setSelected(null)
@@ -128,7 +130,8 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
   }, [refreshList])
 
   useEffect(() => {
-    void loadInitial(true)
+    // Soft start: reuse existing session/CSRF; force only on explicit Retry.
+    void loadInitial(false)
   }, [loadInitial])
 
   // Poll while selected KB is indexing.
@@ -171,11 +174,12 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
     setError('')
     setNotice('')
     try {
-      await ensureDevSession()
       await action()
     } catch (requestError) {
       const message = formatKbError(requestError, fallback)
-      if (isAuthErrorMessage(message)) {
+      const raw =
+        requestError instanceof Error ? requestError.message : ''
+      if (isAuthErrorMessage(message) || isAuthErrorMessage(raw)) {
         resetDevSessionCache()
         const ok = await ensureDevSession()
         if (ok) {

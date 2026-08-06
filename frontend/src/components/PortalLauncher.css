@@ -184,11 +184,6 @@
   gap: var(--space-3);
 }
 
-.portal-launcher__admin-link {
-  font-weight: 700;
-  color: var(--color-primary);
-}
-
 .portal-launcher__settings-btn {
   display: inline-flex;
   align-items: center;
@@ -350,17 +345,8 @@
   right: var(--space-6);
 }
 
-.portal-module-window--maximized {
-  position: fixed;
-  inset: var(--space-4);
-  z-index: 60;
-  width: auto;
-  height: auto;
-  max-width: none;
-  max-height: none;
-}
-
 .portal-module-window__header {
+  position: relative;
   display: flex;
   min-height: 56px;
   align-items: center;
@@ -418,6 +404,35 @@
 .portal-module-window__controls button:hover,
 .portal-module-window__controls a:hover {
   background: color-mix(in srgb, var(--color-white) 16%, transparent);
+}
+
+.portal-module-window__menu {
+  position: absolute;
+  top: 52px;
+  right: var(--space-3);
+  z-index: 5;
+  display: grid;
+  min-width: 220px;
+  padding: var(--space-2);
+  box-shadow: var(--shadow-md);
+}
+
+.portal-module-window__menu a,
+.portal-module-window__menu button {
+  padding: var(--space-3);
+  color: var(--color-text);
+  text-align: left;
+  text-decoration: none;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  cursor: pointer;
+}
+
+.portal-module-window__menu a:hover,
+.portal-module-window__menu button:hover {
+  color: var(--color-primary);
+  background: var(--color-info-bg);
 }
 
 .portal-module-window__body {

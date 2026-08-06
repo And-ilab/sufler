@@ -8,6 +8,11 @@ import { Card, Fab, HintCard, StatusBadge } from '../../components'
 import { AssistantChat } from '../../assistant/AssistantChat'
 import { OcrDocumentsPanel } from '../ocr/OcrDocumentsPanel'
 import {
+  canOpenKbAdminDeepLink,
+  canWriteAssistantChat,
+  getSettingsMenuEntry,
+} from '../../components/portalLauncherAccess'
+import {
   getHubPanelTabs,
   isHubAdminRole,
   type HubPanelTab,
@@ -45,6 +50,7 @@ export function AiHubPanel({
     () => getHubPanelTabs(roles, rbacTabs),
     [rbacTabs, roles],
   )
+  const settingsEntry = useMemo(() => getSettingsMenuEntry(roles), [roles])
   const visibleTabs = callActive
     ? roleTabs.filter((tab) => tab === 'sufler')
     : roleTabs
@@ -122,14 +128,16 @@ export function AiHubPanel({
               </div>
             </div>
             <div className="hub-panel__controls">
-              <button
-                type="button"
-                aria-label="Открыть меню AI Hub"
-                aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((value) => !value)}
-              >
-                ≡
-              </button>
+              {isHubAdminRole(roles) && settingsEntry && (
+                <button
+                  type="button"
+                  aria-label="Открыть меню AI Hub"
+                  aria-expanded={menuOpen}
+                  onClick={() => setMenuOpen((value) => !value)}
+                >
+                  ≡
+                </button>
+              )}
               <button
                 type="button"
                 aria-label={pinned ? 'Открепить панель' : 'Закрепить панель'}
@@ -145,12 +153,12 @@ export function AiHubPanel({
                 ×
               </button>
             </div>
-            {menuOpen && (
+            {menuOpen && settingsEntry && (
               <Card className="hub-panel__menu" role="menu">
-                {isHubAdminRole(roles) && (
-                  <a role="menuitem" href="/ai-hub/admin">Центр настроек</a>
-                )}
-                {roles.some((role) => ['software_administrator', 'llm_knowledge_base_administrator'].includes(role)) && (
+                <a role="menuitem" href={settingsEntry.href}>
+                  {settingsEntry.label}
+                </a>
+                {canOpenKbAdminDeepLink(roles) && (
                   <a role="menuitem" href="/ai-hub/admin/kb_admin">БЗ · полное окно</a>
                 )}
                 <button type="button" role="menuitem" onClick={() => setMenuOpen(false)}>
@@ -176,7 +184,9 @@ export function AiHubPanel({
           </div>
 
           <main className="hub-panel__body">
-            {activeTab === 'assistant' && <AssistantPanel />}
+            {activeTab === 'assistant' && (
+              <AssistantPanel readOnly={!canWriteAssistantChat(roles)} />
+            )}
             {activeTab === 'documents' && (
               <div className="hub-tab-content hub-tab-content--documents">
                 <OcrDocumentsPanel initialSubTab={initialDocumentSubTab} />
@@ -216,10 +226,10 @@ export function AiHubPanel({
   )
 }
 
-function AssistantPanel() {
+function AssistantPanel({ readOnly = false }: { readOnly?: boolean }) {
   return (
     <div className="hub-tab-content hub-tab-content--assistant">
-      <AssistantChat demoMode compact />
+      <AssistantChat demoMode compact readOnly={readOnly} />
     </div>
   )
 }

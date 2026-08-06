@@ -357,6 +357,28 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 SESSION_COOKIE_AGE = 3600  # 1 час
 SESSION_SAVE_EVERY_REQUEST = True
 
+# SPA on Vite (:5173) posts with Origin: http://127.0.0.1:5173 while the API
+# is proxied to Django. Without trusted origins Django rejects CSRF even when
+# X-CSRFToken matches the cookie (browser always sends Origin on POST).
+_CSRF_TRUSTED_DEFAULT = (
+    "http://127.0.0.1:5173,"
+    "http://localhost:5173,"
+    "http://127.0.0.1:8001,"
+    "http://localhost:8001,"
+    "http://127.0.0.1:8000,"
+    "http://localhost:8000"
+)
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "DJANGO_CSRF_TRUSTED_ORIGINS",
+        _CSRF_TRUSTED_DEFAULT,
+    ).split(",")
+    if origin.strip()
+]
+CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SAMESITE = "Lax"
+
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv(
     "CELERY_RESULT_BACKEND",

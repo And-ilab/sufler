@@ -19,8 +19,22 @@ interface CapabilitiesScreenProps {
   canEdit?: boolean
 }
 
-const AUTH_HINT =
-  'Нет сессии авторизации. Нажмите «Обновить» — в DEV выполняется вход как dev-role-01.'
+function formatAdminError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : ''
+  if (message === 'authentication_required') {
+    return 'Нет сессии Django. Нажмите «Обновить» — в DEV выполнится вход как dev-role-01 (VITE_DEV_AUTH_PASSWORD = AUTH_MOCK_LDAP_DEFAULT_PASSWORD).'
+  }
+  if (message === 'csrf_failed') {
+    return 'Сбой CSRF после входа. Нажмите «Обновить» — токен обновится автоматически.'
+  }
+  if (message === 'permission_denied') {
+    return 'Недостаточно прав для этой операции.'
+  }
+  if (message && isAuthErrorMessage(message)) {
+    return 'Нет сессии Django. Нажмите «Обновить» — в DEV выполнится вход как dev-role-01.'
+  }
+  return message || fallback
+}
 
 export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) {
   const [items, setItems] = useState<AssistantCapability[]>([])
@@ -31,11 +45,11 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
   const [creatingKb, setCreatingKb] = useState(false)
   const [loading, setLoading] = useState(true)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (forceRelogin = false) => {
     setLoading(true)
     setError('')
     try {
-      resetDevSessionCache()
+      if (forceRelogin) resetDevSessionCache()
       let ok = await ensureDevSession()
       if (!ok) {
         resetDevSessionCache()
@@ -44,7 +58,10 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
       if (!ok) {
         setItems([])
         setKbs([])
-        setError(AUTH_HINT)
+        setError(formatAdminError(
+          new Error('authentication_required'),
+          'Нет сессии',
+        ))
         return
       }
       const [caps, nextKbs] = await Promise.all([
@@ -54,17 +71,16 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
       setItems(caps)
       setKbs(nextKbs)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Ошибка загрузки'
       setItems([])
       setKbs([])
-      setError(isAuthErrorMessage(message) ? AUTH_HINT : message)
+      setError(formatAdminError(err, 'Ошибка загрузки'))
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    void refresh()
+    void refresh(false)
   }, [refresh])
 
   const toggle = async (item: AssistantCapability) => {
@@ -72,17 +88,25 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
     setBusyCode(item.code)
     setError('')
     try {
-      if (!(await ensureDevSession())) {
-        setError(AUTH_HINT)
-        return
-      }
       const updated = await setCapabilityEnabled(item.code, !item.enabled)
       setItems((current) =>
         current.map((row) => (row.code === updated.code ? updated : row)),
       )
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Ошибка сохранения'
-      setError(isAuthErrorMessage(message) ? AUTH_HINT : message)
+      if (isAuthErrorMessage(err instanceof Error ? err.message : '')) {
+        resetDevSessionCache()
+        try {
+          const updated = await setCapabilityEnabled(item.code, !item.enabled)
+          setItems((current) =>
+            current.map((row) => (row.code === updated.code ? updated : row)),
+          )
+          return
+        } catch (retryErr) {
+          setError(formatAdminError(retryErr, 'Ошибка сохранения'))
+          return
+        }
+      }
+      setError(formatAdminError(err, 'Ошибка сохранения'))
     } finally {
       setBusyCode('')
     }
@@ -93,16 +117,23 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
     setCreatingKb(true)
     setError('')
     try {
-      if (!(await ensureDevSession())) {
-        setError(AUTH_HINT)
-        return
-      }
       await createAssistantKb({ name: kbName.trim() })
       setKbName('')
-      await refresh()
+      await refresh(false)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Ошибка создания KB'
-      setError(isAuthErrorMessage(message) ? AUTH_HINT : message)
+      if (isAuthErrorMessage(err instanceof Error ? err.message : '')) {
+        resetDevSessionCache()
+        try {
+          await createAssistantKb({ name: kbName.trim() })
+          setKbName('')
+          await refresh(false)
+          return
+        } catch (retryErr) {
+          setError(formatAdminError(retryErr, 'Ошибка создания KB'))
+          return
+        }
+      }
+      setError(formatAdminError(err, 'Ошибка создания KB'))
     } finally {
       setCreatingKb(false)
     }
@@ -202,7 +233,7 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
             type="button"
             variant="secondary"
             disabled={loading}
-            onClick={() => void refresh()}
+            onClick={() => void refresh(true)}
             data-testid="asst-kb-refresh"
           >
             Обновить

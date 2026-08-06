@@ -1,3 +1,5 @@
+import { ensureCsrfToken, ensureDevSession } from '../../../auth/ensureDevSession'
+
 export type KnowledgeBaseStatus = 'idle' | 'indexing' | 'ready' | 'error'
 export type DocumentStatus = 'uploaded' | 'indexed' | 'error'
 
@@ -48,11 +50,6 @@ export class KnowledgeBaseApiError extends Error {
   }
 }
 
-function csrfToken(): string {
-  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/)
-  return match ? decodeURIComponent(match[1]) : ''
-}
-
 async function parseResponse<T>(response: Response): Promise<T> {
   let body: T | ApiErrorPayload | null = null
   const text = await response.text()
@@ -63,10 +60,23 @@ async function parseResponse<T>(response: Response): Promise<T> {
   }
   if (!response.ok) {
     const error = (body ?? {}) as ApiErrorPayload
-    const code =
-      error.error
-      ?? (response.status === 403 ? 'authentication_required' : `http_${response.status}`)
-    throw new KnowledgeBaseApiError(code, error.details ?? {})
+    if (error.error) {
+      throw new KnowledgeBaseApiError(error.error, error.details ?? {})
+    }
+    // Django CSRF failure is HTML 403 — not the same as missing session.
+    if (
+      response.status === 403
+      && /csrf|CSRF verification failed/i.test(text)
+    ) {
+      throw new KnowledgeBaseApiError('csrf_failed')
+    }
+    if (response.status === 401) {
+      throw new KnowledgeBaseApiError('authentication_required')
+    }
+    if (response.status === 403) {
+      throw new KnowledgeBaseApiError('permission_denied')
+    }
+    throw new KnowledgeBaseApiError(`http_${response.status}`)
   }
   if (body == null) {
     throw new KnowledgeBaseApiError('empty_response')
@@ -74,20 +84,35 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return body as T
 }
 
-export async function listKnowledgeBases(): Promise<KnowledgeBase[]> {
-  const response = await fetch('/api/admin/kb/', {
-    method: 'GET',
+async function authedFetch(
+  input: string,
+  init: RequestInit & { csrf?: boolean } = {},
+): Promise<Response> {
+  const { csrf = false, headers: initHeaders, ...rest } = init
+  await ensureDevSession()
+  const headers = new Headers(initHeaders)
+  if (csrf) {
+    const token = await ensureCsrfToken()
+    if (!token) {
+      throw new KnowledgeBaseApiError('csrf_failed')
+    }
+    headers.set('X-CSRFToken', token)
+  }
+  return fetch(input, {
+    ...rest,
     credentials: 'include',
+    headers,
   })
+}
+
+export async function listKnowledgeBases(): Promise<KnowledgeBase[]> {
+  const response = await authedFetch('/api/admin/kb/', { method: 'GET' })
   const body = await parseResponse<{ items: KnowledgeBase[] }>(response)
   return body.items
 }
 
 export async function getKnowledgeBase(id: number): Promise<KnowledgeBase> {
-  const response = await fetch(`/api/admin/kb/${id}/`, {
-    method: 'GET',
-    credentials: 'include',
-  })
+  const response = await authedFetch(`/api/admin/kb/${id}/`, { method: 'GET' })
   return parseResponse<KnowledgeBase>(response)
 }
 
@@ -96,23 +121,19 @@ export async function createKnowledgeBase(payload: {
   scope?: string
   description?: string
 }): Promise<KnowledgeBase> {
-  const response = await fetch('/api/admin/kb/', {
+  const response = await authedFetch('/api/admin/kb/', {
     method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRFToken': csrfToken(),
-    },
+    csrf: true,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
   return parseResponse<KnowledgeBase>(response)
 }
 
 export async function deleteKnowledgeBase(id: number): Promise<void> {
-  const response = await fetch(`/api/admin/kb/${id}/`, {
+  const response = await authedFetch(`/api/admin/kb/${id}/`, {
     method: 'DELETE',
-    credentials: 'include',
-    headers: { 'X-CSRFToken': csrfToken() },
+    csrf: true,
   })
   await parseResponse<{ ok: boolean }>(response)
 }
@@ -123,10 +144,9 @@ export async function uploadKnowledgeDocument(
 ): Promise<{ knowledge_base: KnowledgeBase; document: KnowledgeBaseDocument }> {
   const form = new FormData()
   form.append('file', file)
-  const response = await fetch(`/api/admin/kb/${kbId}/upload/`, {
+  const response = await authedFetch(`/api/admin/kb/${kbId}/upload/`, {
     method: 'POST',
-    credentials: 'include',
-    headers: { 'X-CSRFToken': csrfToken() },
+    csrf: true,
     body: form,
   })
   return parseResponse(response)
@@ -136,12 +156,11 @@ export async function deleteKnowledgeDocument(
   kbId: number,
   documentId: number,
 ): Promise<KnowledgeBase> {
-  const response = await fetch(
+  const response = await authedFetch(
     `/api/admin/kb/${kbId}/documents/${documentId}/`,
     {
       method: 'DELETE',
-      credentials: 'include',
-      headers: { 'X-CSRFToken': csrfToken() },
+      csrf: true,
     },
   )
   return parseResponse<KnowledgeBase>(response)
@@ -150,10 +169,9 @@ export async function deleteKnowledgeDocument(
 export async function reindexKnowledgeBase(
   kbId: number,
 ): Promise<KnowledgeBase> {
-  const response = await fetch(`/api/admin/kb/${kbId}/reindex/`, {
+  const response = await authedFetch(`/api/admin/kb/${kbId}/reindex/`, {
     method: 'POST',
-    credentials: 'include',
-    headers: { 'X-CSRFToken': csrfToken() },
+    csrf: true,
   })
   return parseResponse<KnowledgeBase>(response)
 }

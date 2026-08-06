@@ -90,18 +90,24 @@ function FeedbackBar({
 function MessageLenta({
   messages,
   streaming,
+  readOnly = false,
   onFeedback,
   onStop,
 }: {
   messages: AssistantMessage[]
   streaming: boolean
+  readOnly?: boolean
   onFeedback: (id: string, kind: FeedbackKind) => void
   onStop: () => void
 }) {
   if (!messages.length) {
     return (
       <div className="asst-lenta asst-lenta--empty" data-testid="asst-lenta">
-        <p>Выберите базы знаний и задайте вопрос</p>
+        <p>
+          {readOnly
+            ? 'Просмотр чата · отправка сообщений недоступна. Откройте ≡ → отчётность.'
+            : 'Выберите базы знаний и задайте вопрос'}
+        </p>
       </div>
     )
   }
@@ -153,7 +159,9 @@ function MessageLenta({
                   </ul>
                 </div>
               ) : null}
-              <FeedbackBar message={message} onFeedback={onFeedback} />
+              {!readOnly ? (
+                <FeedbackBar message={message} onFeedback={onFeedback} />
+              ) : null}
             </Card>
           )}
         </div>
@@ -234,6 +242,8 @@ function ToolsPanel({
 export interface AssistantChatProps {
   demoMode?: boolean
   compact?: boolean
+  /** TZ III.2 п.10: аналитик — просмотр без отправки сообщений. */
+  readOnly?: boolean
   username?: string
   initialDraft?: string
   /** Optional override (Storybook); otherwise loaded from `/api/v1/assistant/kbs/`. */
@@ -243,6 +253,7 @@ export interface AssistantChatProps {
 export function AssistantChat({
   demoMode = true,
   compact = false,
+  readOnly = false,
   initialDraft = '',
   knowledgeBases: knowledgeBasesProp,
 }: AssistantChatProps) {
@@ -333,7 +344,7 @@ export function AssistantChat({
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
-    if (!draft.trim() || streaming) return
+    if (readOnly || !draft.trim() || streaming) return
     const text = draft
     setDraft('')
     void sendMessage(text)
@@ -341,15 +352,25 @@ export function AssistantChat({
 
   return (
     <div
-      className={`asst-chat${compact ? ' asst-chat--compact' : ''}`}
+      className={`asst-chat${compact ? ' asst-chat--compact' : ''}${
+        readOnly ? ' asst-chat--readonly' : ''
+      }`}
       data-testid="assistant-chat"
+      data-readonly={readOnly ? 'true' : undefined}
     >
+      {readOnly ? (
+        <div className="asst-readonly-banner" role="status" data-testid="asst-readonly-banner">
+          <StatusBadge status="neutral">Только просмотр</StatusBadge>
+          <span>Нет права на отправку (I.4). Отчёты и настройки — через меню ≡</span>
+        </div>
+      ) : null}
       <div className="asst-toolbar">
         <div className="asst-kb" data-testid="asst-kb">
           <button
             type="button"
             className="asst-kb__trigger"
             aria-expanded={kbOpen}
+            disabled={readOnly}
             onClick={() => setKbOpen((value) => !value)}
             data-testid="asst-kb-trigger"
           >
@@ -400,10 +421,16 @@ export function AssistantChat({
             </div>
           ) : null}
         </div>
-        <Button type="button" variant="secondary" onClick={newDialog} data-testid="asst-new">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={newDialog}
+          disabled={readOnly}
+          data-testid="asst-new"
+        >
           + Новый
         </Button>
-        <Button type="button" variant="ghost" data-testid="asst-history">
+        <Button type="button" variant="ghost" disabled={readOnly} data-testid="asst-history">
           История диалогов
         </Button>
       </div>
@@ -411,18 +438,21 @@ export function AssistantChat({
       <MessageLenta
         messages={messages}
         streaming={streaming}
+        readOnly={readOnly}
         onFeedback={setFeedback}
         onStop={stopStreaming}
       />
 
-      <ToolsPanel
-        tools={tools}
-        open={toolsOpen}
-        onClose={() => setToolsOpen(false)}
-        onRun={runTool}
-      />
+      {!readOnly ? (
+        <ToolsPanel
+          tools={tools}
+          open={toolsOpen}
+          onClose={() => setToolsOpen(false)}
+          onRun={runTool}
+        />
+      ) : null}
 
-      {error ? (
+      {error && !readOnly ? (
         <Card className="asst-error" role="alert">
           <StatusBadge status="danger">Ошибка</StatusBadge>
           <p>{error}</p>
@@ -434,7 +464,7 @@ export function AssistantChat({
 
       <form className="asst-composer" onSubmit={onSubmit} data-testid="asst-composer">
         <div className="asst-composer__extras">
-          <Button type="button" variant="ghost">
+          <Button type="button" variant="ghost" disabled={readOnly}>
             Прикрепить
           </Button>
           <Button
@@ -442,6 +472,7 @@ export function AssistantChat({
             variant={toolsOpen ? 'secondary' : 'ghost'}
             aria-expanded={toolsOpen}
             aria-controls="asst-tools-panel"
+            disabled={readOnly}
             onClick={() => setToolsOpen((value) => !value)}
             data-testid="asst-composer-tools"
           >
@@ -453,8 +484,10 @@ export function AssistantChat({
           id="asst-draft"
           value={draft}
           maxLength={maxChars}
-          placeholder="Задайте вопрос…"
+          placeholder={readOnly ? 'Отправка сообщений недоступна для аналитика' : 'Задайте вопрос…'}
           data-testid="asst-draft"
+          disabled={readOnly}
+          readOnly={readOnly}
           onChange={(event) => setDraft(event.target.value)}
         />
         <div className="asst-composer__footer">
@@ -463,7 +496,7 @@ export function AssistantChat({
           </span>
           <Button
             type="submit"
-            disabled={!draft.trim() || streaming}
+            disabled={readOnly || !draft.trim() || streaming}
             data-testid="asst-send"
           >
             {streaming ? 'Стриминг…' : 'Отправить'}

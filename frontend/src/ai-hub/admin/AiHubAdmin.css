@@ -6,6 +6,32 @@
   background: var(--color-surface-muted);
 }
 
+.admin-center--boot {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: var(--space-6);
+  background: var(--color-surface-muted);
+}
+
+.admin-center--boot .ui-card {
+  display: grid;
+  gap: var(--space-3);
+  width: min(480px, 100%);
+  padding: var(--space-5);
+}
+
+.admin-center--boot h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.admin-center--boot p {
+  margin: 0;
+  color: var(--color-text-muted);
+  line-height: 1.45;
+}
+
 .admin-sidebar {
   position: sticky;
   top: 0;

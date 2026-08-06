@@ -137,6 +137,14 @@
   background: var(--color-secondary);
 }
 
+.role-picker__module--settings {
+  background: color-mix(in srgb, var(--color-primary) 75%, #000);
+}
+
+.role-picker__module--reports {
+  background: var(--color-info, #2563eb);
+}
+
 .role-picker__module--none {
   color: var(--color-text-muted);
   background: var(--color-surface-muted);

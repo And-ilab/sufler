@@ -67,6 +67,7 @@ services:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:8001,http://localhost:8001}
       AUTH_BACKEND: ${AUTH_BACKEND:-${AUTH_MODE:-mock_ldap}}
       AUTH_MODE: ${AUTH_MODE:-mock_ldap}
       AUTH_MOCK_LDAP_DEFAULT_PASSWORD: ${AUTH_MOCK_LDAP_DEFAULT_PASSWORD:-dev-only-password}
@@ -152,6 +153,7 @@ services:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:8001,http://localhost:8001}
       AUTH_BACKEND: ${AUTH_BACKEND:-${AUTH_MODE:-mock_ldap}}
       AUTH_MODE: ${AUTH_MODE:-mock_ldap}
       AUTH_MOCK_LDAP_DEFAULT_PASSWORD: ${AUTH_MOCK_LDAP_DEFAULT_PASSWORD:-dev-only-password}
@@ -230,9 +232,9 @@ services:
     environment:
       VITE_API_PROXY_TARGET: http://backend:8000
       VITE_DEV_RBAC_ROLES: ${VITE_DEV_RBAC_ROLES:-contact_center_telephony_operator,ai_hub_admin}
-      # Must match AUTH_MOCK_LDAP_DEFAULT_PASSWORD so Admin/KB DEV auto-login works in browser
+      # Must match AUTH_MOCK_LDAP_DEFAULT_PASSWORD (infra/.env). Vite reads this at process start.
       VITE_DEV_AUTH_USER: ${VITE_DEV_AUTH_USER:-dev-role-01}
-      VITE_DEV_AUTH_PASSWORD: ${AUTH_MOCK_LDAP_DEFAULT_PASSWORD:-dev-only-password}
+      VITE_DEV_AUTH_PASSWORD: ${AUTH_MOCK_LDAP_DEFAULT_PASSWORD:-replace-with-dev-only-password}
     ports:
       - "${FRONTEND_PORT_HOST:-5173}:5173"
     volumes:
