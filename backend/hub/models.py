@@ -177,10 +177,12 @@ class AssistantKnowledgeBase(models.Model):
     """Assistant module KB namespace ``assistant_*`` (isolated from cc_production)."""
 
     STATUS_IDLE = "idle"
+    STATUS_INDEXING = "indexing"
     STATUS_READY = "ready"
     STATUS_ERROR = "error"
     STATUS_CHOICES = (
         (STATUS_IDLE, "Idle"),
+        (STATUS_INDEXING, "Indexing"),
         (STATUS_READY, "Ready"),
         (STATUS_ERROR, "Error"),
     )
@@ -195,7 +197,10 @@ class AssistantKnowledgeBase(models.Model):
         default=STATUS_IDLE,
         db_index=True,
     )
+    status_message = models.CharField(max_length=500, blank=True)
     document_count = models.PositiveIntegerField(default=0)
+    chunk_count = models.PositiveIntegerField(default=0)
+    last_reindexed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.CharField(max_length=150, blank=True)
@@ -205,6 +210,47 @@ class AssistantKnowledgeBase(models.Model):
 
     def __str__(self) -> str:
         return self.slug
+
+
+class AssistantKnowledgeBaseDocument(models.Model):
+    """Uploaded source document for an assistant_* KB (isolated from КЦ)."""
+
+    STATUS_UPLOADED = "uploaded"
+    STATUS_INDEXED = "indexed"
+    STATUS_ERROR = "error"
+    STATUS_CHOICES = (
+        (STATUS_UPLOADED, "Uploaded"),
+        (STATUS_INDEXED, "Indexed"),
+        (STATUS_ERROR, "Error"),
+    )
+
+    knowledge_base = models.ForeignKey(
+        AssistantKnowledgeBase,
+        on_delete=models.CASCADE,
+        related_name="documents",
+    )
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=128, blank=True)
+    size_bytes = models.PositiveIntegerField(default=0)
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_UPLOADED,
+        db_index=True,
+    )
+    status_message = models.CharField(max_length=500, blank=True)
+    extracted_text = models.TextField(blank=True)
+    chunk_count = models.PositiveIntegerField(default=0)
+    article_id = models.BigIntegerField(unique=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    indexed_at = models.DateTimeField(null=True, blank=True)
+    uploaded_by = models.CharField(max_length=150, blank=True)
+
+    class Meta:
+        ordering = ("-uploaded_at",)
+
+    def __str__(self) -> str:
+        return self.filename
 
 
 class AssistantPromptTemplate(models.Model):

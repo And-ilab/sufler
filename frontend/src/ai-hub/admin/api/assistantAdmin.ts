@@ -3,6 +3,22 @@ import { ensureCsrfToken, ensureDevSession } from '../../../auth/ensureDevSessio
 export type PromptType = 'system' | 'task' | 'scope'
 export type PromptStatus = 'draft' | 'published'
 
+export type AssistantKbStatus = 'idle' | 'indexing' | 'ready' | 'error'
+export type AssistantDocumentStatus = 'uploaded' | 'indexed' | 'error'
+
+export interface AssistantKbDocument {
+  id: number
+  filename: string
+  content_type: string
+  size_bytes: number
+  status: AssistantDocumentStatus
+  status_message: string
+  chunk_count: number
+  uploaded_at: string
+  indexed_at: string | null
+  uploaded_by: string
+}
+
 export interface AssistantKb {
   id: number
   name: string
@@ -11,8 +27,15 @@ export interface AssistantKb {
   isolated_from: string
   scope: string
   description: string
-  status: string
+  status: AssistantKbStatus | string
+  status_message?: string
   document_count: number
+  chunk_count?: number
+  last_reindexed_at?: string | null
+  created_at?: string
+  updated_at?: string
+  created_by?: string
+  documents?: AssistantKbDocument[]
 }
 
 export interface AssistantPrompt {
@@ -133,6 +156,57 @@ export async function createAssistantKb(payload: {
     csrf: true,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+  })
+  return parseJson(response)
+}
+
+export async function getAssistantKb(id: number): Promise<AssistantKb> {
+  const response = await authedFetch(`/api/admin/assistant/kb/${id}/`, {
+    method: 'GET',
+  })
+  return parseJson(response)
+}
+
+export async function deleteAssistantKb(id: number): Promise<void> {
+  const response = await authedFetch(`/api/admin/assistant/kb/${id}/`, {
+    method: 'DELETE',
+    csrf: true,
+  })
+  await parseJson<{ ok: boolean }>(response)
+}
+
+export async function uploadAssistantKbDocument(
+  kbId: number,
+  file: File,
+): Promise<{ knowledge_base: AssistantKb; document: AssistantKbDocument }> {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await authedFetch(`/api/admin/assistant/kb/${kbId}/upload/`, {
+    method: 'POST',
+    csrf: true,
+    body: form,
+  })
+  return parseJson(response)
+}
+
+export async function deleteAssistantKbDocument(
+  kbId: number,
+  documentId: number,
+): Promise<AssistantKb> {
+  const response = await authedFetch(
+    `/api/admin/assistant/kb/${kbId}/documents/${documentId}/`,
+    {
+      method: 'DELETE',
+      csrf: true,
+    },
+  )
+  return parseJson(response)
+}
+
+export async function reindexAssistantKb(kbId: number): Promise<AssistantKb> {
+  const response = await authedFetch(`/api/admin/assistant/kb/${kbId}/reindex/`, {
+    method: 'POST',
+    csrf: true,
   })
   return parseJson(response)
 }

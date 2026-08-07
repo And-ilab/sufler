@@ -3,16 +3,32 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Mapping
 
 from django.db import transaction
+from django.utils import timezone
 from django.utils.text import slugify
 
+from hub.kb_admin import KnowledgeBaseError, extract_document_text
 from hub.models import (
     AssistantCapability,
     AssistantKnowledgeBase,
+    AssistantKnowledgeBaseDocument,
     AssistantPromptTemplate,
 )
+from ingest.models import AssistantProductionChunk
+from ingest.pipeline import (
+    checksum_for_text,
+    chunk_text,
+    deterministic_embedding,
+    normalize_text,
+)
+
+ARTICLE_ID_BASE = 3_000_000_000
+DEFAULT_CHUNK_SIZE = 512
+DEFAULT_CHUNK_OVERLAP = 64
+DEFAULT_EMBEDDING_MODEL = "dev-embedding"
 
 FORBIDDEN_KB_SLUGS = frozenset({"cc_production", "cc-production", "suz_cc"})
 ASSISTANT_SLUG_PREFIX = "assistant_"
@@ -23,7 +39,7 @@ DEFAULT_CAPABILITIES: tuple[dict[str, Any], ...] = (
         "code": "rag_kb",
         "name": "Поиск по KB (RAG)",
         "description": "Retrieval по индексам assistant_* (не cc_production).",
-        "deep_link": "kb_admin",
+        "deep_link": "capabilities",
         "category": "rag",
         "sort_order": 10,
         "enabled": True,
@@ -202,8 +218,29 @@ def _normalize_assistant_slug(raw: str) -> str:
     return value
 
 
-def serialize_kb(kb: AssistantKnowledgeBase) -> dict[str, Any]:
+def serialize_document(document: AssistantKnowledgeBaseDocument) -> dict[str, Any]:
     return {
+        "id": document.pk,
+        "filename": document.filename,
+        "content_type": document.content_type,
+        "size_bytes": document.size_bytes,
+        "status": document.status,
+        "status_message": document.status_message,
+        "chunk_count": document.chunk_count,
+        "uploaded_at": document.uploaded_at.isoformat(),
+        "indexed_at": (
+            document.indexed_at.isoformat() if document.indexed_at else None
+        ),
+        "uploaded_by": document.uploaded_by,
+    }
+
+
+def serialize_kb(
+    kb: AssistantKnowledgeBase,
+    *,
+    include_documents: bool = False,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "id": kb.pk,
         "name": kb.name,
         "slug": kb.slug,
@@ -212,11 +249,45 @@ def serialize_kb(kb: AssistantKnowledgeBase) -> dict[str, Any]:
         "scope": kb.scope,
         "description": kb.description,
         "status": kb.status,
+        "status_message": kb.status_message,
         "document_count": kb.document_count,
+        "chunk_count": kb.chunk_count,
+        "last_reindexed_at": (
+            kb.last_reindexed_at.isoformat() if kb.last_reindexed_at else None
+        ),
         "created_at": kb.created_at.isoformat(),
         "updated_at": kb.updated_at.isoformat(),
         "created_by": kb.created_by,
     }
+    if include_documents:
+        payload["documents"] = [
+            serialize_document(document) for document in kb.documents.all()
+        ]
+    return payload
+
+
+def get_assistant_kb(kb_id: int) -> dict[str, Any]:
+    try:
+        kb = AssistantKnowledgeBase.objects.prefetch_related("documents").get(
+            pk=kb_id
+        )
+    except AssistantKnowledgeBase.DoesNotExist as exc:
+        raise AssistantAdminError("KB not found") from exc
+    return serialize_kb(kb, include_documents=True)
+
+
+def _chunk_profile() -> tuple[int, int, str]:
+    try:
+        from core.model_registry import ModelRegistry
+
+        profile = ModelRegistry.load().get_profile("kb_cc_production")
+        return (
+            profile.chunk_size_tokens,
+            profile.chunk_overlap_tokens,
+            profile.embedding_model,
+        )
+    except Exception:
+        return DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, DEFAULT_EMBEDDING_MODEL
 
 
 def serialize_prompt(prompt: AssistantPromptTemplate) -> dict[str, Any]:
@@ -275,10 +346,10 @@ def create_assistant_kb(
         slug=slug,
         scope=str(payload.get("scope") or "department")[:64],
         description=str(payload.get("description") or ""),
-        status=AssistantKnowledgeBase.STATUS_READY,
+        status=AssistantKnowledgeBase.STATUS_IDLE,
         created_by=username,
     )
-    return serialize_kb(kb)
+    return serialize_kb(kb, include_documents=True)
 
 
 def delete_assistant_kb(kb_id: int) -> None:
@@ -288,7 +359,205 @@ def delete_assistant_kb(kb_id: int) -> None:
         raise AssistantAdminError("KB not found") from exc
     if not kb.slug.startswith(ASSISTANT_SLUG_PREFIX):
         raise AssistantAdminError("refusing to delete non-assistant namespace")
+    article_ids = list(kb.documents.values_list("article_id", flat=True))
+    if article_ids:
+        AssistantProductionChunk.objects.filter(
+            kb_slug=kb.slug,
+            article_id__in=article_ids,
+        ).delete()
     kb.delete()
+
+
+@transaction.atomic
+def upload_assistant_document(
+    kb_id: int,
+    *,
+    filename: str,
+    content_type: str,
+    data: bytes,
+    username: str = "",
+    reindex: bool = True,
+) -> dict[str, Any]:
+    try:
+        kb = AssistantKnowledgeBase.objects.select_for_update().get(pk=kb_id)
+    except AssistantKnowledgeBase.DoesNotExist as exc:
+        raise AssistantAdminError("KB not found") from exc
+    if not kb.slug.startswith(ASSISTANT_SLUG_PREFIX):
+        raise AssistantAdminError("refusing to write non-assistant namespace")
+    cleaned_name = Path(filename).name.strip()
+    if not cleaned_name:
+        raise AssistantAdminError("filename is required")
+    try:
+        text = extract_document_text(cleaned_name, data)
+    except KnowledgeBaseError as exc:
+        raise AssistantAdminError(str(exc)) from exc
+    provisional_article_id = ARTICLE_ID_BASE + (
+        AssistantKnowledgeBaseDocument.objects.count() + 1
+    ) * 10_000 + (kb.pk % 10_000)
+    while AssistantKnowledgeBaseDocument.objects.filter(
+        article_id=provisional_article_id
+    ).exists():
+        provisional_article_id += 1
+    document = AssistantKnowledgeBaseDocument.objects.create(
+        knowledge_base=kb,
+        filename=cleaned_name,
+        content_type=content_type or "",
+        size_bytes=len(data),
+        status=AssistantKnowledgeBaseDocument.STATUS_UPLOADED,
+        extracted_text=text,
+        uploaded_by=username,
+        article_id=provisional_article_id,
+    )
+    document.article_id = ARTICLE_ID_BASE + document.pk
+    document.save(update_fields=("article_id",))
+    kb.document_count = kb.documents.count()
+    kb.status = AssistantKnowledgeBase.STATUS_IDLE
+    kb.status_message = "Документ загружен, требуется переиндексация"
+    kb.save(
+        update_fields=(
+            "document_count",
+            "status",
+            "status_message",
+            "updated_at",
+        )
+    )
+    if reindex:
+        reindex_assistant_kb(kb.pk)
+        kb.refresh_from_db()
+        document.refresh_from_db()
+    return {
+        "knowledge_base": serialize_kb(kb, include_documents=True),
+        "document": serialize_document(document),
+    }
+
+
+@transaction.atomic
+def delete_assistant_document(kb_id: int, document_id: int) -> dict[str, Any]:
+    try:
+        kb = AssistantKnowledgeBase.objects.select_for_update().get(pk=kb_id)
+    except AssistantKnowledgeBase.DoesNotExist as exc:
+        raise AssistantAdminError("KB not found") from exc
+    try:
+        document = kb.documents.get(pk=document_id)
+    except AssistantKnowledgeBaseDocument.DoesNotExist as exc:
+        raise AssistantAdminError("document not found") from exc
+    AssistantProductionChunk.objects.filter(
+        kb_slug=kb.slug,
+        article_id=document.article_id,
+    ).delete()
+    document.delete()
+    kb.document_count = kb.documents.count()
+    kb.chunk_count = sum(kb.documents.values_list("chunk_count", flat=True))
+    kb.status_message = "Документ удалён"
+    kb.save(
+        update_fields=(
+            "document_count",
+            "chunk_count",
+            "status_message",
+            "updated_at",
+        )
+    )
+    return serialize_kb(kb, include_documents=True)
+
+
+@transaction.atomic
+def reindex_assistant_kb(kb_id: int) -> dict[str, Any]:
+    try:
+        kb = AssistantKnowledgeBase.objects.select_for_update().get(pk=kb_id)
+    except AssistantKnowledgeBase.DoesNotExist as exc:
+        raise AssistantAdminError("KB not found") from exc
+    if not kb.slug.startswith(ASSISTANT_SLUG_PREFIX):
+        raise AssistantAdminError("refusing to index non-assistant namespace")
+
+    kb.status = AssistantKnowledgeBase.STATUS_INDEXING
+    kb.status_message = "Индексация выполняется"
+    kb.save(update_fields=("status", "status_message", "updated_at"))
+
+    chunk_size, overlap, embedding_model = _chunk_profile()
+    total_chunks = 0
+    try:
+        for document in kb.documents.select_for_update():
+            text = normalize_text(document.extracted_text)
+            if not text:
+                document.status = AssistantKnowledgeBaseDocument.STATUS_ERROR
+                document.status_message = "Нет текста для индексации"
+                document.chunk_count = 0
+                document.save(
+                    update_fields=(
+                        "status",
+                        "status_message",
+                        "chunk_count",
+                    )
+                )
+                continue
+            chunks = chunk_text(
+                text,
+                chunk_size=chunk_size,
+                overlap=overlap,
+            )
+            checksum = checksum_for_text(text)
+            AssistantProductionChunk.objects.filter(
+                kb_slug=kb.slug,
+                article_id=document.article_id,
+            ).delete()
+            AssistantProductionChunk.objects.bulk_create(
+                [
+                    AssistantProductionChunk(
+                        kb_slug=kb.slug,
+                        article_id=document.article_id,
+                        version_id=document.pk,
+                        chunk_index=index,
+                        title=document.filename,
+                        content=chunk,
+                        permalink=(
+                            f"https://hub.local/assistant-kb/{kb.slug}"
+                            f"/documents/{document.pk}"
+                        ),
+                        locale="ru",
+                        visibility_scope=["assistant", kb.scope],
+                        checksum=checksum,
+                        embedding_model=embedding_model,
+                        embedding=deterministic_embedding(chunk),
+                        is_active=True,
+                    )
+                    for index, chunk in enumerate(chunks)
+                ]
+            )
+            document.status = AssistantKnowledgeBaseDocument.STATUS_INDEXED
+            document.status_message = ""
+            document.chunk_count = len(chunks)
+            document.indexed_at = timezone.now()
+            document.save(
+                update_fields=(
+                    "status",
+                    "status_message",
+                    "chunk_count",
+                    "indexed_at",
+                )
+            )
+            total_chunks += len(chunks)
+        kb.status = AssistantKnowledgeBase.STATUS_READY
+        kb.status_message = "Индекс актуален"
+        kb.chunk_count = total_chunks
+        kb.document_count = kb.documents.count()
+        kb.last_reindexed_at = timezone.now()
+        kb.save(
+            update_fields=(
+                "status",
+                "status_message",
+                "chunk_count",
+                "document_count",
+                "last_reindexed_at",
+                "updated_at",
+            )
+        )
+    except Exception as exc:
+        kb.status = AssistantKnowledgeBase.STATUS_ERROR
+        kb.status_message = str(exc)[:500]
+        kb.save(update_fields=("status", "status_message", "updated_at"))
+        raise AssistantAdminError(kb.status_message) from exc
+
+    return serialize_kb(kb, include_documents=True)
 
 
 def list_prompts() -> list[dict[str, Any]]:
