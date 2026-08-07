@@ -1,5 +1,8 @@
 # CPU inference overlay (LLM manager + embedding).
 #
+# Paths are relative to infra/ (the first -f compose file in up-cpu.sh).
+# Compose resolves relative build/volume paths from the first compose file.
+#
 # From infra/:
 #   chmod +x local-inference/download-models.sh local-inference/up-cpu.sh
 #   ./local-inference/download-models.sh
@@ -14,7 +17,7 @@ services:
   llm:
     profiles: ["cpu-inference"]
     build:
-      context: .
+      context: ./local-inference
       dockerfile: Dockerfile.llm
     image: ${LLM_IMAGE:-sufler-llm:local}
     restart: unless-stopped
@@ -32,7 +35,7 @@ services:
       LLM_CTX: ${LLM_CTX:-4096}
       LLM_THREADS: ${LLM_THREADS:-}
     volumes:
-      - ../../models:/models
+      - ../models:/models
       - llm_manager_state:/var/lib/llm-manager
     ports:
       - "${LLM_MANAGER_PORT_HOST:-8070}:8070"
@@ -53,7 +56,7 @@ services:
   embedding:
     profiles: ["cpu-inference"]
     build:
-      context: ../../backend/services/embedding
+      context: ../backend/services/embedding
       dockerfile: Dockerfile
     image: ${EMBEDDING_IMAGE:-sufler-embedding:local}
     restart: unless-stopped
@@ -64,7 +67,7 @@ services:
       TRANSFORMERS_CACHE: /models/hf-cache
       SENTENCE_TRANSFORMERS_HOME: /models/hf-cache
     volumes:
-      - ../../models:/models
+      - ../models:/models
     ports:
       - "${EMBEDDING_PORT_HOST:-8090}:8090"
     healthcheck:

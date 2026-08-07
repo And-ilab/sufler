@@ -40,6 +40,7 @@ DEFAULT_MODEL_ID = os.environ.get("LLM_DEFAULT_MODEL_ID", "")
 
 _lock = threading.Lock()
 _process: subprocess.Popen[bytes] | None = None
+_log_fh: Any = None
 _active_id: str | None = None
 _switching = False
 _last_error: str | None = None
@@ -109,19 +110,24 @@ def _read_state() -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _llama_ready(port: int, timeout: float = 120.0) -> bool:
+def _llama_ready(port: int, timeout: float = 300.0) -> bool:
+    """Wait until OpenAI /v1/models returns HTTP 200 (not 503 while loading)."""
     deadline = time.time() + timeout
     url = f"http://127.0.0.1:{port}/v1/models"
     while time.time() < deadline:
         try:
-            with urlopen(url, timeout=2) as resp:
+            with urlopen(url, timeout=3) as resp:
                 if resp.status == 200:
-                    return True
-        except (URLError, TimeoutError, OSError):
+                    # Ensure body looks like a model list, not an error page.
+                    body = resp.read().decode("utf-8", errors="replace")
+                    if '"data"' in body or '"models"' in body or '"id"' in body:
+                        return True
+        except Exception:
+            # urllib raises HTTPError for 503 while the GGUF is still loading.
             pass
         if _process is not None and _process.poll() is not None:
             return False
-        time.sleep(0.5)
+        time.sleep(1.0)
     return False
 
 
@@ -199,35 +205,42 @@ def _free_llama_port(port: int) -> None:
 
 
 def _stop_llama() -> None:
-    global _process
+    global _process, _log_fh
     proc = _process
     _process = None
-    if proc is None:
-        return
-    if proc.poll() is not None:
-        return
-    try:
-        proc.terminate()
-    except (OSError, ValueError):
-        pass
-    try:
-        proc.wait(timeout=8)
-    except subprocess.TimeoutExpired:
-        _kill_pid(proc.pid)
+    if proc is not None and proc.poll() is None:
         try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
+            proc.terminate()
+        except (OSError, ValueError):
             pass
+        try:
+            proc.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            _kill_pid(proc.pid)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+    if _log_fh is not None:
+        try:
+            _log_fh.close()
+        except OSError:
+            pass
+        _log_fh = None
 
 
 def _start_llama(model_id: str) -> None:
-    global _process, _active_id, _last_error
+    global _process, _log_fh, _active_id, _last_error
     catalog = _load_catalog()
     item = _model_by_id(catalog, model_id)
     gguf = _gguf_path(item)
     alias = catalog.get("openai_alias") or "qwen2.5-1.5b-instruct"
     port = int(catalog.get("llama_port") or LLAMA_PORT or 8080)
     llama = _find_llama_server()
+    if not llama.is_file():
+        raise FileNotFoundError(f"llama-server binary missing: {llama}")
+    if not os.access(llama, os.X_OK):
+        raise PermissionError(f"llama-server is not executable: {llama}")
 
     _stop_llama()
     _free_llama_port(port)
@@ -235,6 +248,10 @@ def _start_llama(model_id: str) -> None:
     creationflags = 0
     if os.name == "nt":
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+
+    log_path = STATE_PATH.parent / "llama-server.log"
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _log_fh = log_path.open("ab", buffering=0)
 
     cmd = [
         str(llama),
@@ -251,17 +268,43 @@ def _start_llama(model_id: str) -> None:
         "--alias",
         alias,
     ]
+    env = os.environ.copy()
+    # Official image libs live next to the binary.
+    lib_dirs = [
+        str(llama.parent),
+        str(llama.parent / "lib"),
+        "/opt/llama",
+        "/opt/llama/lib",
+    ]
+    existing = [path for path in lib_dirs if Path(path).is_dir()]
+    if existing:
+        env["LD_LIBRARY_PATH"] = ":".join(
+            existing + ([env["LD_LIBRARY_PATH"]] if env.get("LD_LIBRARY_PATH") else [])
+        )
+
+    print(f"Starting llama-server: {' '.join(cmd)}", flush=True)
     _process = subprocess.Popen(
         cmd,
         cwd=str(MODELS_DIR),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=_log_fh,
+        stderr=subprocess.STDOUT,
         creationflags=creationflags,
+        env=env,
     )
     if not _llama_ready(port):
         code = _process.poll()
+        detail = ""
+        try:
+            _log_fh.flush()
+            if log_path.is_file():
+                detail = log_path.read_text(encoding="utf-8", errors="replace")[-2000:]
+        except OSError:
+            detail = ""
         _stop_llama()
-        _last_error = f"llama-server failed to become ready (exit={code})"
+        _last_error = (
+            f"llama-server failed to become ready (exit={code}). "
+            f"log_tail={detail!r}"
+        )
         raise RuntimeError(_last_error)
     _active_id = model_id
     _last_error = None
@@ -298,10 +341,12 @@ def status_payload() -> dict[str, Any]:
         )
     running = _process is not None and _process.poll() is None
     port = int(catalog.get("llama_port") or LLAMA_PORT or 8080)
+    ready = bool(_active_id) and running and not _switching
     return {
         "active_model_id": _active_id,
         "switching": _switching,
         "llama_running": running,
+        "ready": ready,
         "openai_alias": catalog.get("openai_alias"),
         "openai_base_url": f"http://{LLAMA_HOST}:{port}/v1",
         "models": available,
@@ -399,6 +444,16 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, payload)
 
 
+def _autostart_worker() -> None:
+    try:
+        ensure_started()
+        print(f"Active model: {_active_id}", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        global _last_error
+        _last_error = str(exc)
+        print(f"WARN: could not autostart LLM: {exc}", flush=True)
+
+
 def main() -> None:
     print(
         f"LLM manager on http://{MANAGER_HOST}:{MANAGER_PORT} "
@@ -406,12 +461,12 @@ def main() -> None:
         flush=True,
     )
     print(f"GGUF_DIR={GGUF_DIR} CATALOG={CATALOG_PATH}", flush=True)
-    try:
-        ensure_started()
-        print(f"Active model: {_active_id}", flush=True)
-    except Exception as exc:  # noqa: BLE001
-        print(f"WARN: could not autostart LLM: {exc}", flush=True)
+
+    # Bind HTTP first so healthchecks work while the GGUF is loading.
     server = ThreadingHTTPServer((MANAGER_HOST, MANAGER_PORT), Handler)
+    starter = threading.Thread(target=_autostart_worker, name="llm-autostart", daemon=True)
+    starter.start()
+    print("HTTP manager listening; autostarting llama in background…", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

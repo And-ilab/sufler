@@ -35,6 +35,19 @@ function parseSseBlock(block: string): ChatStreamChunk | null {
     const payload = JSON.parse(data) as {
       choices?: Array<{ delta?: { content?: string | null } }>
       sources?: ChatSource[]
+      error?: string
+      details?: string
+    }
+    if (payload.error) {
+      const detail = payload.details || payload.error
+      const content =
+        payload.choices?.[0]?.delta?.content ||
+        `Ошибка модели: ${detail}`
+      return {
+        content: content || '',
+        done: false,
+        sources: Array.isArray(payload.sources) ? payload.sources : undefined,
+      }
     }
     const content = payload.choices?.[0]?.delta?.content ?? ''
     return {

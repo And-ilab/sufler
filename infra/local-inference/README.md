@@ -44,6 +44,11 @@ EMBEDDING_BASE_URL=http://embedding:8090
 
 ### 2b. TEST prod-like (`infra/test/`)
 
+Через пайплайн **Deploy TEST** (тег `v*` / `test-*` или Actions → Run):
+собирает `llm`+`embedding`, на VM делает `pull-up --cpu-inference` и `cpu-verify`.
+
+Вручную:
+
 ```bash
 cd infra/test
 ./deploy.sh models-pull
@@ -52,6 +57,8 @@ cd infra/test
 ```
 
 Сервисы `llm` / `embedding` в profile `cpu-inference` (internal network, без публикации наружу).
+
+Workflow **Deploy** (main → rsync) на сервере вызывает `up-cpu.sh` + `verify-cpu.sh`.
 
 ---
 

@@ -200,6 +200,11 @@ mount weights, and optionally add Compose `device_requests` for NVIDIA.
 Compose profile **`cpu-inference`**: services `llm` (llama.cpp + model switcher) and
 `embedding` (E5-large). No GPU. Details: [`../local-inference/README.md`](../local-inference/README.md).
 
+**CI (`Deploy TEST`)** builds/pushes `llm` + `embedding` and on the VM runs
+`pull-up --cpu-inference` + `cpu-verify` automatically (tag `v*` / `test-*` or manual dispatch).
+
+Manual on the VM:
+
 ```bash
 ./deploy.sh models-pull
 ./deploy.sh up --cpu-inference

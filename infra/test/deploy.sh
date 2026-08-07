@@ -10,7 +10,7 @@
 #   ./deploy.sh              # validate + up --build -d (local build)
 #   ./deploy.sh up --cpu-inference  # also start CPU llm + embedding
 #   ./deploy.sh models-pull  # download GGUF weights into ../../models
-#   ./deploy.sh pull-up      # pull BACKEND_IMAGE/FRONTEND_IMAGE then up (CI)
+#   ./deploy.sh pull-up [--cpu-inference]  # pull registry images then up (CI)
 #   ./deploy.sh db-verify    # migrate + pgvector indexes + backend connection
 #   ./deploy.sh support-verify  # redis + celery worker + MinIO upload/download
 #   ./deploy.sh inference-verify  # ASR + LLM gateway (profile=test) + suggest smoke
@@ -81,12 +81,14 @@ enable_cpu_inference_env() {
   set_env_key MODEL_GATEWAY_MODE openai
   set_env_key OPENAI_BASE_URL http://llm:8080/v1
   set_env_key OPENAI_API_KEY local
-  set_env_key OPENAI_TIMEOUT_SECONDS 300
+  set_env_key OPENAI_TIMEOUT_SECONDS 600
   set_env_key LOCAL_LLM_MANAGER_URL http://llm:8070
   set_env_key EMBEDDING_MODE http
   set_env_key EMBEDDING_BASE_URL http://embedding:8090
   set_env_key EMBEDDING_MODEL intfloat/multilingual-e5-large
   set_env_key EMBEDDING_DIMENSIONS 1024
+  set_env_key EMBEDDING_TIMEOUT_SECONDS 180
+  set_env_key ASSISTANT_MAX_TOKENS 256
   set_env_key LLM_DEFAULT_MODEL_ID qwen2.5-1.5b-instruct
   set_env_key COMPOSE_PROFILES cpu-inference
   export COMPOSE_PROFILES=cpu-inference
@@ -113,21 +115,34 @@ write_image_env() {
   # Persist CI image refs into .env without printing secrets.
   local backend_image="${BACKEND_IMAGE:-}"
   local frontend_image="${FRONTEND_IMAGE:-}"
+  local llm_image="${LLM_IMAGE:-}"
+  local embedding_image="${EMBEDDING_IMAGE:-}"
   [[ -n "${backend_image}" ]] || die "BACKEND_IMAGE is required for pull-up"
   [[ -n "${frontend_image}" ]] || die "FRONTEND_IMAGE is required for pull-up"
 
   # Remove prior image lines, then append (idempotent).
-  if grep -qE '^(BACKEND_IMAGE|FRONTEND_IMAGE)=' "${ENV_FILE}" 2>/dev/null; then
-    grep -vE '^(BACKEND_IMAGE|FRONTEND_IMAGE)=' "${ENV_FILE}" > "${ENV_FILE}.tmp"
+  if grep -qE '^(BACKEND_IMAGE|FRONTEND_IMAGE|LLM_IMAGE|EMBEDDING_IMAGE)=' "${ENV_FILE}" 2>/dev/null; then
+    grep -vE '^(BACKEND_IMAGE|FRONTEND_IMAGE|LLM_IMAGE|EMBEDDING_IMAGE)=' "${ENV_FILE}" > "${ENV_FILE}.tmp"
     mv "${ENV_FILE}.tmp" "${ENV_FILE}"
   fi
   {
     echo "BACKEND_IMAGE=${backend_image}"
     echo "FRONTEND_IMAGE=${frontend_image}"
+    if [[ -n "${llm_image}" ]]; then
+      echo "LLM_IMAGE=${llm_image}"
+    fi
+    if [[ -n "${embedding_image}" ]]; then
+      echo "EMBEDDING_IMAGE=${embedding_image}"
+    fi
   } >> "${ENV_FILE}"
-  # Re-export for this process
   export BACKEND_IMAGE="${backend_image}"
   export FRONTEND_IMAGE="${frontend_image}"
+  if [[ -n "${llm_image}" ]]; then
+    export LLM_IMAGE="${llm_image}"
+  fi
+  if [[ -n "${embedding_image}" ]]; then
+    export EMBEDDING_IMAGE="${embedding_image}"
+  fi
 }
 
 registry_login() {
@@ -142,11 +157,23 @@ registry_login() {
 cmd="${1:-up}"
 shift || true
 cpu_inference=0
+no_cpu_inference=0
 for arg in "$@"; do
   case "${arg}" in
     --cpu-inference|cpu-inference) cpu_inference=1 ;;
+    --no-cpu-inference|no-cpu-inference) no_cpu_inference=1 ;;
   esac
 done
+
+# CI / pull-up defaults to CPU inference unless explicitly disabled.
+if [[ "${no_cpu_inference}" -eq 1 ]]; then
+  cpu_inference=0
+elif [[ "${cpu_inference}" -eq 1 || "${CPU_INFERENCE:-0}" == "1" ]]; then
+  cpu_inference=1
+elif [[ "${cmd}" == "pull-up" && "${CPU_INFERENCE:-1}" != "0" ]]; then
+  # Default ON for registry deploys (override with CPU_INFERENCE=0 or --no-cpu-inference).
+  cpu_inference=1
+fi
 
 case "${cmd}" in
   models-pull)
@@ -155,7 +182,7 @@ case "${cmd}" in
   up)
     require_env
     require_tls_certs
-    if [[ "${cpu_inference}" -eq 1 || "${CPU_INFERENCE:-0}" == "1" ]]; then
+    if [[ "${cpu_inference}" -eq 1 ]]; then
       bash "${ROOT}/../local-inference/download-models.sh"
       enable_cpu_inference_env
       echo "CPU inference profile enabled (llm + embedding)."
@@ -167,7 +194,7 @@ case "${cmd}" in
     echo "Stack started. HTTPS UI: https://localhost/  (HTTP :80 redirects to HTTPS)"
     echo "Health:  curl -k https://localhost/health/"
     echo "Logs:    ./deploy.sh logs"
-    if [[ "${cpu_inference}" -eq 1 || "${CPU_INFERENCE:-0}" == "1" ]]; then
+    if [[ "${cpu_inference}" -eq 1 ]]; then
       echo "CPU verify: ./deploy.sh cpu-verify"
     fi
     ;;
@@ -176,21 +203,30 @@ case "${cmd}" in
     require_tls_certs
     write_image_env
     registry_login
-    if [[ "${cpu_inference}" -eq 1 || "${CPU_INFERENCE:-0}" == "1" ]]; then
+    if [[ "${cpu_inference}" -eq 1 ]]; then
+      [[ -n "${LLM_IMAGE:-}" ]] || die "LLM_IMAGE is required for pull-up with CPU inference"
+      [[ -n "${EMBEDDING_IMAGE:-}" ]] || die "EMBEDDING_IMAGE is required for pull-up with CPU inference"
+      chmod +x "${ROOT}/../local-inference/download-models.sh" || true
       bash "${ROOT}/../local-inference/download-models.sh"
       enable_cpu_inference_env
+      echo "CPU inference profile enabled (llm + embedding)."
     fi
     compose config --quiet
     echo "Pulling images and starting ${PROJECT} (no local build)…"
     compose pull backend celery-worker frontend asr edge
-    if [[ "${cpu_inference}" -eq 1 || "${CPU_INFERENCE:-0}" == "1" ]]; then
-      compose pull llm embedding || true
+    if [[ "${cpu_inference}" -eq 1 ]]; then
+      compose pull llm embedding
     fi
     compose up -d --no-build
     echo
     echo "Stack started from registry images (edge TLS)."
     echo "BACKEND_IMAGE=${BACKEND_IMAGE}"
     echo "FRONTEND_IMAGE=${FRONTEND_IMAGE}"
+    if [[ "${cpu_inference}" -eq 1 ]]; then
+      echo "LLM_IMAGE=${LLM_IMAGE}"
+      echo "EMBEDDING_IMAGE=${EMBEDDING_IMAGE}"
+      echo "Next: ./deploy.sh cpu-verify"
+    fi
     ;;
   config)
     require_env
@@ -233,23 +269,12 @@ case "${cmd}" in
     require_env
     set_env_key COMPOSE_PROFILES cpu-inference
     export COMPOSE_PROFILES=cpu-inference
-    echo "=== llm /health ==="
-    compose exec -T llm \
-      python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8070/health', timeout=5).read().decode())" \
-      || die "llm health failed"
-    echo "=== embedding /health ==="
-    compose exec -T embedding \
-      python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=5).read().decode())" \
-      || die "embedding health failed"
-    echo "=== backend → inference ==="
-    compose exec -T backend \
-      python -c "
-import os, urllib.request
-print(urllib.request.urlopen(os.environ['LOCAL_LLM_MANAGER_URL'].rstrip('/') + '/health', timeout=5).status)
-print(urllib.request.urlopen(os.environ['EMBEDDING_BASE_URL'].rstrip('/') + '/health', timeout=5).status)
-print(urllib.request.urlopen(os.environ['OPENAI_BASE_URL'].rstrip('/') + '/models', timeout=5).status)
-" || die "backend cannot reach CPU inference"
-    echo "OK: CPU inference ready"
+    chmod +x "${ROOT}/../local-inference/verify-cpu.sh" || true
+    COMPOSE_DIR="${ROOT}" \
+      COMPOSE_FILE="${COMPOSE_FILE}" \
+      COMPOSE_PROJECT_NAME="${PROJECT}" \
+      ENV_FILE="${ENV_FILE}" \
+      bash "${ROOT}/../local-inference/verify-cpu.sh"
     ;;
   backup-stub)
     bash "${ROOT}/backup-postgres.sh" "${1:---dry-run}"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from typing import Any, Iterator, Mapping, Sequence
 
@@ -270,6 +271,33 @@ def retrieve_assistant_context(
     return documents, threshold
 
 
+def _generation_parameters() -> dict[str, Any]:
+    """Build sampling params; cap tokens for CPU so the UI does not hang forever."""
+    try:
+        settings = get_model_settings(PROFILE)
+        parameters: dict[str, Any] = {
+            "temperature": float(settings.temperature),
+            "top_p": float(settings.top_p),
+            "max_tokens": int(settings.max_tokens),
+        }
+    except Exception:
+        parameters = {"max_tokens": 256}
+
+    # Default registry max_tokens=1024 is too slow on CPU (minutes per answer).
+    raw_cap = os.environ.get("ASSISTANT_MAX_TOKENS") or os.environ.get(
+        "LLM_MAX_TOKENS"
+    )
+    if raw_cap:
+        try:
+            parameters["max_tokens"] = max(32, int(raw_cap))
+        except ValueError:
+            pass
+    else:
+        current = int(parameters.get("max_tokens") or 256)
+        parameters["max_tokens"] = min(current, 384)
+    return parameters
+
+
 def iter_chat_sse(
     messages: Sequence[Mapping[str, str]],
     *,
@@ -279,18 +307,23 @@ def iter_chat_sse(
 ) -> Iterator[str]:
     """Yield OpenAI-compatible SSE frames from ``assistant_bank`` with RAG."""
     active = gateway or ModelGateway.from_registry()
-    try:
-        settings = get_model_settings(PROFILE)
-        parameters: dict[str, Any] = {
-            "temperature": float(settings.temperature),
-            "top_p": float(settings.top_p),
-            "max_tokens": int(settings.max_tokens),
-        }
-    except Exception:
-        parameters = {}
+    parameters = _generation_parameters()
 
     if request_id:
         yield f": request_id {request_id}\n\n"
+
+    # Immediate SSE frame so proxies/UI know the stream is alive while we embed.
+    yield (
+        "data: "
+        + json.dumps(
+            {
+                "status": "retrieving",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
+            },
+            ensure_ascii=False,
+        )
+        + "\n\n"
+    )
 
     documents: list[dict[str, Any]] = []
     try:
@@ -306,6 +339,7 @@ def iter_chat_sse(
         "data: "
         + json.dumps(
             {
+                "status": "generating",
                 "sources": sources,
                 "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
             },
@@ -341,3 +375,30 @@ def iter_chat_sse(
         yield from active.stream(PROFILE, outbound, **parameters)
     except ModelGatewayConfigurationError as exc:
         raise AssistantChatError(str(exc)) from exc
+    except Exception as exc:
+        # Surface gateway/network errors into the SSE so the UI stops spinning.
+        err = str(exc) or exc.__class__.__name__
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "error": "llm_error",
+                    "details": err,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "content": (
+                                    "Не удалось получить ответ от модели: "
+                                    f"{err}"
+                                )
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            )
+            + "\n\n"
+        )
+        yield "data: [DONE]\n\n"
