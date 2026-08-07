@@ -1,0 +1,46 @@
+# CPU-only LLM manager + llama.cpp server (no GPU).
+# Build context: infra/local-inference
+FROM debian:bookworm-slim AS llama-build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake git ca-certificates libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git \
+ && cmake -S llama.cpp -B llama.cpp/build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DGGML_NATIVE=OFF \
+      -DLLAMA_CURL=ON \
+ && cmake --build llama.cpp/build --config Release -j"$(nproc)" --target llama-server \
+ && cp llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
+
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates libgomp1 libcurl4 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=llama-build /usr/local/bin/llama-server /usr/local/bin/llama-server
+COPY llm_manager.py models.json /opt/llm/
+
+ENV PYTHONUNBUFFERED=1 \
+    LLM_MANAGER_HOST=0.0.0.0 \
+    LLM_MANAGER_PORT=8070 \
+    LLAMA_HOST=0.0.0.0 \
+    LLAMA_PORT=8080 \
+    LLAMA_SERVER_PATH=/usr/local/bin/llama-server \
+    MODELS_DIR=/models \
+    GGUF_DIR=/models/llm \
+    CATALOG_PATH=/opt/llm/models.json \
+    STATE_PATH=/var/lib/llm-manager/state.json \
+    LLM_DEFAULT_MODEL_ID=qwen2.5-1.5b-instruct
+
+RUN mkdir -p /models/llm /var/lib/llm-manager
+
+EXPOSE 8070 8080
+HEALTHCHECK --interval=15s --timeout=5s --retries=12 --start-period=90s \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8070/health', timeout=3)"
+
+WORKDIR /opt/llm
+CMD ["python", "/opt/llm/llm_manager.py"]

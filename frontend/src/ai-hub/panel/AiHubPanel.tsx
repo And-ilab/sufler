@@ -229,7 +229,7 @@ export function AiHubPanel({
 function AssistantPanel({ readOnly = false }: { readOnly?: boolean }) {
   return (
     <div className="hub-tab-content hub-tab-content--assistant">
-      <AssistantChat demoMode compact readOnly={readOnly} />
+      <AssistantChat compact readOnly={readOnly} />
     </div>
   )
 }

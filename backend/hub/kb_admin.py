@@ -16,10 +16,10 @@ from django.utils.text import slugify
 
 from core.model_registry import ModelRegistry
 from hub.models import ContactCenterKnowledgeBase, KnowledgeBaseDocument
+from core.embeddings import embed_passage
 from ingest.pipeline import (
     checksum_for_text,
     chunk_text,
-    deterministic_embedding,
     normalize_text,
 )
 from ingest.models import CCProductionChunk
@@ -363,7 +363,7 @@ def reindex_knowledge_base(kb_id: int) -> dict[str, Any]:
                         visibility_scope=["kc_operator", "contact_center"],
                         checksum=checksum,
                         embedding_model=profile.embedding_model,
-                        embedding=deterministic_embedding(chunk),
+                        embedding=embed_passage(chunk),
                         is_active=True,
                     )
                     for index, chunk in enumerate(chunks)

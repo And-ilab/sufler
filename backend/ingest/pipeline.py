@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import html
-import math
 import re
 from dataclasses import dataclass
 
 from django.db import transaction
 
+from core.embeddings import deterministic_embedding, embed_passage
 from core.model_registry import ModelRegistry
 from ingest.models import CCProductionChunk, KnowledgeIngestEvent
 from ingest.schema import SuzPayload, SuzPayloadError
@@ -58,22 +58,6 @@ def chunk_text(
             break
         start += chunk_size - overlap
     return chunks
-
-
-def deterministic_embedding(text: str, dimensions: int = 1024) -> list[float]:
-    """Offline deterministic embedding stub with pgvector-compatible shape."""
-    vector = [0.0] * dimensions
-    for token in text.casefold().split():
-        digest = hashlib.blake2b(
-            token.encode("utf-8"),
-            digest_size=8,
-        ).digest()
-        index = int.from_bytes(digest[:4], "big") % dimensions
-        vector[index] += -1.0 if digest[4] & 1 else 1.0
-    norm = math.sqrt(sum(value * value for value in vector))
-    if norm:
-        return [value / norm for value in vector]
-    return vector
 
 
 @transaction.atomic
@@ -159,7 +143,7 @@ def ingest_payload(payload: SuzPayload) -> IngestResult:
                 visibility_scope=list(payload.visibility_scope),
                 checksum=payload.checksum,
                 embedding_model=profile.embedding_model,
-                embedding=deterministic_embedding(chunk),
+                embedding=embed_passage(chunk),
                 is_active=True,
             )
             for index, chunk in enumerate(chunks)

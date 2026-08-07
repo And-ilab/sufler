@@ -1,18 +1,16 @@
-"""Read-only Query Understanding preview service for FR-UND-12."""
+"""RAG retrieval over ``assistant_production`` (isolated from cc_production)."""
 
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Sequence
-from typing import Any
+from typing import Any, Sequence
 
 from django.db import connection
 from pgvector.django import CosineDistance
 
-from hub.model_registry_store import get_model_settings
-from ingest.models import CCProductionChunk
 from core.embeddings import embed_query
-from qu.models import QuReferenceExample
+from hub.model_registry_store import get_model_settings
+from ingest.models import AssistantProductionChunk
 
 
 DEFAULT_LIMIT = 5
@@ -28,38 +26,28 @@ def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
     return max(0.0, min(1.0, dot / (left_norm * right_norm)))
 
 
-def _best_example(
-    query_embedding: Sequence[float],
-    examples: Iterable[QuReferenceExample],
+def preview_assistant_query(
+    query: str,
     *,
-    fallback: str,
-) -> tuple[int | None, str]:
-    ranked = [
-        (
-            _cosine_similarity(
-                query_embedding,
-                embed_query(example.question),
-            ),
-            example,
-        )
-        for example in examples
-    ]
-    if not ranked:
-        return None, fallback
-    _, best = max(ranked, key=lambda item: item[0])
-    return best.pk, best.question
-
-
-def preview_query(query: str, *, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
-    """Rank active KB documents and attach the source QU example."""
+    kb_slugs: Sequence[str] | None = None,
+    limit: int = DEFAULT_LIMIT,
+) -> dict[str, Any]:
+    """Rank active assistant_* chunks, optionally filtered by kb_slug list."""
     normalized_query = query.strip()
     if not normalized_query:
         raise ValueError("query must be a non-empty string")
     if not 1 <= limit <= MAX_LIMIT:
         raise ValueError(f"limit must be between 1 and {MAX_LIMIT}")
 
+    slugs = [
+        slug.strip()
+        for slug in (kb_slugs or [])
+        if isinstance(slug, str) and slug.strip()
+    ]
+
     query_embedding = embed_query(normalized_query)
-    chunk_query = CCProductionChunk.objects.filter(is_active=True).only(
+    chunk_query = AssistantProductionChunk.objects.filter(is_active=True).only(
+        "kb_slug",
         "article_id",
         "chunk_index",
         "title",
@@ -67,6 +55,9 @@ def preview_query(query: str, *, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
         "permalink",
         "embedding",
     )
+    if slugs:
+        chunk_query = chunk_query.filter(kb_slug__in=slugs)
+
     if connection.vendor == "postgresql":
         chunks = list(
             chunk_query.annotate(
@@ -86,56 +77,42 @@ def preview_query(query: str, *, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
             )
             for chunk in chunks
         ]
-    examples = list(QuReferenceExample.objects.filter(is_active=True))
-    examples_by_article: dict[int, list[QuReferenceExample]] = {}
-    global_examples: list[QuReferenceExample] = []
-    for example in examples:
-        if example.article_id is None:
-            global_examples.append(example)
-        else:
-            examples_by_article.setdefault(example.article_id, []).append(
-                example
-            )
 
-    best_chunks: dict[int, tuple[float, CCProductionChunk]] = {}
+    best_chunks: dict[tuple[str, int], tuple[float, AssistantProductionChunk]] = {}
     for score, chunk in scored_chunks:
-        current = best_chunks.get(chunk.article_id)
+        key = (chunk.kb_slug, chunk.article_id)
+        current = best_chunks.get(key)
         if current is None or score > current[0]:
-            best_chunks[chunk.article_id] = (score, chunk)
+            best_chunks[key] = (score, chunk)
 
     ranked = sorted(
         best_chunks.values(),
-        key=lambda item: (-item[0], item[1].article_id),
+        key=lambda item: (-item[0], item[1].kb_slug, item[1].article_id),
     )[:limit]
     threshold = get_model_settings(
         "assistant_bank"
     ).context_inclusion_threshold
     documents = []
     for rank, (score, chunk) in enumerate(ranked, start=1):
-        matched_example_id, matched_example = _best_example(
-            query_embedding,
-            examples_by_article.get(chunk.article_id, global_examples),
-            fallback=chunk.title,
-        )
         documents.append(
             {
                 "rank": rank,
+                "kb_slug": chunk.kb_slug,
                 "article_id": chunk.article_id,
                 "chunk_index": chunk.chunk_index,
                 "title": chunk.title,
                 "permalink": chunk.permalink,
-                "snippet": chunk.content[:240],
+                "snippet": chunk.content[:800],
                 "relevance_score": round(score, 4),
                 "relevance_percent": round(score * 100),
                 "meets_min_relevance": score >= threshold,
-                "matched_example_id": matched_example_id,
-                "matched_example": matched_example,
             }
         )
 
     return {
         "query": normalized_query,
-        "kb_id": "cc_production",
+        "kb_id": "assistant_production",
+        "kb_slugs": slugs,
         "min_relevance": threshold,
         "min_relevance_percent": round(threshold * 100),
         "documents": documents,

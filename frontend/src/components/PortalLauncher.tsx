@@ -75,21 +75,24 @@ function ModuleWindow({
   const initialSize =
     module === 'sufler'
       ? { width: 960, height: 580 }
-      : { width: 420, height: 560 }
+      : { width: 720, height: 720 }
   const [size, setSize] = useState(initialSize)
+  const [maximized, setMaximized] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const showKbAdmin = canOpenKbAdminDeepLink(roles)
 
   const resizeBy = (widthDelta: number, heightDelta: number) => {
+    if (maximized) return
     const maxWidth = Math.max(320, window.innerWidth - 48)
     const maxHeight = Math.max(280, window.innerHeight - 120)
     setSize((current) => ({
-      width: Math.min(maxWidth, Math.max(320, current.width + widthDelta)),
-      height: Math.min(maxHeight, Math.max(280, current.height + heightDelta)),
+      width: Math.min(maxWidth, Math.max(360, current.width + widthDelta)),
+      height: Math.min(maxHeight, Math.max(420, current.height + heightDelta)),
     }))
   }
 
   const startResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (maximized) return
     event.preventDefault()
     const startX = event.clientX
     const startY = event.clientY
@@ -99,8 +102,8 @@ function ModuleWindow({
       const maxWidth = Math.max(320, window.innerWidth - 48)
       const maxHeight = Math.max(280, window.innerHeight - 120)
       setSize({
-        width: Math.min(maxWidth, Math.max(320, startSize.width + moveEvent.clientX - startX)),
-        height: Math.min(maxHeight, Math.max(280, startSize.height + moveEvent.clientY - startY)),
+        width: Math.min(maxWidth, Math.max(360, startSize.width + moveEvent.clientX - startX)),
+        height: Math.min(maxHeight, Math.max(420, startSize.height + moveEvent.clientY - startY)),
       })
     }
     const onPointerUp = () => {
@@ -121,8 +124,14 @@ function ModuleWindow({
 
   return (
     <section
-      className={`portal-module-window portal-module-window--${module}`}
-      style={{ width: `${size.width}px`, height: `${size.height}px` }}
+      className={`portal-module-window portal-module-window--${module}${
+        maximized ? ' portal-module-window--maximized' : ''
+      }`}
+      style={
+        maximized
+          ? undefined
+          : { width: `${size.width}px`, height: `${size.height}px` }
+      }
       role="dialog"
       aria-label={title}
       data-testid={`${module}-window`}
@@ -152,6 +161,15 @@ function ModuleWindow({
           </a>
           <button type="button" onClick={onMinimize} aria-label="Свернуть окно">
             —
+          </button>
+          <button
+            type="button"
+            onClick={() => setMaximized((value) => !value)}
+            aria-label={maximized ? 'Восстановить окно' : 'Развернуть на весь экран'}
+            title={maximized ? 'Восстановить' : 'На весь экран'}
+            data-testid={`${module}-maximize`}
+          >
+            {maximized ? '❐' : '□'}
           </button>
           <button type="button" onClick={onClose} aria-label="Закрыть окно">
             ×
@@ -199,27 +217,27 @@ function ModuleWindow({
         />
       )}
 
-      <button
-        type="button"
-        className="portal-module-window__resize"
-        onPointerDown={startResize}
-        onKeyDown={(event) => {
-          if (event.key.startsWith('Arrow')) event.preventDefault()
-          const delta = event.shiftKey ? 40 : 10
-          if (event.key === 'ArrowRight') resizeBy(delta, 0)
-          if (event.key === 'ArrowLeft') resizeBy(-delta, 0)
-          if (event.key === 'ArrowDown') resizeBy(0, delta)
-          if (event.key === 'ArrowUp') resizeBy(0, -delta)
-        }}
-        aria-label={`Изменить размер окна ${MODULE_LABELS[module]}`}
-      />
+      {!maximized ? (
+        <button
+          type="button"
+          className="portal-module-window__resize"
+          onPointerDown={startResize}
+          onKeyDown={(event) => {
+            if (event.key.startsWith('Arrow')) event.preventDefault()
+            const delta = event.shiftKey ? 40 : 10
+            if (event.key === 'ArrowRight') resizeBy(delta, 0)
+            if (event.key === 'ArrowLeft') resizeBy(-delta, 0)
+            if (event.key === 'ArrowDown') resizeBy(0, delta)
+            if (event.key === 'ArrowUp') resizeBy(0, -delta)
+          }}
+          aria-label={`Изменить размер окна ${MODULE_LABELS[module]}`}
+        />
+      ) : null}
     </section>
   )
 }
 
 function AssistantWindowContent({
-  username,
-  roleLabel,
   readOnly = false,
 }: {
   username?: string | null
@@ -228,16 +246,9 @@ function AssistantWindowContent({
 }) {
   return (
     <div className="portal-module-window__body portal-module-window__body--assistant">
-      <nav className="portal-assistant-tabs" aria-label="Модули окна">
-        <span className="is-active">Ассистент</span>
-        <span aria-disabled="true">Документы</span>
-      </nav>
-      <p className="portal-assistant-userline">
-        {username || 'Пользователь'}
-        {roleLabel ? ` · ${roleLabel}` : ''}
-        {readOnly ? ' · только просмотр' : ''}
-      </p>
-      <AssistantChat demoMode compact readOnly={readOnly} />
+      <div className="portal-assistant-chat-host">
+        <AssistantChat compact readOnly={readOnly} />
+      </div>
     </div>
   )
 }

@@ -194,7 +194,20 @@ verify_inference_tier: OK
 
 To use the Vosk approved_dev candidate on a GPU/CPU host: set `ASR_MODE=vosk`,
 mount weights, and optionally add Compose `device_requests` for NVIDIA.
-For a real LLM candidate: set registry/`MODEL_GATEWAY_MODE=openai` + `OPENAI_BASE_URL`.
+
+### CPU LLM + embeddings (Linux server)
+
+Compose profile **`cpu-inference`**: services `llm` (llama.cpp + model switcher) and
+`embedding` (E5-large). No GPU. Details: [`../local-inference/README.md`](../local-inference/README.md).
+
+```bash
+./deploy.sh models-pull
+./deploy.sh up --cpu-inference
+./deploy.sh cpu-verify
+```
+
+This sets `MODEL_GATEWAY_MODE=openai`, `OPENAI_BASE_URL=http://llm:8080/v1`,
+`EMBEDDING_MODE=http`, `EMBEDDING_BASE_URL=http://embedding:8090`.
 
 Env: `AI_INFERENCE_PROFILE=test` (default on TEST compose).
 

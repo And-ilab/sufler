@@ -6,6 +6,7 @@ import {
 } from '../../auth/ensureDevSession'
 import { Button, Card, StatusBadge } from '../../components'
 import {
+  AssistantAdminApiError,
   createAssistantKb,
   deleteAssistantKb,
   deleteAssistantKbDocument,
@@ -26,6 +27,14 @@ interface CapabilitiesScreenProps {
 }
 
 function formatAdminError(error: unknown, fallback: string): string {
+  if (error instanceof AssistantAdminApiError) {
+    const detail =
+      error.details.request?.[0] ||
+      error.details.name?.[0] ||
+      error.details.slug?.[0] ||
+      Object.values(error.details).flat()[0]
+    if (detail) return detail
+  }
   const message = error instanceof Error ? error.message : ''
   if (message === 'authentication_required') {
     return 'Нет сессии Django. Нажмите «Обновить» — в DEV выполнится вход как dev-role-01 (VITE_DEV_AUTH_PASSWORD = AUTH_MOCK_LDAP_DEFAULT_PASSWORD).'
@@ -35,6 +44,9 @@ function formatAdminError(error: unknown, fallback: string): string {
   }
   if (message === 'permission_denied') {
     return 'Недостаточно прав для этой операции.'
+  }
+  if (message === 'validation_error') {
+    return fallback
   }
   if (message && isAuthErrorMessage(message)) {
     return 'Нет сессии Django. Нажмите «Обновить» — в DEV выполнится вход как dev-role-01.'
@@ -230,24 +242,35 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
 
   const uploadFiles = async (files: FileList | File[] | null | undefined) => {
     if (!canEdit || !selected || busy) return
-    const list = files ? [...files] : []
+    // Snapshot immediately — FileList is live and clears with the input.
+    const list = files ? Array.from(files) : []
     if (!list.length) return
     const kbId = selected.id
+    if (fileInputRef.current) fileInputRef.current.value = ''
     await runKbAction(async () => {
       let last = selected
-      for (const file of list) {
-        const result = await uploadAssistantKbDocument(kbId, file)
+      for (let index = 0; index < list.length; index += 1) {
+        setNotice(`Загрузка файлов: ${index + 1} / ${list.length}…`)
+        const result = await uploadAssistantKbDocument(kbId, list[index], {
+          reindex: false,
+        })
         last = result.knowledge_base
+        setSelected(last)
       }
-      setSelected(last)
+      setNotice(
+        list.length === 1
+          ? `Файл «${list[0].name}» загружен. Индексация…`
+          : `Загружено файлов: ${list.length}. Индексация…`,
+      )
+      const indexed = await reindexAssistantKb(kbId)
+      setSelected(indexed)
       await refreshKbList(kbId)
       setNotice(
         list.length === 1
-          ? `Файл «${list[0].name}» загружен. Индексация выполняется автоматически.`
-          : `Загружено файлов: ${list.length}. Индексация выполняется автоматически.`,
+          ? `Файл «${list[0].name}» загружен и проиндексирован.`
+          : `Загружено и проиндексировано файлов: ${list.length}.`,
       )
     }, 'Не удалось загрузить документ')
-    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   const onReindex = async () => {

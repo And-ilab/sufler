@@ -345,6 +345,18 @@
   right: var(--space-6);
 }
 
+.portal-module-window--maximized {
+  inset: 12px;
+  right: 12px;
+  left: 12px;
+  bottom: 12px;
+  width: auto !important;
+  height: auto !important;
+  max-width: none;
+  max-height: none;
+  z-index: 40;
+}
+
 .portal-module-window__header {
   position: relative;
   display: flex;
@@ -448,6 +460,20 @@
 .portal-module-window__body--assistant {
   gap: var(--space-2);
   padding: var(--space-3);
+  overflow: hidden;
+}
+
+.portal-assistant-chat-host {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.portal-assistant-chat-host > .asst-chat {
+  flex: 1;
+  min-height: 0;
 }
 
 .portal-module-window__body--sufler-app {

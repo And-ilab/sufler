@@ -106,6 +106,14 @@ services:
       OCR_OBJECT_STORE_BACKEND: ${OCR_OBJECT_STORE_BACKEND:-minio}
       AI_INFERENCE_PROFILE: ${AI_INFERENCE_PROFILE:-test}
       MODEL_GATEWAY_MODE: ${MODEL_GATEWAY_MODE:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-local}
+      OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-300}
+      LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-http://llm:8070}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       ASR_HEALTH_URL: ${ASR_HEALTH_URL:-http://asr:8764/health}
       ASR_WS_URL: ${ASR_WS_URL:-ws://asr:8765/}
       AUDIT_FILE_PATH: /var/log/sufler/audit.jsonl
@@ -166,6 +174,14 @@ services:
       OCR_OBJECT_STORE_BACKEND: ${OCR_OBJECT_STORE_BACKEND:-minio}
       AI_INFERENCE_PROFILE: ${AI_INFERENCE_PROFILE:-test}
       MODEL_GATEWAY_MODE: ${MODEL_GATEWAY_MODE:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-local}
+      OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-300}
+      LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-http://llm:8070}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       AUDIT_FILE_PATH: /var/log/sufler/audit.jsonl
     command: celery -A sufler worker --loglevel=info --hostname=worker@%h --concurrency=${CELERY_CONCURRENCY:-2}
     volumes:
@@ -190,6 +206,74 @@ services:
       timeout: 15s
       retries: 5
       start_period: 40s
+
+  # CPU LLM (llama.cpp + model switcher). Enable: COMPOSE_PROFILES=cpu-inference
+  llm:
+    profiles: ["cpu-inference"]
+    image: ${LLM_IMAGE:-sufler-llm:local}
+    build:
+      context: ../local-inference
+      dockerfile: Dockerfile.llm
+    restart: unless-stopped
+    environment:
+      LLM_MANAGER_HOST: "0.0.0.0"
+      LLM_MANAGER_PORT: "8070"
+      LLAMA_HOST: "0.0.0.0"
+      LLAMA_PORT: "8080"
+      LLAMA_SERVER_PATH: /usr/local/bin/llama-server
+      MODELS_DIR: /models
+      GGUF_DIR: /models/llm
+      CATALOG_PATH: /opt/llm/models.json
+      STATE_PATH: /var/lib/llm-manager/state.json
+      LLM_DEFAULT_MODEL_ID: ${LLM_DEFAULT_MODEL_ID:-qwen2.5-1.5b-instruct}
+      LLM_CTX: ${LLM_CTX:-4096}
+      LLM_THREADS: ${LLM_THREADS:-}
+    volumes:
+      - ../../models:/models
+      - llm_manager_state:/var/lib/llm-manager
+    networks: [internal]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8070/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  # CPU embeddings (E5-large). Enable: COMPOSE_PROFILES=cpu-inference
+  embedding:
+    profiles: ["cpu-inference"]
+    image: ${EMBEDDING_IMAGE:-sufler-embedding:local}
+    build:
+      context: ../../backend/services/embedding
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
+      HF_HOME: /models/hf-cache
+      TRANSFORMERS_CACHE: /models/hf-cache
+      SENTENCE_TRANSFORMERS_HOME: /models/hf-cache
+    volumes:
+      - ../../models:/models
+    networks: [internal]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 20
+      start_period: 240s
 
   # AI inference tier — ASR stub (approved_dev). No GPU required.
   # For Vosk: set ASR_MODE=vosk, mount model dir, optionally add device_requests.
@@ -278,3 +362,4 @@ volumes:
   minio_data:
   audit_data:
   static_data:
+  llm_manager_state:

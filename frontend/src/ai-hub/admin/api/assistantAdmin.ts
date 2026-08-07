@@ -178,9 +178,12 @@ export async function deleteAssistantKb(id: number): Promise<void> {
 export async function uploadAssistantKbDocument(
   kbId: number,
   file: File,
+  options: { reindex?: boolean } = {},
 ): Promise<{ knowledge_base: AssistantKb; document: AssistantKbDocument }> {
   const form = new FormData()
   form.append('file', file)
+  // Default false: batch upload then one reindex (avoids N full CPU embeds).
+  form.append('reindex', options.reindex ? '1' : '0')
   const response = await authedFetch(`/api/admin/assistant/kb/${kbId}/upload/`, {
     method: 'POST',
     csrf: true,

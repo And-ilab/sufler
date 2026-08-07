@@ -1,8 +1,18 @@
 import { DEMO_STUB_ANSWER } from '../types'
 
+export interface ChatSource {
+  id?: string
+  title?: string
+  permalink?: string
+  relevance_percent?: number
+  snippet?: string
+  kb_slug?: string
+}
+
 export interface ChatStreamChunk {
   content: string
   done: boolean
+  sources?: ChatSource[]
 }
 
 function csrfToken(): string {
@@ -24,9 +34,14 @@ function parseSseBlock(block: string): ChatStreamChunk | null {
   try {
     const payload = JSON.parse(data) as {
       choices?: Array<{ delta?: { content?: string | null } }>
+      sources?: ChatSource[]
     }
     const content = payload.choices?.[0]?.delta?.content ?? ''
-    return { content: content || '', done: false }
+    return {
+      content: content || '',
+      done: false,
+      sources: Array.isArray(payload.sources) ? payload.sources : undefined,
+    }
   } catch {
     return null
   }
@@ -36,6 +51,7 @@ function parseSseBlock(block: string): ChatStreamChunk | null {
 export async function* streamAssistantChat(input: {
   message: string
   sessionId?: string
+  kbSlugs?: string[]
   signal?: AbortSignal
 }): AsyncGenerator<ChatStreamChunk> {
   const response = await fetch('/api/v1/assistant/chat', {
@@ -49,6 +65,7 @@ export async function* streamAssistantChat(input: {
     body: JSON.stringify({
       message: input.message,
       session_id: input.sessionId,
+      kb_slugs: input.kbSlugs ?? [],
       stream: true,
     }),
     signal: input.signal,

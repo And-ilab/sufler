@@ -58,7 +58,7 @@ function StandaloneModule({
   return (
     <AssistantWindowApp
       username={username ?? 'Пользователь ИИ-ассистента'}
-      demoMode={import.meta.env.VITE_SUFLER_DEMO === '1' || import.meta.env.DEV}
+      demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
       readOnly={!canWriteAssistantChat(roles)}
     />
   )

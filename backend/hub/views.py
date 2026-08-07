@@ -425,6 +425,13 @@ def assistant_knowledge_base_upload(
         return _assistant_validation_error(
             AssistantAdminError("file is required")
         )
+    # Default true for single-file API compat; UI batch upload sends reindex=0.
+    reindex_raw = str(
+        request.POST.get("reindex")
+        if "reindex" in request.POST
+        else request.GET.get("reindex") or "1"
+    ).strip().lower()
+    reindex = reindex_raw not in {"0", "false", "no", "off"}
     try:
         result = upload_assistant_document(
             kb_id,
@@ -432,7 +439,7 @@ def assistant_knowledge_base_upload(
             content_type=getattr(uploaded, "content_type", "") or "",
             data=uploaded.read(),
             username=request.user.get_username(),
-            reindex=True,
+            reindex=reindex,
         )
     except AssistantAdminError as exc:
         if str(exc) == "KB not found":

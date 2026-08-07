@@ -1,0 +1,84 @@
+# CPU inference overlay (LLM manager + embedding).
+#
+# From infra/:
+#   chmod +x local-inference/download-models.sh local-inference/up-cpu.sh
+#   ./local-inference/download-models.sh
+#   ./local-inference/up-cpu.sh
+#
+# Or manually:
+#   COMPOSE_PROFILES=cpu-inference docker compose \
+#     -f docker-compose.yml -f local-inference/docker-compose.cpu.yml up -d --build
+name: sufler
+
+services:
+  llm:
+    profiles: ["cpu-inference"]
+    build:
+      context: .
+      dockerfile: Dockerfile.llm
+    image: ${LLM_IMAGE:-sufler-llm:local}
+    restart: unless-stopped
+    environment:
+      LLM_MANAGER_HOST: "0.0.0.0"
+      LLM_MANAGER_PORT: "8070"
+      LLAMA_HOST: "0.0.0.0"
+      LLAMA_PORT: "8080"
+      LLAMA_SERVER_PATH: /usr/local/bin/llama-server
+      MODELS_DIR: /models
+      GGUF_DIR: /models/llm
+      CATALOG_PATH: /opt/llm/models.json
+      STATE_PATH: /var/lib/llm-manager/state.json
+      LLM_DEFAULT_MODEL_ID: ${LLM_DEFAULT_MODEL_ID:-qwen2.5-1.5b-instruct}
+      LLM_CTX: ${LLM_CTX:-4096}
+      LLM_THREADS: ${LLM_THREADS:-}
+    volumes:
+      - ../../models:/models
+      - llm_manager_state:/var/lib/llm-manager
+    ports:
+      - "${LLM_MANAGER_PORT_HOST:-8070}:8070"
+      - "${LLM_PORT_HOST:-8080}:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8070/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  embedding:
+    profiles: ["cpu-inference"]
+    build:
+      context: ../../backend/services/embedding
+      dockerfile: Dockerfile
+    image: ${EMBEDDING_IMAGE:-sufler-embedding:local}
+    restart: unless-stopped
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
+      HF_HOME: /models/hf-cache
+      TRANSFORMERS_CACHE: /models/hf-cache
+      SENTENCE_TRANSFORMERS_HOME: /models/hf-cache
+    volumes:
+      - ../../models:/models
+    ports:
+      - "${EMBEDDING_PORT_HOST:-8090}:8090"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 20
+      start_period: 240s
+
+volumes:
+  llm_manager_state:

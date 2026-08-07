@@ -12,7 +12,7 @@ export interface AssistantWindowAppProps {
 
 export function AssistantWindowApp({
   username = 'Пользователь ИИ-ассистента',
-  demoMode = true,
+  demoMode = false,
   readOnly = false,
   initiallyOpen = true,
 }: AssistantWindowAppProps) {

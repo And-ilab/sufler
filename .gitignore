@@ -44,3 +44,6 @@ local/*
 local/kb/*
 !local/kb/manual/
 !local/kb/manual/**
+
+# Local CPU model weights / llama.cpp binaries
+models/

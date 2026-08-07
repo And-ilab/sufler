@@ -22,6 +22,7 @@ from assistant.chat import (
     iter_chat_sse,
     parse_chat_request,
 )
+from assistant.local_llm import get_models_status, select_model
 from assistant.openapi import build_openapi_document
 from auth.decorators import require_permissions
 from auth.roles import PERM_ASSISTANT_REPORTS, PERM_ASSISTANT_USE
@@ -61,6 +62,53 @@ def assistant_knowledge_bases(request: HttpRequest) -> JsonResponse:
     )
 
 
+@require_http_methods(["GET", "PUT"])
+@require_permissions(PERM_ASSISTANT_USE, api=True)
+def assistant_models(request: HttpRequest) -> JsonResponse:
+    """GET/PUT /api/v1/assistant/models/ — local LLM catalog and active model."""
+    if request.method == "GET":
+        return JsonResponse(get_models_status())
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"error": "validation_error", "details": {"request": ["Invalid JSON"]}},
+            status=400,
+        )
+    if not isinstance(body, Mapping):
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"request": ["Body must be a JSON object"]},
+            },
+            status=400,
+        )
+    model_id = body.get("model_id") or body.get("id")
+    if not isinstance(model_id, str) or not model_id.strip():
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"model_id": ["Required"]},
+            },
+            status=400,
+        )
+    try:
+        return JsonResponse(select_model(model_id))
+    except RuntimeError as exc:
+        return JsonResponse(
+            {"error": "switch_failed", "details": str(exc)},
+            status=502,
+        )
+    except ValueError as exc:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"model_id": [str(exc)]},
+            },
+            status=400,
+        )
+
+
 @require_http_methods(["POST"])
 @require_permissions(PERM_ASSISTANT_USE, api=True)
 def assistant_chat(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
@@ -84,6 +132,7 @@ def assistant_chat(request: HttpRequest) -> StreamingHttpResponse | JsonResponse
     def event_stream():
         yield from iter_chat_sse(
             parsed["messages"],
+            kb_slugs=parsed.get("kb_slugs") or [],
             request_id=str(request_id),
         )
 

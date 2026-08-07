@@ -1,18 +1,30 @@
-"""Assistant chat orchestration via ModelGateway ``assistant_bank`` (Part III.7)."""
+"""Assistant chat orchestration: RAG over assistant_* → ModelGateway stream."""
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any, Iterator, Mapping, Sequence
 
+from core.embeddings import embedding_backend_info
 from core.model_gateway import ModelGateway, ModelGatewayConfigurationError
 from hub.model_registry_store import get_model_settings
+from qu.assistant_retrieval import preview_assistant_query
 
 PROFILE = "assistant_bank"
 DEFAULT_SYSTEM_PROMPT = (
     "Ты внутренний ИИ-ассистент банка. Отвечай по подтверждённым "
     "корпоративным источникам, кратко и по делу."
 )
+GROUNDED_SYSTEM_PROMPT = (
+    "Ты внутренний ИИ-ассистент банка. Отвечай ТОЛЬКО фактами из "
+    "переданных фрагментов базы знаний. Внимательно читай каждый фрагмент: "
+    "числа, сроки и условия уже есть в тексте — перенеси их в ответ. "
+    "Не утверждай, что данных нет, если они явно указаны во фрагментах. "
+    "Если действительно нет нужных фактов — скажи об этом. "
+    "Ответ краткий, по делу. В конце укажи названия источников."
+)
+DEFAULT_RAG_LIMIT = 5
 
 
 class AssistantChatError(ValueError):
@@ -69,6 +81,25 @@ def _as_messages(payload: Mapping[str, Any]) -> list[dict[str, str]]:
     return messages
 
 
+def _parse_kb_slugs(payload: Mapping[str, Any]) -> list[str]:
+    raw = payload.get("kb_slugs")
+    if raw is None:
+        single = payload.get("kb_slug")
+        if isinstance(single, str) and single.strip():
+            return [single.strip()]
+        return []
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise AssistantChatError("kb_slugs must be an array of strings")
+    slugs: list[str] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, str) or not item.strip():
+            raise AssistantChatError(
+                f"kb_slugs[{index}] must be a non-empty string"
+            )
+        slugs.append(item.strip())
+    return slugs
+
+
 def parse_chat_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
         raise AssistantChatError("Request body must be a JSON object")
@@ -96,6 +127,7 @@ def parse_chat_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         "messages": messages,
         "session_id": session_id.strip(),
         "stream": True,
+        "kb_slugs": _parse_kb_slugs(payload),
     }
 
 
@@ -149,13 +181,103 @@ def _apply_attachments(
     return messages
 
 
+def _last_user_text(messages: Sequence[Mapping[str, str]]) -> str:
+    for item in reversed(messages):
+        if item.get("role") == "user":
+            return str(item.get("content") or "").strip()
+    return ""
+
+
+def _citation(document: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "id": (
+            f"{document.get('kb_slug')}:{document.get('article_id')}:"
+            f"{document.get('chunk_index')}"
+        ),
+        "kb_slug": document.get("kb_slug"),
+        "article_id": document["article_id"],
+        "chunk_index": document["chunk_index"],
+        "title": document["title"],
+        "permalink": document["permalink"],
+        "snippet": document.get("snippet") or "",
+        "relevance_percent": document.get("relevance_percent"),
+    }
+
+
+def _inject_rag_context(
+    messages: Sequence[Mapping[str, str]],
+    documents: Sequence[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    context_blocks = []
+    for document in documents:
+        context_blocks.append(
+            f"[{document['rank']}] {document['title']} "
+            f"(БЗ: {document.get('kb_slug', '')})\n"
+            f"URL: {document['permalink']}\n"
+            f"{document['snippet']}"
+        )
+    context = "\n\n".join(context_blocks)
+    query = _last_user_text(messages)
+    grounded = [
+        {"role": "system", "content": GROUNDED_SYSTEM_PROMPT},
+        *[
+            {"role": item["role"], "content": item["content"]}
+            for item in messages
+            if item.get("role") != "system"
+        ],
+    ]
+    # Replace last user turn with query + retrieved fragments.
+    for index in range(len(grounded) - 1, -1, -1):
+        if grounded[index]["role"] == "user":
+            grounded[index] = {
+                "role": "user",
+                "content": (
+                    f"Вопрос пользователя:\n{query}\n\n"
+                    f"Фрагменты базы знаний:\n{context}\n\n"
+                    "Сформулируй ответ по фрагментам. Используй конкретные "
+                    "числа и сроки из текста фрагментов."
+                ),
+            }
+            break
+    return grounded
+
+
+def retrieve_assistant_context(
+    messages: Sequence[Mapping[str, str]],
+    *,
+    kb_slugs: Sequence[str] | None = None,
+    limit: int = DEFAULT_RAG_LIMIT,
+) -> tuple[list[dict[str, Any]], float]:
+    """Return documents above the context-inclusion threshold."""
+    query = _last_user_text(messages)
+    if not query:
+        return [], 0.0
+    settings = get_model_settings(PROFILE)
+    threshold = float(settings.context_inclusion_threshold)
+    # Hash stub embeddings yield low absolute cosine scores; keep RAG usable locally.
+    if embedding_backend_info()["mode"] == "stub":
+        threshold = min(threshold, 0.05)
+    result = preview_assistant_query(
+        query,
+        kb_slugs=kb_slugs,
+        limit=limit,
+    )
+    documents = [
+        document
+        for document in result["documents"]
+        if float(document["relevance_score"]) >= threshold
+    ][:limit]
+    return documents, threshold
+
+
 def iter_chat_sse(
     messages: Sequence[Mapping[str, str]],
     *,
+    kb_slugs: Sequence[str] | None = None,
     gateway: ModelGateway | None = None,
     request_id: str | None = None,
 ) -> Iterator[str]:
-    """Yield OpenAI-compatible SSE frames from ``assistant_bank``."""
+    """Yield OpenAI-compatible SSE frames from ``assistant_bank`` with RAG."""
     active = gateway or ModelGateway.from_registry()
     try:
         settings = get_model_settings(PROFILE)
@@ -167,11 +289,55 @@ def iter_chat_sse(
     except Exception:
         parameters = {}
 
-    # Prefix optional correlation as a comment frame for clients/tests.
     if request_id:
         yield f": request_id {request_id}\n\n"
 
+    documents: list[dict[str, Any]] = []
     try:
-        yield from active.stream(PROFILE, messages, **parameters)
+        documents, _threshold = retrieve_assistant_context(
+            messages,
+            kb_slugs=kb_slugs,
+        )
+    except Exception:
+        documents = []
+
+    sources = [_citation(document) for document in documents]
+    yield (
+        "data: "
+        + json.dumps(
+            {
+                "sources": sources,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
+            },
+            ensure_ascii=False,
+        )
+        + "\n\n"
+    )
+
+    outbound = (
+        _inject_rag_context(messages, documents)
+        if documents
+        else list(messages)
+    )
+    if not documents:
+        # Keep default system prompt; nudge model when KB is empty/miss.
+        outbound = [
+            {
+                "role": "system",
+                "content": (
+                    DEFAULT_SYSTEM_PROMPT
+                    + " В выбранных базах знаний релевантных фрагментов "
+                    "не найдено — сообщи об этом пользователю."
+                ),
+            },
+            *[
+                {"role": item["role"], "content": item["content"]}
+                for item in outbound
+                if item.get("role") != "system"
+            ],
+        ]
+
+    try:
+        yield from active.stream(PROFILE, outbound, **parameters)
     except ModelGatewayConfigurationError as exc:
         raise AssistantChatError(str(exc)) from exc
