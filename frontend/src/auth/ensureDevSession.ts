@@ -11,7 +11,13 @@ let inFlight: Promise<boolean> | null = null
 let workingPassword: string | null = null
 
 function isDevRuntime(): boolean {
-  return Boolean(import.meta.env.DEV || import.meta.env.VITE_DEV_AUTH_PASSWORD || import.meta.env.VITE_SUFLER_DEMO === '1')
+  // Vite DEV, explicit demo, or TEST prod image built with mock-login args.
+  return Boolean(
+    import.meta.env.DEV
+    || import.meta.env.VITE_ALLOW_DEV_LOGIN === '1'
+    || import.meta.env.VITE_DEV_AUTH_PASSWORD
+    || import.meta.env.VITE_SUFLER_DEMO === '1',
+  )
 }
 
 export function readCsrfToken(): string {

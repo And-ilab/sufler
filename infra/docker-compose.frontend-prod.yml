@@ -2,6 +2,7 @@
 # Use on the bank TEST/PROD VM so the UI does not white-screen on 504 from Vite.
 #
 # Applied by default from local-inference/up-cpu.sh (FRONTEND_MODE=prod).
+# Bake mock_ldap auto-login for TEST (same password as AUTH_MOCK_LDAP_DEFAULT_PASSWORD).
 name: sufler
 
 services:
@@ -9,6 +10,12 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile.prod
+      args:
+        VITE_ALLOW_DEV_LOGIN: ${VITE_ALLOW_DEV_LOGIN:-1}
+        VITE_DEV_AUTH_USER: ${VITE_DEV_AUTH_USER:-dev-role-01}
+        # Must match backend AUTH_MOCK_LDAP_DEFAULT_PASSWORD (infra/.env).
+        VITE_DEV_AUTH_PASSWORD: ${AUTH_MOCK_LDAP_DEFAULT_PASSWORD:-replace-with-dev-only-password}
+        VITE_DEV_RBAC_ROLES: ${VITE_DEV_RBAC_ROLES:-}
     image: ${FRONTEND_IMAGE:-sufler-frontend:local}
     restart: unless-stopped
     # Clear Vite-only settings from docker-compose.yml (Compose merge reset).
