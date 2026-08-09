@@ -71,7 +71,7 @@ class SuflerSuggestPipelineTest(TestCase):
         self.assertTrue(
             any("sufler_suggest_latency" in message for message in logs.output)
         )
-        self.assertEqual(result["gateway_model"], "stub:sufler_cc")
+        self.assertEqual(result["gateway_model"], "qwen2.5-1.5b-instruct")
         self.assertIsNone(result["blocked_reason"])
 
     def test_empty_text_rejected(self):

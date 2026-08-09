@@ -1,0 +1,186 @@
+"""Embedding router: stub (dev/tests) | HTTP service | in-process local model.
+
+Vector size stays 1024 to match pgvector ``VectorField(dimensions=1024)`` and
+the registry baseline ``intfloat/multilingual-e5-large``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import math
+import os
+from functools import lru_cache
+from typing import Literal, Sequence
+
+import requests
+
+DEFAULT_DIMENSIONS = 1024
+DEFAULT_MODEL = "intfloat/multilingual-e5-large"
+SUPPORTED_MODES = frozenset({"stub", "http", "local"})
+
+
+class EmbeddingError(RuntimeError):
+    """Raised when a real embedding backend fails."""
+
+
+def _mode() -> str:
+    raw = (os.environ.get("EMBEDDING_MODE") or "stub").strip().lower()
+    return raw if raw in SUPPORTED_MODES else "stub"
+
+
+def _dimensions() -> int:
+    try:
+        value = int(os.environ.get("EMBEDDING_DIMENSIONS") or DEFAULT_DIMENSIONS)
+    except ValueError:
+        return DEFAULT_DIMENSIONS
+    return value if value > 0 else DEFAULT_DIMENSIONS
+
+
+def _model_name() -> str:
+    return (os.environ.get("EMBEDDING_MODEL") or DEFAULT_MODEL).strip()
+
+
+def deterministic_embedding(
+    text: str,
+    dimensions: int = DEFAULT_DIMENSIONS,
+) -> list[float]:
+    """Offline deterministic embedding stub with pgvector-compatible shape."""
+    vector = [0.0] * dimensions
+    for token in text.casefold().split():
+        digest = hashlib.blake2b(
+            token.encode("utf-8"),
+            digest_size=8,
+        ).digest()
+        index = int.from_bytes(digest[:4], "big") % dimensions
+        vector[index] += -1.0 if digest[4] & 1 else 1.0
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm:
+        return [value / norm for value in vector]
+    return vector
+
+
+def _with_e5_prefix(text: str, *, is_query: bool) -> str:
+    stripped = text.strip()
+    lowered = stripped.casefold()
+    if lowered.startswith("query:") or lowered.startswith("passage:"):
+        return stripped
+    prefix = "query: " if is_query else "passage: "
+    return f"{prefix}{stripped}"
+
+
+def _http_embed(
+    texts: Sequence[str],
+    *,
+    is_query: bool,
+) -> list[list[float]]:
+    base = (os.environ.get("EMBEDDING_BASE_URL") or "").rstrip("/")
+    if not base:
+        raise EmbeddingError(
+            "EMBEDDING_BASE_URL is required when EMBEDDING_MODE=http"
+        )
+    timeout = float(os.environ.get("EMBEDDING_TIMEOUT_SECONDS") or "120")
+    payload = {
+        "texts": list(texts),
+        "is_query": is_query,
+        "model": _model_name(),
+    }
+    try:
+        response = requests.post(
+            f"{base}/embed",
+            json=payload,
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        body = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise EmbeddingError("HTTP embedding request failed") from exc
+    vectors = body.get("embeddings") if isinstance(body, dict) else None
+    if not isinstance(vectors, list) or len(vectors) != len(texts):
+        raise EmbeddingError("HTTP embedding response shape is invalid")
+    dims = _dimensions()
+    normalized: list[list[float]] = []
+    for item in vectors:
+        if not isinstance(item, list) or len(item) != dims:
+            raise EmbeddingError(
+                f"Expected embedding length {dims}, got "
+                f"{len(item) if isinstance(item, list) else type(item)}"
+            )
+        normalized.append([float(value) for value in item])
+    return normalized
+
+
+@lru_cache(maxsize=1)
+def _local_model():
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise EmbeddingError(
+            "sentence-transformers is required for EMBEDDING_MODE=local"
+        ) from exc
+    return SentenceTransformer(_model_name())
+
+
+def _local_embed(
+    texts: Sequence[str],
+    *,
+    is_query: bool,
+) -> list[list[float]]:
+    model = _local_model()
+    prefixed = [_with_e5_prefix(text, is_query=is_query) for text in texts]
+    vectors = model.encode(
+        prefixed,
+        normalize_embeddings=True,
+        show_progress_bar=False,
+    )
+    dims = _dimensions()
+    result: list[list[float]] = []
+    for row in vectors:
+        values = [float(value) for value in row]
+        if len(values) != dims:
+            raise EmbeddingError(
+                f"Local model returned dim={len(values)}, expected {dims}"
+            )
+        result.append(values)
+    return result
+
+
+def embed_texts(
+    texts: Sequence[str],
+    *,
+    is_query: bool = False,
+) -> list[list[float]]:
+    """Embed one or more texts according to ``EMBEDDING_MODE``."""
+    if not texts:
+        return []
+    cleaned = [str(text or "") for text in texts]
+    mode = _mode()
+    if mode == "stub":
+        dims = _dimensions()
+        return [deterministic_embedding(text, dims) for text in cleaned]
+    if mode == "http":
+        return _http_embed(cleaned, is_query=is_query)
+    return _local_embed(cleaned, is_query=is_query)
+
+
+def embed_text(text: str, *, is_query: bool = False) -> list[float]:
+    return embed_texts([text], is_query=is_query)[0]
+
+
+def embed_query(text: str) -> list[float]:
+    return embed_text(text, is_query=True)
+
+
+def embed_passage(text: str) -> list[float]:
+    return embed_text(text, is_query=False)
+
+
+def embedding_backend_info() -> dict[str, str | int]:
+    return {
+        "mode": _mode(),
+        "model": _model_name(),
+        "dimensions": _dimensions(),
+        "base_url": (os.environ.get("EMBEDDING_BASE_URL") or "").rstrip("/"),
+    }
+
+
+Kind = Literal["query", "passage"]

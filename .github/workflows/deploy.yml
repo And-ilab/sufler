@@ -14,6 +14,7 @@ jobs:
   deploy:
     name: Deploy to server
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Check out repository
@@ -36,17 +37,24 @@ jobs:
             --exclude='.git' \
             --exclude='.github' \
             --exclude='infra/.env' \
+            --exclude='infra/test/.env' \
+            --exclude='models/' \
             --exclude='_extracted' \
             ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/"
 
-      - name: Rebuild and restart services
+      - name: Rebuild stack with CPU inference
         run: |
           ssh -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "cd ${{ secrets.DEPLOY_PATH }}/infra && docker compose up --build -d"
+            "set -euo pipefail; \
+             cd ${{ secrets.DEPLOY_PATH }}/infra; \
+             chmod +x local-inference/*.sh; \
+             # Prod nginx SPA + Ollama (not Vite — Vite 504 → white screen on the server).
+             FRONTEND_MODE=prod ./local-inference/up-cpu.sh; \
+             ./local-inference/verify-cpu.sh || echo 'WARN: verify-cpu failed (check ollama/embedding)'"
 
       - name: Health check
         run: |
           ssh -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "curl -sf http://localhost:8001/health/ > /dev/null"
+            "curl -fsS http://127.0.0.1:${{ secrets.BACKEND_PORT || 8001 }}/health/ || curl -fsS http://127.0.0.1:8001/health/"

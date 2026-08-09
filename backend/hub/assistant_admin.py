@@ -3,26 +3,79 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Mapping
 
 from django.db import transaction
+from django.utils import timezone
 from django.utils.text import slugify
 
+from hub.kb_admin import KnowledgeBaseError, extract_document_text
 from hub.models import (
     AssistantCapability,
     AssistantKnowledgeBase,
+    AssistantKnowledgeBaseDocument,
     AssistantPromptTemplate,
 )
+from core.embeddings import embed_texts
+from ingest.models import AssistantProductionChunk
+from ingest.pipeline import (
+    checksum_for_text,
+    chunk_text,
+    normalize_text,
+)
+
+ARTICLE_ID_BASE = 3_000_000_000
+DEFAULT_CHUNK_SIZE = 512
+DEFAULT_CHUNK_OVERLAP = 64
+DEFAULT_EMBEDDING_MODEL = "dev-embedding"
 
 FORBIDDEN_KB_SLUGS = frozenset({"cc_production", "cc-production", "suz_cc"})
 ASSISTANT_SLUG_PREFIX = "assistant_"
 SLUG_RE = re.compile(r"^[a-z0-9_]+$")
+_CYRILLIC_MAP = str.maketrans(
+    {
+        "а": "a",
+        "б": "b",
+        "в": "v",
+        "г": "g",
+        "д": "d",
+        "е": "e",
+        "ё": "e",
+        "ж": "zh",
+        "з": "z",
+        "и": "i",
+        "й": "y",
+        "к": "k",
+        "л": "l",
+        "м": "m",
+        "н": "n",
+        "о": "o",
+        "п": "p",
+        "р": "r",
+        "с": "s",
+        "т": "t",
+        "у": "u",
+        "ф": "f",
+        "х": "h",
+        "ц": "ts",
+        "ч": "ch",
+        "ш": "sh",
+        "щ": "sch",
+        "ъ": "",
+        "ы": "y",
+        "ь": "",
+        "э": "e",
+        "ю": "yu",
+        "я": "ya",
+    }
+)
 
 DEFAULT_CAPABILITIES: tuple[dict[str, Any], ...] = (
     {
         "code": "rag_kb",
         "name": "Поиск по KB (RAG)",
-        "description": "Retrieval по индексам assistant_* (не cc_production).",
+        "description": "Retrieval по БЗ: ручная загрузка и СУЗ Битрикс — единый раздел «Базы знаний».",
         "deep_link": "kb_admin",
         "category": "rag",
         "sort_order": 10,
@@ -31,7 +84,7 @@ DEFAULT_CAPABILITIES: tuple[dict[str, Any], ...] = (
     {
         "code": "external_sources",
         "name": "Внешние источники",
-        "description": "Secure adapters / whitelist источников (VII.5 D4).",
+        "description": "Адаптеры внешних систем (не CRUD БЗ). Базы знаний СУЗ — в «Базы знаний».",
         "deep_link": "data_sources",
         "category": "integration",
         "sort_order": 20,
@@ -98,6 +151,7 @@ DEFAULT_PROMPTS: tuple[dict[str, Any], ...] = (
         "name": "System · assistant_bank",
         "prompt_type": AssistantPromptTemplate.TYPE_SYSTEM,
         "scope": "bank",
+        "event_trigger": "",
         "body": (
             "Ты внутренний ИИ-ассистент банка. Отвечай только на основе "
             "индексов {{kb}} и контекста подразделения {{dept}}. "
@@ -107,24 +161,76 @@ DEFAULT_PROMPTS: tuple[dict[str, Any], ...] = (
         "kb_slug": "assistant_hr",
     },
     {
-        "name": "Task · оформление отпуска",
-        "prompt_type": AssistantPromptTemplate.TYPE_TASK,
-        "scope": "department",
-        "body": (
-            "Сформулируй пошаговый ответ по регламенту отпусков. "
-            "Укажи сроки и необходимые согласования."
-        ),
-        "status": AssistantPromptTemplate.STATUS_DRAFT,
-        "kb_slug": "assistant_hr",
-    },
-    {
         "name": "Scope · ИБ",
         "prompt_type": AssistantPromptTemplate.TYPE_SCOPE,
         "scope": "security",
+        "event_trigger": "",
         "body": "Не раскрывай внутренние политики ИБ вне AD-scope пользователя.",
         "status": AssistantPromptTemplate.STATUS_PUBLISHED,
         "kb_slug": "assistant_security",
     },
+)
+
+# Task skills for «Навыки и инструменты» (orchestration events).
+DEFAULT_TASK_SKILL_PROMPTS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "сессии пользователя",
+        "event_trigger": "Начало сессии",
+        "body": (
+            "Учитывай контекст текущей сессии {{session_id}} "
+            "и роль пользователя {{dept}}."
+        ),
+        "status": AssistantPromptTemplate.STATUS_PUBLISHED,
+    },
+    {
+        "name": "общение в диалоге",
+        "event_trigger": "Ответ в чате",
+        "body": (
+            "Отвечай профессионально и кратко. "
+            "Сохраняй тон банка без канцелярита."
+        ),
+        "status": AssistantPromptTemplate.STATUS_PUBLISHED,
+    },
+    {
+        "name": "уточняющий вопрос",
+        "event_trigger": "Запрос уточнения (QU)",
+        "body": (
+            "Сформулируй один короткий уточняющий вопрос, чтобы сузить тему. "
+            "Не задавай более двух уточнений подряд без попытки ответа."
+        ),
+        "status": AssistantPromptTemplate.STATUS_DRAFT,
+    },
+    {
+        "name": "контекст истории",
+        "event_trigger": "Контекст истории (auto/manual)",
+        "body": (
+            "Используй последние {{history_limit}} сообщений из истории "
+            "диалога, если они релевантны запросу."
+        ),
+        "status": AssistantPromptTemplate.STATUS_PUBLISHED,
+    },
+    {
+        "name": "перевод en→ru",
+        "event_trigger": "Перевод EN→RU",
+        "body": (
+            "Переведи текст на русский язык, сохраняя терминологию банка "
+            "и форматирование."
+        ),
+        "status": AssistantPromptTemplate.STATUS_PUBLISHED,
+    },
+    {
+        "name": "перевод ru→en",
+        "event_trigger": "Перевод RU→EN",
+        "body": (
+            "Translate the text to English, preserving banking terminology "
+            "and formatting."
+        ),
+        "status": AssistantPromptTemplate.STATUS_PUBLISHED,
+    },
+)
+
+TASK_EVENT_TRIGGERS: tuple[str, ...] = tuple(
+    item["event_trigger"] for item in DEFAULT_TASK_SKILL_PROMPTS
 )
 
 DEFAULT_KBS: tuple[dict[str, str], ...] = (
@@ -165,13 +271,42 @@ def ensure_assistant_seed(username: str = "system") -> None:
                 name=item["name"],
                 prompt_type=item["prompt_type"],
                 scope=item["scope"],
+                event_trigger=item.get("event_trigger", ""),
                 body=item["body"],
                 status=item["status"],
                 kb_slug=item["kb_slug"],
                 updated_by=username,
             )
+    for item in DEFAULT_TASK_SKILL_PROMPTS:
+        matches = list(
+            AssistantPromptTemplate.objects.filter(
+                name=item["name"],
+                prompt_type=AssistantPromptTemplate.TYPE_TASK,
+            ).order_by("id")
+        )
+        if matches:
+            prompt = matches[0]
+            # Collapse accidental duplicates from repeated seed runs.
+            if len(matches) > 1:
+                AssistantPromptTemplate.objects.filter(
+                    pk__in=[row.pk for row in matches[1:]]
+                ).delete()
+            if not prompt.event_trigger:
+                prompt.event_trigger = item["event_trigger"]
+                prompt.save(update_fields=("event_trigger", "updated_at"))
+        else:
+            AssistantPromptTemplate.objects.create(
+                name=item["name"],
+                prompt_type=AssistantPromptTemplate.TYPE_TASK,
+                scope="bank",
+                event_trigger=item["event_trigger"],
+                body=item["body"],
+                status=item["status"],
+                kb_slug="",
+                updated_by=username,
+            )
     for item in DEFAULT_CAPABILITIES:
-        AssistantCapability.objects.get_or_create(
+        capability, created = AssistantCapability.objects.get_or_create(
             code=item["code"],
             defaults={
                 "name": item["name"],
@@ -182,6 +317,25 @@ def ensure_assistant_seed(username: str = "system") -> None:
                 "enabled": item["enabled"],
             },
         )
+        if not created and (
+            capability.deep_link != item["deep_link"]
+            or capability.description != item["description"]
+            or capability.name != item["name"]
+        ):
+            capability.deep_link = item["deep_link"]
+            capability.description = item["description"]
+            capability.name = item["name"]
+            capability.save(
+                update_fields=("deep_link", "description", "name", "updated_at")
+            )
+
+
+def _slugify_assistant_name(raw: str) -> str:
+    """ASCII slug from RU/EN name (Cyrillic is transliterated first)."""
+    lowered = (raw or "").strip().casefold()
+    transliterated = lowered.translate(_CYRILLIC_MAP)
+    base = slugify(transliterated, allow_unicode=False).replace("-", "_")
+    return base or "kb"
 
 
 def _normalize_assistant_slug(raw: str) -> str:
@@ -191,7 +345,7 @@ def _normalize_assistant_slug(raw: str) -> str:
             "assistant KB must not use cc_production namespace"
         )
     if not value.startswith(ASSISTANT_SLUG_PREFIX):
-        value = f"{ASSISTANT_SLUG_PREFIX}{slugify(value, allow_unicode=False) or 'kb'}"
+        value = f"{ASSISTANT_SLUG_PREFIX}{_slugify_assistant_name(value)}"
     value = value.replace("-", "_")
     if not SLUG_RE.match(value):
         raise AssistantAdminError("slug must be snake_case assistant_*")
@@ -202,8 +356,39 @@ def _normalize_assistant_slug(raw: str) -> str:
     return value
 
 
-def serialize_kb(kb: AssistantKnowledgeBase) -> dict[str, Any]:
+def _unique_assistant_slug(raw: str) -> str:
+    base = _normalize_assistant_slug(raw)
+    candidate = base
+    index = 2
+    while AssistantKnowledgeBase.objects.filter(slug=candidate).exists():
+        candidate = f"{base}_{index}"
+        index += 1
+    return candidate
+
+
+def serialize_document(document: AssistantKnowledgeBaseDocument) -> dict[str, Any]:
     return {
+        "id": document.pk,
+        "filename": document.filename,
+        "content_type": document.content_type,
+        "size_bytes": document.size_bytes,
+        "status": document.status,
+        "status_message": document.status_message,
+        "chunk_count": document.chunk_count,
+        "uploaded_at": document.uploaded_at.isoformat(),
+        "indexed_at": (
+            document.indexed_at.isoformat() if document.indexed_at else None
+        ),
+        "uploaded_by": document.uploaded_by,
+    }
+
+
+def serialize_kb(
+    kb: AssistantKnowledgeBase,
+    *,
+    include_documents: bool = False,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "id": kb.pk,
         "name": kb.name,
         "slug": kb.slug,
@@ -212,11 +397,45 @@ def serialize_kb(kb: AssistantKnowledgeBase) -> dict[str, Any]:
         "scope": kb.scope,
         "description": kb.description,
         "status": kb.status,
+        "status_message": kb.status_message,
         "document_count": kb.document_count,
+        "chunk_count": kb.chunk_count,
+        "last_reindexed_at": (
+            kb.last_reindexed_at.isoformat() if kb.last_reindexed_at else None
+        ),
         "created_at": kb.created_at.isoformat(),
         "updated_at": kb.updated_at.isoformat(),
         "created_by": kb.created_by,
     }
+    if include_documents:
+        payload["documents"] = [
+            serialize_document(document) for document in kb.documents.all()
+        ]
+    return payload
+
+
+def get_assistant_kb(kb_id: int) -> dict[str, Any]:
+    try:
+        kb = AssistantKnowledgeBase.objects.prefetch_related("documents").get(
+            pk=kb_id
+        )
+    except AssistantKnowledgeBase.DoesNotExist as exc:
+        raise AssistantAdminError("KB not found") from exc
+    return serialize_kb(kb, include_documents=True)
+
+
+def _chunk_profile() -> tuple[int, int, str]:
+    try:
+        from core.model_registry import ModelRegistry
+
+        profile = ModelRegistry.load().get_profile("kb_cc_production")
+        return (
+            profile.chunk_size_tokens,
+            profile.chunk_overlap_tokens,
+            profile.embedding_model,
+        )
+    except Exception:
+        return DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, DEFAULT_EMBEDDING_MODEL
 
 
 def serialize_prompt(prompt: AssistantPromptTemplate) -> dict[str, Any]:
@@ -225,6 +444,7 @@ def serialize_prompt(prompt: AssistantPromptTemplate) -> dict[str, Any]:
         "name": prompt.name,
         "prompt_type": prompt.prompt_type,
         "scope": prompt.scope,
+        "event_trigger": prompt.event_trigger,
         "body": prompt.body,
         "status": prompt.status,
         "version": prompt.version,
@@ -263,22 +483,23 @@ def create_assistant_kb(
 ) -> dict[str, Any]:
     name = str(payload.get("name") or "").strip()
     if not name:
-        raise AssistantAdminError("name is required")
+        raise AssistantAdminError("Укажите название базы знаний")
     slug_raw = str(payload.get("slug") or name)
-    slug = _normalize_assistant_slug(slug_raw)
-    if AssistantKnowledgeBase.objects.filter(slug=slug).exists():
-        raise AssistantAdminError(f"KB {slug!r} already exists")
+    slug = _unique_assistant_slug(slug_raw)
     if AssistantKnowledgeBase.objects.filter(name=name).exists():
-        raise AssistantAdminError("name must be unique")
+        raise AssistantAdminError(
+            f"База с названием «{name}» уже существует. "
+            "Выберите другое имя."
+        )
     kb = AssistantKnowledgeBase.objects.create(
         name=name,
         slug=slug,
         scope=str(payload.get("scope") or "department")[:64],
         description=str(payload.get("description") or ""),
-        status=AssistantKnowledgeBase.STATUS_READY,
+        status=AssistantKnowledgeBase.STATUS_IDLE,
         created_by=username,
     )
-    return serialize_kb(kb)
+    return serialize_kb(kb, include_documents=True)
 
 
 def delete_assistant_kb(kb_id: int) -> None:
@@ -288,7 +509,224 @@ def delete_assistant_kb(kb_id: int) -> None:
         raise AssistantAdminError("KB not found") from exc
     if not kb.slug.startswith(ASSISTANT_SLUG_PREFIX):
         raise AssistantAdminError("refusing to delete non-assistant namespace")
+    article_ids = list(kb.documents.values_list("article_id", flat=True))
+    if article_ids:
+        AssistantProductionChunk.objects.filter(
+            kb_slug=kb.slug,
+            article_id__in=article_ids,
+        ).delete()
     kb.delete()
+
+
+def upload_assistant_document(
+    kb_id: int,
+    *,
+    filename: str,
+    content_type: str,
+    data: bytes,
+    username: str = "",
+    reindex: bool = False,
+) -> dict[str, Any]:
+    """Store a document. Reindex is optional and runs outside the write txn."""
+    with transaction.atomic():
+        try:
+            kb = AssistantKnowledgeBase.objects.select_for_update().get(pk=kb_id)
+        except AssistantKnowledgeBase.DoesNotExist as exc:
+            raise AssistantAdminError("KB not found") from exc
+        if not kb.slug.startswith(ASSISTANT_SLUG_PREFIX):
+            raise AssistantAdminError("refusing to write non-assistant namespace")
+        cleaned_name = Path(filename).name.strip()
+        if not cleaned_name:
+            raise AssistantAdminError("filename is required")
+        try:
+            text = extract_document_text(cleaned_name, data)
+        except KnowledgeBaseError as exc:
+            raise AssistantAdminError(str(exc)) from exc
+        provisional_article_id = ARTICLE_ID_BASE + (
+            AssistantKnowledgeBaseDocument.objects.count() + 1
+        ) * 10_000 + (kb.pk % 10_000)
+        while AssistantKnowledgeBaseDocument.objects.filter(
+            article_id=provisional_article_id
+        ).exists():
+            provisional_article_id += 1
+        document = AssistantKnowledgeBaseDocument.objects.create(
+            knowledge_base=kb,
+            filename=cleaned_name,
+            content_type=content_type or "",
+            size_bytes=len(data),
+            status=AssistantKnowledgeBaseDocument.STATUS_UPLOADED,
+            extracted_text=text,
+            uploaded_by=username,
+            article_id=provisional_article_id,
+        )
+        document.article_id = ARTICLE_ID_BASE + document.pk
+        document.save(update_fields=("article_id",))
+        kb.document_count = kb.documents.count()
+        kb.status = AssistantKnowledgeBase.STATUS_IDLE
+        kb.status_message = "Документ загружен, требуется переиндексация"
+        kb.save(
+            update_fields=(
+                "document_count",
+                "status",
+                "status_message",
+                "updated_at",
+            )
+        )
+        document_id = document.pk
+        kb_pk = kb.pk
+
+    if reindex:
+        kb_payload = reindex_assistant_kb(kb_pk)
+        document = AssistantKnowledgeBaseDocument.objects.get(pk=document_id)
+        return {
+            "knowledge_base": kb_payload,
+            "document": serialize_document(document),
+        }
+
+    kb = AssistantKnowledgeBase.objects.get(pk=kb_pk)
+    document = AssistantKnowledgeBaseDocument.objects.get(pk=document_id)
+    return {
+        "knowledge_base": serialize_kb(kb, include_documents=True),
+        "document": serialize_document(document),
+    }
+
+
+def delete_assistant_document(kb_id: int, document_id: int) -> dict[str, Any]:
+    with transaction.atomic():
+        try:
+            kb = AssistantKnowledgeBase.objects.select_for_update().get(pk=kb_id)
+        except AssistantKnowledgeBase.DoesNotExist as exc:
+            raise AssistantAdminError("KB not found") from exc
+        try:
+            document = kb.documents.get(pk=document_id)
+        except AssistantKnowledgeBaseDocument.DoesNotExist as exc:
+            raise AssistantAdminError("document not found") from exc
+        AssistantProductionChunk.objects.filter(
+            kb_slug=kb.slug,
+            article_id=document.article_id,
+        ).delete()
+        document.delete()
+        kb.document_count = kb.documents.count()
+        kb.chunk_count = AssistantProductionChunk.objects.filter(
+            kb_slug=kb.slug,
+            is_active=True,
+        ).count()
+        kb.status_message = "Документ удалён"
+        if kb.status == AssistantKnowledgeBase.STATUS_INDEXING:
+            kb.status = AssistantKnowledgeBase.STATUS_IDLE
+        kb.save(
+            update_fields=(
+                "document_count",
+                "chunk_count",
+                "status",
+                "status_message",
+                "updated_at",
+            )
+        )
+        return serialize_kb(kb, include_documents=True)
+
+
+def reindex_assistant_kb(kb_id: int) -> dict[str, Any]:
+    try:
+        kb = AssistantKnowledgeBase.objects.get(pk=kb_id)
+    except AssistantKnowledgeBase.DoesNotExist as exc:
+        raise AssistantAdminError("KB not found") from exc
+    if not kb.slug.startswith(ASSISTANT_SLUG_PREFIX):
+        raise AssistantAdminError("refusing to index non-assistant namespace")
+
+    kb.status = AssistantKnowledgeBase.STATUS_INDEXING
+    kb.status_message = "Индексация выполняется"
+    kb.save(update_fields=("status", "status_message", "updated_at"))
+
+    chunk_size, overlap, embedding_model = _chunk_profile()
+    total_chunks = 0
+    try:
+        documents = list(kb.documents.order_by("pk"))
+        for document in documents:
+            text = normalize_text(document.extracted_text)
+            if not text:
+                document.status = AssistantKnowledgeBaseDocument.STATUS_ERROR
+                document.status_message = "Нет текста для индексации"
+                document.chunk_count = 0
+                document.save(
+                    update_fields=(
+                        "status",
+                        "status_message",
+                        "chunk_count",
+                    )
+                )
+                continue
+            chunks = chunk_text(
+                text,
+                chunk_size=chunk_size,
+                overlap=overlap,
+            )
+            checksum = checksum_for_text(text)
+            vectors = embed_texts(chunks, is_query=False)
+            with transaction.atomic():
+                AssistantProductionChunk.objects.filter(
+                    kb_slug=kb.slug,
+                    article_id=document.article_id,
+                ).delete()
+                AssistantProductionChunk.objects.bulk_create(
+                    [
+                        AssistantProductionChunk(
+                            kb_slug=kb.slug,
+                            article_id=document.article_id,
+                            version_id=document.pk,
+                            chunk_index=index,
+                            title=document.filename,
+                            content=chunk,
+                            permalink=(
+                                f"/ai-hub/admin/capabilities"
+                                f"?kb={kb.slug}&doc={document.pk}"
+                                f"&file={document.filename}"
+                            ),
+                            locale="ru",
+                            visibility_scope=["assistant", kb.scope],
+                            checksum=checksum,
+                            embedding_model=embedding_model,
+                            embedding=vectors[index],
+                            is_active=True,
+                        )
+                        for index, chunk in enumerate(chunks)
+                    ]
+                )
+                document.status = AssistantKnowledgeBaseDocument.STATUS_INDEXED
+                document.status_message = ""
+                document.chunk_count = len(chunks)
+                document.indexed_at = timezone.now()
+                document.save(
+                    update_fields=(
+                        "status",
+                        "status_message",
+                        "chunk_count",
+                        "indexed_at",
+                    )
+                )
+            total_chunks += len(chunks)
+        kb.status = AssistantKnowledgeBase.STATUS_READY
+        kb.status_message = "Индекс актуален"
+        kb.chunk_count = total_chunks
+        kb.document_count = kb.documents.count()
+        kb.last_reindexed_at = timezone.now()
+        kb.save(
+            update_fields=(
+                "status",
+                "status_message",
+                "chunk_count",
+                "document_count",
+                "last_reindexed_at",
+                "updated_at",
+            )
+        )
+    except Exception as exc:
+        kb.status = AssistantKnowledgeBase.STATUS_ERROR
+        kb.status_message = str(exc)[:500]
+        kb.save(update_fields=("status", "status_message", "updated_at"))
+        raise AssistantAdminError(kb.status_message) from exc
+
+    return serialize_kb(kb, include_documents=True)
 
 
 def list_prompts() -> list[dict[str, Any]]:
@@ -329,6 +767,7 @@ def create_prompt(
         name=name,
         prompt_type=prompt_type,
         scope=str(payload.get("scope") or "bank")[:64],
+        event_trigger=str(payload.get("event_trigger") or "")[:128],
         body=body,
         status=AssistantPromptTemplate.STATUS_DRAFT,
         kb_slug=kb_slug,
@@ -369,6 +808,8 @@ def update_prompt(
         prompt.prompt_type = prompt_type
     if "scope" in payload:
         prompt.scope = str(payload.get("scope") or "bank")[:64]
+    if "event_trigger" in payload:
+        prompt.event_trigger = str(payload.get("event_trigger") or "")[:128]
     if "kb_slug" in payload:
         kb_slug = str(payload.get("kb_slug") or "").strip()
         prompt.kb_slug = _normalize_assistant_slug(kb_slug) if kb_slug else ""

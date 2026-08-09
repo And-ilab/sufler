@@ -9,6 +9,8 @@ export interface AssistantSource {
   title: string
   relevance_percent: number
   permalink?: string
+  snippet?: string
+  kb_slug?: string
 }
 
 export interface AssistantMessage {

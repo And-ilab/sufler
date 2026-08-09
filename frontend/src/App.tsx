@@ -15,6 +15,7 @@ import {
   Card,
   PortalLauncher,
   StatusBadge,
+  canWriteAssistantChat,
   getAllowedLauncherModules,
   type LauncherModule,
 } from './components'
@@ -57,7 +58,8 @@ function StandaloneModule({
   return (
     <AssistantWindowApp
       username={username ?? 'Пользователь ИИ-ассистента'}
-      demoMode={import.meta.env.VITE_SUFLER_DEMO === '1' || import.meta.env.DEV}
+      demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
+      readOnly={!canWriteAssistantChat(roles)}
     />
   )
 }
@@ -142,7 +144,10 @@ function App() {
           <Card>
             <StatusBadge status="danger">403</StatusBadge>
             <h1>Нет доступа к Центру настроек</h1>
-            <p>Для этого маршрута требуется одна из административных ролей I.4.</p>
+            <p>
+              Нужна админ-роль I.4 (п.1–3, 8, 11) или аналитик с отчётностью
+              (п.7 КЦ / п.10 ассистент / п.13 OCR).
+            </p>
             <Button onClick={() => window.location.assign('/')}>Вернуться на портал</Button>
           </Card>
         </main>

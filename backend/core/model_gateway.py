@@ -207,6 +207,13 @@ class ModelGateway:
                 ).llm_gateway_mode
             except KeyError:
                 mode = None
+        if "timeout_seconds" not in kwargs:
+            raw_timeout = os.environ.get("OPENAI_TIMEOUT_SECONDS")
+            if raw_timeout:
+                try:
+                    kwargs["timeout_seconds"] = float(raw_timeout)
+                except ValueError:
+                    pass
         return cls(registry, mode=mode, **kwargs)
 
     def get_profile(self, profile: str) -> GatewayProfile:
@@ -243,6 +250,22 @@ class ModelGateway:
             headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
 
+    def _resolve_model(self, profile: GatewayProfile) -> str:
+        """Runtime UI selection → env OPENAI_MODEL → registry slot name."""
+        try:
+            from assistant.local_llm import active_model_id
+
+            runtime = (active_model_id() or "").strip()
+            if runtime:
+                return runtime
+        except Exception:
+            pass
+        for key in ("OPENAI_MODEL", "OLLAMA_MODEL"):
+            override = (os.environ.get(key) or "").strip()
+            if override:
+                return override
+        return profile.model
+
     def _payload(
         self,
         profile: GatewayProfile,
@@ -252,7 +275,7 @@ class ModelGateway:
         parameters: Mapping[str, Any],
     ) -> dict[str, Any]:
         return {
-            "model": profile.model,
+            "model": self._resolve_model(profile),
             "messages": _validate_messages(messages),
             "stream": stream,
             **_validate_parameters(parameters),
@@ -442,11 +465,17 @@ class ModelGateway:
                     stream=True,
                 ) as response:
                     response.raise_for_status()
-                    for line in response.iter_lines(decode_unicode=True):
-                        if not line:
+                    # llama.cpp often omits charset; requests would then
+                    # decode SSE as ISO-8859-1 and corrupt Cyrillic.
+                    response.encoding = "utf-8"
+                    for raw in response.iter_lines(decode_unicode=False):
+                        if not raw:
                             continue
-                        if isinstance(line, bytes):
-                            line = line.decode("utf-8")
+                        line = (
+                            raw.decode("utf-8")
+                            if isinstance(raw, (bytes, bytearray))
+                            else str(raw)
+                        )
                         if line.startswith("data:"):
                             yield f"{line}\n\n"
             except requests.RequestException as exc:

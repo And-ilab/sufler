@@ -43,6 +43,7 @@ class ModelRegistryAdminIntegrationTest(TestCase):
                 "top_p": 0.92,
                 "max_tokens": 1536,
                 "response_chars_max": 480,
+                "preset": "standard",
             },
             "rag": {
                 "chunk_size_tokens": 768,

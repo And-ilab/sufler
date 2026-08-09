@@ -106,6 +106,19 @@ services:
       OCR_OBJECT_STORE_BACKEND: ${OCR_OBJECT_STORE_BACKEND:-minio}
       AI_INFERENCE_PROFILE: ${AI_INFERENCE_PROFILE:-test}
       MODEL_GATEWAY_MODE: ${MODEL_GATEWAY_MODE:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
+      OPENAI_MODEL: ${OPENAI_MODEL:-qwen2.5:3b}
+      OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-600}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_ACTIVE_MODEL_PATH: ${OLLAMA_ACTIVE_MODEL_PATH:-/tmp/sufler_active_openai_model}
+      LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
+      EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-180}
+      ASSISTANT_MAX_TOKENS: ${ASSISTANT_MAX_TOKENS:-256}
       ASR_HEALTH_URL: ${ASR_HEALTH_URL:-http://asr:8764/health}
       ASR_WS_URL: ${ASR_WS_URL:-ws://asr:8765/}
       AUDIT_FILE_PATH: /var/log/sufler/audit.jsonl
@@ -166,6 +179,19 @@ services:
       OCR_OBJECT_STORE_BACKEND: ${OCR_OBJECT_STORE_BACKEND:-minio}
       AI_INFERENCE_PROFILE: ${AI_INFERENCE_PROFILE:-test}
       MODEL_GATEWAY_MODE: ${MODEL_GATEWAY_MODE:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
+      OPENAI_MODEL: ${OPENAI_MODEL:-qwen2.5:3b}
+      OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-600}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_ACTIVE_MODEL_PATH: ${OLLAMA_ACTIVE_MODEL_PATH:-/tmp/sufler_active_openai_model}
+      LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
+      EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-180}
+      ASSISTANT_MAX_TOKENS: ${ASSISTANT_MAX_TOKENS:-256}
       AUDIT_FILE_PATH: /var/log/sufler/audit.jsonl
     command: celery -A sufler worker --loglevel=info --hostname=worker@%h --concurrency=${CELERY_CONCURRENCY:-2}
     volumes:
@@ -190,6 +216,55 @@ services:
       timeout: 15s
       retries: 5
       start_period: 40s
+
+  # CPU LLM via official Ollama. Enable: COMPOSE_PROFILES=cpu-inference
+  # Pull models: docker compose --profile cpu-inference exec ollama ollama pull qwen2.5:3b
+  ollama:
+    profiles: ["cpu-inference"]
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-1}
+    volumes:
+      - ollama_data:/root/.ollama
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  # CPU embeddings (E5-large). Enable: COMPOSE_PROFILES=cpu-inference
+  embedding:
+    profiles: ["cpu-inference"]
+    image: ${EMBEDDING_IMAGE:-sufler-embedding:local}
+    build:
+      context: ../../backend/services/embedding
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
+      HF_HOME: /models/hf-cache
+      TRANSFORMERS_CACHE: /models/hf-cache
+      SENTENCE_TRANSFORMERS_HOME: /models/hf-cache
+    volumes:
+      - ../../models:/models
+    networks: [internal]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 20
+      start_period: 240s
 
   # AI inference tier — ASR stub (approved_dev). No GPU required.
   # For Vosk: set ASR_MODE=vosk, mount model dir, optionally add device_requests.
@@ -278,3 +353,4 @@ volumes:
   minio_data:
   audit_data:
   static_data:
+  ollama_data:

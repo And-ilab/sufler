@@ -1,6 +1,10 @@
 import { useMemo } from 'react'
 import { DEMO_ROLE_CATALOG, type DemoRoleDefinition } from '../auth/demoRoles'
-import { getAllowedLauncherModules, type LauncherModule } from './portalLauncherAccess'
+import {
+  getAllowedLauncherModules,
+  getSettingsMenuEntry,
+  type LauncherModule,
+} from './portalLauncherAccess'
 import { Card } from './Card'
 import { StatusBadge } from './StatusBadge'
 import './RolePicker.css'
@@ -21,7 +25,7 @@ export function RolePicker({
   selectedCode = null,
   onSelect,
   title = 'Выбор тестовой роли',
-  subtitle = 'Матрица ролей I.4 · права на модули Ассистент и Суфлёр',
+  subtitle = 'Матрица ролей I.4 · Суфлёр / Ассистент / настройки / отчёты',
 }: RolePickerProps) {
   const groups = useMemo(() => {
     const map = new Map<string, DemoRoleDefinition[]>()
@@ -49,6 +53,7 @@ export function RolePicker({
               <ul className="role-picker__list">
                 {roles.map((role) => {
                   const modules = getAllowedLauncherModules([role.code])
+                  const settings = getSettingsMenuEntry([role.code])
                   const selected = selectedCode === role.code
                   return (
                     <li key={role.code}>
@@ -64,17 +69,25 @@ export function RolePicker({
                           <span className="role-picker__label">{role.label}</span>
                         </span>
                         <span className="role-picker__modules" aria-label="Доступные модули">
-                          {modules.length === 0 ? (
+                          {modules.map((module) => (
+                            <span
+                              key={module}
+                              className={`role-picker__module role-picker__module--${module}`}
+                            >
+                              {MODULE_BADGE[module]}
+                            </span>
+                          ))}
+                          {settings && (
+                            <span
+                              className={`role-picker__module role-picker__module--${
+                                settings.kind === 'reports' ? 'reports' : 'settings'
+                              }`}
+                            >
+                              {settings.kind === 'reports' ? 'Отчёты' : 'Настройки'}
+                            </span>
+                          )}
+                          {modules.length === 0 && !settings && (
                             <span className="role-picker__module role-picker__module--none">нет S/A</span>
-                          ) : (
-                            modules.map((module) => (
-                              <span
-                                key={module}
-                                className={`role-picker__module role-picker__module--${module}`}
-                              >
-                                {MODULE_BADGE[module]}
-                              </span>
-                            ))
                           )}
                         </span>
                       </button>

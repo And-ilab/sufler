@@ -1,8 +1,18 @@
 import { DEMO_STUB_ANSWER } from '../types'
 
+export interface ChatSource {
+  id?: string
+  title?: string
+  permalink?: string
+  relevance_percent?: number
+  snippet?: string
+  kb_slug?: string
+}
+
 export interface ChatStreamChunk {
   content: string
   done: boolean
+  sources?: ChatSource[]
 }
 
 function csrfToken(): string {
@@ -24,9 +34,27 @@ function parseSseBlock(block: string): ChatStreamChunk | null {
   try {
     const payload = JSON.parse(data) as {
       choices?: Array<{ delta?: { content?: string | null } }>
+      sources?: ChatSource[]
+      error?: string
+      details?: string
+    }
+    if (payload.error) {
+      const detail = payload.details || payload.error
+      const content =
+        payload.choices?.[0]?.delta?.content ||
+        `Ошибка модели: ${detail}`
+      return {
+        content: content || '',
+        done: false,
+        sources: Array.isArray(payload.sources) ? payload.sources : undefined,
+      }
     }
     const content = payload.choices?.[0]?.delta?.content ?? ''
-    return { content: content || '', done: false }
+    return {
+      content: content || '',
+      done: false,
+      sources: Array.isArray(payload.sources) ? payload.sources : undefined,
+    }
   } catch {
     return null
   }
@@ -36,31 +64,57 @@ function parseSseBlock(block: string): ChatStreamChunk | null {
 export async function* streamAssistantChat(input: {
   message: string
   sessionId?: string
+  kbSlugs?: string[]
   signal?: AbortSignal
 }): AsyncGenerator<ChatStreamChunk> {
-  const response = await fetch('/api/v1/assistant/chat', {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-      'X-CSRFToken': csrfToken(),
-    },
-    body: JSON.stringify({
-      message: input.message,
-      session_id: input.sessionId,
-      stream: true,
-    }),
-    signal: input.signal,
-  })
+  let response: Response
+  try {
+    response = await fetch('/api/v1/assistant/chat', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        'X-CSRFToken': csrfToken(),
+      },
+      body: JSON.stringify({
+        message: input.message,
+        session_id: input.sessionId,
+        kb_slugs: input.kbSlugs ?? [],
+        stream: true,
+      }),
+      signal: input.signal,
+    })
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err)
+    // Browser TypeError "Failed to fetch" = no HTTP response (down / TLS / proxy / CORS).
+    if (/failed to fetch|networkerror|load failed/i.test(raw)) {
+      throw new Error(
+        'Нет связи с API (Failed to fetch). Откройте DevTools → Network: '
+        + 'есть ли POST /api/v1/assistant/chat? На сервере проверьте, что '
+        + 'backend/edge запущены, /api/ проксируется на Django, в .env заданы '
+        + 'DJANGO_ALLOWED_HOSTS и DJANGO_CSRF_TRUSTED_ORIGINS = URL сайта '
+        + '(https://ваш-хост), и что вы залогинены (cookie сессии).',
+      )
+    }
+    throw err instanceof Error ? err : new Error(raw)
+  }
 
   if (!response.ok) {
     let detail = `HTTP ${response.status}`
     try {
-      const body = (await response.json()) as { error?: string }
+      const body = (await response.json()) as { error?: string; detail?: string }
       if (body.error) detail = body.error
+      else if (body.detail) detail = body.detail
     } catch {
       /* ignore */
+    }
+    if (response.status === 401) {
+      detail = 'Нужна авторизация (войдите в систему) — ' + detail
+    } else if (response.status === 403) {
+      detail =
+        'Доступ запрещён (CSRF или права). Добавьте URL сайта в '
+        + 'DJANGO_CSRF_TRUSTED_ORIGINS и перезапустите backend — ' + detail
     }
     throw new Error(detail)
   }

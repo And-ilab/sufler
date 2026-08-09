@@ -12,6 +12,11 @@ export default defineConfig(({ mode }) => {
     server: {
       host: true,
       port: 5173,
+      // Docker Desktop on Windows often misses bind-mount file events without polling.
+      watch: {
+        usePolling: true,
+        interval: 1000,
+      },
       proxy: {
         '/api': apiProxyTarget,
         '/ws': {

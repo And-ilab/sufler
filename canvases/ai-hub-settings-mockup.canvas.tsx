@@ -796,8 +796,15 @@ function KbAdminScreen({ t }: { t: CanvasHostTheme }): JSX.Element {
             + Создать БЗ
           </Button>
           <Stack gap={6} style={{ marginTop: 12 }}>
-            {["HR policies", "IT runbooks", "Корп. регламенты"].map((kb) => (
-              <Text key={kb}>{kb}</Text>
+            {[
+              ["HR policies", "Ручная загрузка"],
+              ["IT runbooks", "Ручная загрузка"],
+              ["СУЗ Битрикс", "СУЗ Битрикс"],
+            ].map(([kb, source]) => (
+              <Stack key={kb} gap={2}>
+                <Text>{kb}</Text>
+                <Text style={{ opacity: 0.7, fontSize: 12 }}>{source}</Text>
+              </Stack>
             ))}
           </Stack>
         </div>
@@ -809,10 +816,10 @@ function KbAdminScreen({ t }: { t: CanvasHostTheme }): JSX.Element {
           </Row>
           <Divider />
           <Table
-            headers={["Документ", "%"]}
+            headers={["Документ", "Источник", "%"]}
             rows={[
-              ["Положение об отпусках.pdf", "100"],
-              ["Регламент ДБО.docx", "96"],
+              ["Положение об отпусках.pdf", "СУЗ Битрикс", "100"],
+              ["Регламент ДБО.docx", "Ручная загрузка", "96"],
             ]}
           />
         </div>

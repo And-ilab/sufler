@@ -1,18 +1,22 @@
+import { canOpenAdminCenter } from '../../auth/roleAccess'
+
 export type HubPanelTab = 'assistant' | 'documents' | 'sufler'
 
 const ASSISTANT_ROLES = new Set([
   'software_administrator',
   'contact_center_telephony_operator',
   'contact_center_online_chat_operator',
-  'contact_center_internal_user',
   'ai_assistant_module_administrator',
   'ai_assistant_user',
+  'ai_assistant_analyst',
+  'llm_knowledge_base_administrator',
 ])
 
 const DOCUMENT_ROLES = new Set([
   'software_administrator',
   'document_recognition_module_administrator',
   'document_recognition_user',
+  // Analyst: reporting entry via ≡; documents tab not for upload workflow
 ])
 
 const SUFLER_ROLES = new Set([
@@ -42,12 +46,7 @@ export function getHubPanelTabs(
   return tabs
 }
 
+/** ≡ menu in Hub panel — admins + analysts with reporting (§2.4 п.7/10/13). */
 export function isHubAdminRole(roles: readonly string[]): boolean {
-  return roles.some((role) => [
-    'software_administrator',
-    'llm_knowledge_base_administrator',
-    'contact_center_module_administrator',
-    'ai_assistant_module_administrator',
-    'document_recognition_module_administrator',
-  ].includes(role))
+  return canOpenAdminCenter(roles)
 }

@@ -14,8 +14,16 @@
 .ui-button:disabled { cursor: not-allowed; opacity: .55; }
 .ui-button--primary { color: var(--color-white); background: var(--color-primary); }
 .ui-button--primary:hover:not(:disabled) { background: var(--color-primary-dark); }
-.ui-button--secondary { color: var(--color-white); background: var(--color-secondary); }
-.ui-button--secondary:hover:not(:disabled) { filter: brightness(.9); }
+.ui-button--secondary {
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+  border-color: var(--color-border);
+}
+.ui-button--secondary:hover:not(:disabled) {
+  color: var(--color-primary);
+  background: var(--color-info-bg);
+  border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-border));
+}
 .ui-button--ghost { color: var(--color-primary); background: transparent; border-color: var(--color-border); }
 .ui-button--ghost:hover:not(:disabled) { background: var(--color-info-bg); }
 

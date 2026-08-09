@@ -11,9 +11,13 @@ import { Card } from './Card'
 import { Fab } from './Fab'
 import { StatusBadge } from './StatusBadge'
 import {
-  canOpenAdminCenter,
+  canOpenKbAdminDeepLink,
+  canWriteAssistantChat,
   getAllowedLauncherModules,
+  getSettingsMenuEntry,
+  showPortalSettingsButton,
   type LauncherModule,
+  type SettingsMenuEntry,
 } from './portalLauncherAccess'
 import './PortalLauncher.css'
 
@@ -53,6 +57,8 @@ interface ModuleWindowProps {
   module: LauncherModule
   username?: string | null
   roleLabel?: string | null
+  roles?: readonly string[]
+  settingsEntry?: SettingsMenuEntry | null
   onClose: () => void
   onMinimize: () => void
 }
@@ -61,26 +67,32 @@ function ModuleWindow({
   module,
   username,
   roleLabel,
+  roles = [],
+  settingsEntry = null,
   onClose,
   onMinimize,
 }: ModuleWindowProps) {
   const initialSize =
     module === 'sufler'
       ? { width: 960, height: 580 }
-      : { width: 420, height: 560 }
+      : { width: 720, height: 720 }
   const [size, setSize] = useState(initialSize)
   const [maximized, setMaximized] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const showKbAdmin = canOpenKbAdminDeepLink(roles)
 
   const resizeBy = (widthDelta: number, heightDelta: number) => {
+    if (maximized) return
     const maxWidth = Math.max(320, window.innerWidth - 48)
     const maxHeight = Math.max(280, window.innerHeight - 120)
     setSize((current) => ({
-      width: Math.min(maxWidth, Math.max(320, current.width + widthDelta)),
-      height: Math.min(maxHeight, Math.max(280, current.height + heightDelta)),
+      width: Math.min(maxWidth, Math.max(360, current.width + widthDelta)),
+      height: Math.min(maxHeight, Math.max(420, current.height + heightDelta)),
     }))
   }
 
   const startResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (maximized) return
     event.preventDefault()
     const startX = event.clientX
     const startY = event.clientY
@@ -90,8 +102,8 @@ function ModuleWindow({
       const maxWidth = Math.max(320, window.innerWidth - 48)
       const maxHeight = Math.max(280, window.innerHeight - 120)
       setSize({
-        width: Math.min(maxWidth, Math.max(320, startSize.width + moveEvent.clientX - startX)),
-        height: Math.min(maxHeight, Math.max(280, startSize.height + moveEvent.clientY - startY)),
+        width: Math.min(maxWidth, Math.max(360, startSize.width + moveEvent.clientX - startX)),
+        height: Math.min(maxHeight, Math.max(420, startSize.height + moveEvent.clientY - startY)),
       })
     }
     const onPointerUp = () => {
@@ -103,13 +115,6 @@ function ModuleWindow({
     window.addEventListener('pointerup', onPointerUp)
   }
 
-  const style = maximized
-    ? undefined
-    : {
-        width: `${size.width}px`,
-        height: `${size.height}px`,
-      }
-
   const title =
     module === 'sufler' ? 'Суфлёр · активный звонок' : 'Беларусбанк AI'
   const subtitle =
@@ -119,10 +124,14 @@ function ModuleWindow({
 
   return (
     <section
-      className={`portal-module-window portal-module-window--${module} ${
-        maximized ? 'portal-module-window--maximized' : ''
+      className={`portal-module-window portal-module-window--${module}${
+        maximized ? ' portal-module-window--maximized' : ''
       }`}
-      style={style}
+      style={
+        maximized
+          ? undefined
+          : { width: `${size.width}px`, height: `${size.height}px` }
+      }
       role="dialog"
       aria-label={title}
       data-testid={`${module}-window`}
@@ -136,6 +145,17 @@ function ModuleWindow({
           </div>
         </div>
         <div className="portal-module-window__controls">
+          {settingsEntry && (
+            <button
+              type="button"
+              aria-label="Открыть меню AI Hub"
+              aria-expanded={menuOpen}
+              data-testid="admin-center-gear"
+              onClick={() => setMenuOpen((value) => !value)}
+            >
+              ≡
+            </button>
+          )}
           <a href={`/${module}`} aria-label={`Открыть ${MODULE_LABELS[module]} отдельно`}>
             ↗
           </a>
@@ -145,14 +165,40 @@ function ModuleWindow({
           <button
             type="button"
             onClick={() => setMaximized((value) => !value)}
-            aria-label={maximized ? 'Восстановить размер' : 'Развернуть окно'}
+            aria-label={maximized ? 'Восстановить окно' : 'Развернуть на весь экран'}
+            title={maximized ? 'Восстановить' : 'На весь экран'}
+            data-testid={`${module}-maximize`}
           >
-            □
+            {maximized ? '❐' : '□'}
           </button>
           <button type="button" onClick={onClose} aria-label="Закрыть окно">
             ×
           </button>
         </div>
+        {menuOpen && settingsEntry && (
+          <Card className="portal-module-window__menu" role="menu">
+            <a
+              role="menuitem"
+              href={settingsEntry.href}
+              data-testid="admin-center-link"
+              onClick={() => setMenuOpen(false)}
+            >
+              {settingsEntry.label}
+            </a>
+            {showKbAdmin && (
+              <a
+                role="menuitem"
+                href="/ai-hub/admin/kb_admin"
+                onClick={() => setMenuOpen(false)}
+              >
+                БЗ · полное окно
+              </a>
+            )}
+            <button type="button" role="menuitem" onClick={() => setMenuOpen(false)}>
+              Закрыть меню
+            </button>
+          </Card>
+        )}
       </header>
 
       {module === 'sufler' ? (
@@ -164,10 +210,14 @@ function ModuleWindow({
           />
         </div>
       ) : (
-        <AssistantWindowContent username={username} roleLabel={roleLabel} />
+        <AssistantWindowContent
+          username={username}
+          roleLabel={roleLabel}
+          readOnly={!canWriteAssistantChat(roles)}
+        />
       )}
 
-      {!maximized && (
+      {!maximized ? (
         <button
           type="button"
           className="portal-module-window__resize"
@@ -182,29 +232,23 @@ function ModuleWindow({
           }}
           aria-label={`Изменить размер окна ${MODULE_LABELS[module]}`}
         />
-      )}
+      ) : null}
     </section>
   )
 }
 
 function AssistantWindowContent({
-  username,
-  roleLabel,
+  readOnly = false,
 }: {
   username?: string | null
   roleLabel?: string | null
+  readOnly?: boolean
 }) {
   return (
     <div className="portal-module-window__body portal-module-window__body--assistant">
-      <nav className="portal-assistant-tabs" aria-label="Модули окна">
-        <span className="is-active">Ассистент</span>
-        <span aria-disabled="true">Документы</span>
-      </nav>
-      <p className="portal-assistant-userline">
-        {username || 'Пользователь'}
-        {roleLabel ? ` · ${roleLabel}` : ''}
-      </p>
-      <AssistantChat demoMode compact />
+      <div className="portal-assistant-chat-host">
+        <AssistantChat compact readOnly={readOnly} />
+      </div>
     </div>
   )
 }
@@ -213,12 +257,13 @@ function PortalBackdrop({
   children,
   roleLabel,
   onChangeRole,
-  showAdminCenter,
+  settingsEntry,
 }: {
   children: ReactNode
   roleLabel?: string | null
   onChangeRole?: () => void
-  showAdminCenter?: boolean
+  /** ≡ on portal chrome for roles without S/A windows (analysts / OCR admin). */
+  settingsEntry?: SettingsMenuEntry | null
 }) {
   return (
     <div className="portal-launcher__backdrop">
@@ -229,23 +274,14 @@ function PortalBackdrop({
           <a href="#requests">Заявки</a>
           <a href="#knowledge">База знаний</a>
           <a href="#contact-center">Контакт-центр</a>
-          {showAdminCenter && (
-            <a
-              href="/ai-hub/admin"
-              className="portal-launcher__admin-link"
-              data-testid="admin-center-link"
-            >
-              Центр настроек
-            </a>
-          )}
         </nav>
         <div className="portal-launcher__portal-user">
-          {showAdminCenter && (
+          {settingsEntry && (
             <a
-              href="/ai-hub/admin"
+              href={settingsEntry.href}
               className="portal-launcher__settings-btn"
-              aria-label="Центр настроек"
-              title="Центр настроек"
+              aria-label={settingsEntry.label}
+              title={settingsEntry.label}
               data-testid="admin-center-gear"
             >
               ≡
@@ -295,7 +331,11 @@ export function PortalLauncher({
     () => getAllowedLauncherModules(roles),
     [roles],
   )
-  const showAdminCenter = useMemo(() => canOpenAdminCenter(roles), [roles])
+  const settingsEntry = useMemo(() => getSettingsMenuEntry(roles), [roles])
+  const portalSettingsEntry = useMemo(
+    () => (showPortalSettingsButton(roles) ? settingsEntry : null),
+    [roles, settingsEntry],
+  )
   const [menuOpen, setMenuOpen] = useState(initialMenuOpen)
   const [openWindows, setOpenWindows] = useState<Set<LauncherModule>>(
     () => new Set(initialWindows.filter((module) => modules.includes(module))),
@@ -323,7 +363,7 @@ export function PortalLauncher({
     <PortalBackdrop
       roleLabel={roleLabel}
       onChangeRole={onChangeRole}
-      showAdminCenter={showAdminCenter}
+      settingsEntry={portalSettingsEntry}
     >
       {children}
 
@@ -332,6 +372,8 @@ export function PortalLauncher({
           module="sufler"
           username={username}
           roleLabel={roleLabel}
+          roles={roles}
+          settingsEntry={settingsEntry}
           onClose={() => closeModule('sufler')}
           onMinimize={() => closeModule('sufler')}
         />
@@ -341,6 +383,8 @@ export function PortalLauncher({
           module="assistant"
           username={username}
           roleLabel={roleLabel}
+          roles={roles}
+          settingsEntry={settingsEntry}
           onClose={() => closeModule('assistant')}
           onMinimize={() => closeModule('assistant')}
         />
@@ -431,13 +475,24 @@ export function PortalLauncher({
       {modules.length === 0 && (
         <div className="portal-launcher__empty-modules" role="status">
           <Card>
-            <StatusBadge status="warning">Нет модулей S/A</StatusBadge>
+            <StatusBadge status={settingsEntry ? 'info' : 'warning'}>
+              {settingsEntry?.kind === 'reports' ? 'Отчётность I.4' : 'Нет модулей S/A'}
+            </StatusBadge>
             <p>
-              У выбранной роли нет доступа к Суфлёру и Ассистенту.
-              Выберите другую роль или откройте отчёты / админку по правам I.4.
+              {settingsEntry
+                ? `У роли нет окон Суфлёр/Ассистент. Доступ: «${settingsEntry.label}» через ≡ или кнопку ниже.`
+                : 'У выбранной роли нет доступа к Суфлёру и Ассистенту. Выберите другую роль по матрице I.4.'}
             </p>
+            {settingsEntry && (
+              <Button
+                onClick={() => window.location.assign(settingsEntry.href)}
+                data-testid="admin-center-link"
+              >
+                {settingsEntry.label}
+              </Button>
+            )}
             {onChangeRole && (
-              <Button onClick={onChangeRole}>Сменить роль</Button>
+              <Button variant="ghost" onClick={onChangeRole}>Сменить роль</Button>
             )}
           </Card>
         </div>

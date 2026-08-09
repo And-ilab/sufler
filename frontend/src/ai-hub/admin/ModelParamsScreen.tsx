@@ -18,6 +18,7 @@ import {
   saveModelParams,
   type ModelParamsData,
   type ModelParamsPayload,
+  type ModelParamsPreset,
   type ModelParamsProfile,
 } from './api/modelRegistry'
 import type { AdminProfile } from './adminNav'
@@ -41,22 +42,14 @@ interface ModelParamsScreenProps {
 
 type FieldErrors = Record<string, string>
 
+const PRESET_LABELS: Record<ModelParamsPreset, string> = {
+  short: 'Краткий',
+  standard: 'Стандарт',
+  long: 'Развёрнутый',
+}
+
 function apiProfile(profile: AdminProfile): ModelParamsProfile {
   return profile === 'cc' ? 'sufler_cc' : 'assistant_bank'
-}
-
-function registryStatusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    approved_dev: 'Утверждено (тест)',
-    pending: 'Ожидает',
-    evaluating: 'На оценке',
-    approved_prod: 'Утверждено (prod)',
-  }
-  return labels[status] ?? status
-}
-
-function profileLabel(profile: ModelParamsProfile): string {
-  return profile === 'sufler_cc' ? 'Профиль суфлёра КЦ' : 'Профиль ассистента'
 }
 
 function formatLoadError(error: unknown): string {
@@ -85,7 +78,13 @@ async function withDevSession<T>(action: () => Promise<T>): Promise<T> {
 
 function editablePayload(data: ModelParamsData): ModelParamsPayload {
   return {
-    generation: { ...data.generation },
+    generation: {
+      temperature: data.generation.temperature,
+      top_p: data.generation.top_p,
+      max_tokens: data.generation.max_tokens,
+      response_chars_max: data.generation.response_chars_max,
+      preset: data.generation.preset || 'standard',
+    },
     rag: { ...data.rag },
   }
 }
@@ -113,9 +112,12 @@ function validate(
   }
   if (
     form.generation.response_chars_max < 1
-    || form.generation.response_chars_max > 500
+    || form.generation.response_chars_max > data.constraints.response_chars_max.max
   ) {
-    errors.response_chars_max = 'Максимум 500 символов'
+    errors.response_chars_max = `Максимум ${data.constraints.response_chars_max.max} символов`
+  }
+  if (!['short', 'standard', 'long'].includes(form.generation.preset)) {
+    errors.preset = 'Выберите preset'
   }
   if (form.rag.chunk_size_tokens <= 0) {
     errors.chunk_size_tokens = 'Размер фрагмента должен быть положительным'
@@ -124,20 +126,34 @@ function validate(
     form.rag.chunk_overlap_tokens < 0
     || form.rag.chunk_overlap_tokens >= form.rag.chunk_size_tokens
   ) {
-    errors.chunk_overlap_tokens = 'Перекрытие должно быть меньше размера фрагмента'
+    errors.chunk_overlap_tokens = 'Overlap должен быть меньше chunk size'
   }
   for (const [field, value] of [
     ['context_inclusion', form.rag.context_inclusion],
     ['deterministic_answer', form.rag.deterministic_answer],
   ] as const) {
     if (value < 0 || value > 1) {
-      errors[field] = 'Порог должен быть от 0 до 1'
+      errors[field] = 'Порог должен быть от 0 до 100%'
     }
   }
   if (form.rag.context_inclusion > form.rag.deterministic_answer) {
     errors.deterministic_answer = 'Не может быть ниже порога включения'
   }
   return errors
+}
+
+function openAdminScreen(path: string) {
+  window.history.pushState({}, '', path)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+  window.location.assign(path)
+}
+
+function toPercent(ratio: number): number {
+  return Math.round(ratio * 100)
+}
+
+function fromPercent(percent: number): number {
+  return Math.min(1, Math.max(0, percent / 100))
 }
 
 export const ModelParamsScreen = forwardRef<
@@ -249,10 +265,36 @@ export const ModelParamsScreen = forwardRef<
     setMessage('')
   }
 
+  const resetToPlatform = async () => {
+    if (!data || !canEdit) return
+    const defaults = data.platform_defaults
+    if (!defaults) {
+      setMessage('Дефолты платформы недоступны')
+      return
+    }
+    setServerErrors({})
+    setForm({
+      generation: {
+        temperature: defaults.temperature,
+        top_p: defaults.top_p,
+        max_tokens: defaults.max_tokens,
+        response_chars_max: defaults.response_chars_max,
+        preset: defaults.preset || 'standard',
+      },
+      rag: {
+        chunk_size_tokens: defaults.chunk_size_tokens,
+        chunk_overlap_tokens: defaults.chunk_overlap_tokens,
+        context_inclusion: defaults.context_inclusion_threshold,
+        deterministic_answer: defaults.deterministic_answer_threshold,
+      },
+    })
+    setMessage('Подставлены дефолты платформы — нажмите «Сохранить»')
+  }
+
   useImperativeHandle(ref, () => ({ save, reset }))
 
   if (loading) {
-    return <Card className="model-params-loading" aria-busy="true">Загрузка реестра моделей…</Card>
+    return <Card className="model-params-loading" aria-busy="true">Загрузка параметров модели…</Card>
   }
   if (loadError || !data || !form) {
     return (
@@ -268,9 +310,9 @@ export const ModelParamsScreen = forwardRef<
     )
   }
 
-  const setGeneration = (
-    field: keyof ModelParamsPayload['generation'],
-    value: number,
+  const setGeneration = <K extends keyof ModelParamsPayload['generation']>(
+    field: K,
+    value: ModelParamsPayload['generation'][K],
   ) => {
     setServerErrors({})
     setForm((current) => current && ({
@@ -278,6 +320,7 @@ export const ModelParamsScreen = forwardRef<
       generation: { ...current.generation, [field]: value },
     }))
   }
+
   const setRag = (
     field: keyof ModelParamsPayload['rag'],
     value: number,
@@ -289,40 +332,62 @@ export const ModelParamsScreen = forwardRef<
     }))
   }
 
+  const applyPreset = (preset: ModelParamsPreset) => {
+    const values = data.presets?.[preset]?.values
+    setServerErrors({})
+    setForm((current) => {
+      if (!current) return current
+      return {
+        ...current,
+        generation: {
+          ...current.generation,
+          preset,
+          temperature: values?.temperature ?? current.generation.temperature,
+          top_p: values?.top_p ?? current.generation.top_p,
+          max_tokens: values?.max_tokens ?? current.generation.max_tokens,
+          response_chars_max:
+            values?.response_chars_max ?? current.generation.response_chars_max,
+        },
+      }
+    })
+  }
+
+  const isCc = selectedProfile === 'sufler_cc'
+
   return (
     <div className="model-params" data-testid="model-params-form">
-      <section className="model-params__summary">
-        <Card>
-          <span>Тестовая модель</span>
-          <strong>{data.read_only.dev_model ?? 'Не назначена'}</strong>
-          <small>Слот: {data.slot}</small>
-        </Card>
-        <Card>
-          <span>Статус</span>
-          <StatusBadge status="success">{registryStatusLabel(data.read_only.status)}</StatusBadge>
-          <small>Ревизия {data.revision}</small>
-        </Card>
-        <Card>
-          <span>Кандидат для production</span>
-          <strong>{data.read_only.prod_candidate ?? 'Не утверждён'}</strong>
-          <small>Только после ручного утверждения</small>
-        </Card>
-      </section>
+      <div className="model-params__profile-switch" role="tablist" aria-label="Профиль параметров">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!isCc}
+          className={!isCc ? 'is-active' : undefined}
+          onClick={() => openAdminScreen('/ai-hub/admin/model_params')}
+        >
+          Ассистент
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={isCc}
+          className={isCc ? 'is-active' : undefined}
+          onClick={() => openAdminScreen('/ai-hub/admin/model_params/cc')}
+        >
+          КЦ (sufler_cc)
+        </button>
+        <StatusBadge status="info">
+          {isCc ? 'Профиль sufler_cc' : 'Профиль assistant_bank'}
+        </StatusBadge>
+      </div>
 
-      <Card className="model-params__section">
-        <header>
-          <div>
-            <h2>Генерация ответа</h2>
-            <p>Параметры профиля {data.profile}; изменения сохраняются в БД.</p>
-          </div>
-          <StatusBadge status="info">{profileLabel(data.profile)}</StatusBadge>
-        </header>
-        <div className="model-params__fields">
-          <label className="model-params__slider">
-            <span>Температура <output>{form.generation.temperature.toFixed(2)}</output></span>
+      <div className="model-params__columns">
+        <section className="model-params__column" aria-label="Генерация">
+          <h2>Генерация</h2>
+          <label className={errors.temperature ? 'model-params__row model-params__row--error' : 'model-params__row'}>
+            <span>Температура</span>
             <input
+              type="number"
               aria-label="Температура"
-              type="range"
               min={data.constraints.temperature.min}
               max={data.constraints.temperature.max}
               step={data.constraints.temperature.step}
@@ -332,73 +397,148 @@ export const ModelParamsScreen = forwardRef<
             />
             {errors.temperature && <small role="alert">{errors.temperature}</small>}
           </label>
-          <label className="model-params__slider">
-            <span>Top P <output>{form.generation.top_p.toFixed(2)}</output></span>
+          <label className={errors.response_chars_max ? 'model-params__row model-params__row--error' : 'model-params__row'}>
+            <span>Max ответа</span>
             <input
-              aria-label="Top P"
-              type="range"
-              min={data.constraints.top_p.min}
-              max={data.constraints.top_p.max}
-              step={data.constraints.top_p.step}
-              value={form.generation.top_p}
+              type="number"
+              aria-label="Max ответа"
+              min={data.constraints.response_chars_max.min}
+              max={data.constraints.response_chars_max.max}
+              step={1}
+              value={form.generation.response_chars_max}
               disabled={!canEdit}
-              onChange={(event) => setGeneration('top_p', Number(event.target.value))}
+              data-testid="model-params-max-response"
+              onChange={(event) => setGeneration('response_chars_max', Number(event.target.value))}
             />
-            {errors.top_p && <small role="alert">{errors.top_p}</small>}
+            {errors.response_chars_max && <small role="alert">{errors.response_chars_max}</small>}
           </label>
-          <NumberField label="Макс. токенов" value={form.generation.max_tokens} error={errors.max_tokens} disabled={!canEdit} onChange={(value) => setGeneration('max_tokens', value)} />
-          <NumberField label="Максимум символов ответа" value={form.generation.response_chars_max} error={errors.response_chars_max} disabled={!canEdit} onChange={(value) => setGeneration('response_chars_max', value)} />
-        </div>
+          <label className={errors.preset ? 'model-params__row model-params__row--error' : 'model-params__row'}>
+            <span>Preset</span>
+            <select
+              aria-label="Preset параметров"
+              value={form.generation.preset}
+              disabled={!canEdit}
+              data-testid="model-params-preset"
+              onChange={(event) => applyPreset(event.target.value as ModelParamsPreset)}
+            >
+              {(Object.keys(PRESET_LABELS) as ModelParamsPreset[]).map((key) => (
+                <option key={key} value={key}>
+                  {data.presets?.[key]?.label ?? PRESET_LABELS[key]}
+                </option>
+              ))}
+            </select>
+            {errors.preset && <small role="alert">{errors.preset}</small>}
+          </label>
+        </section>
+
+        <section className="model-params__column" aria-label="RAG / индексация">
+          <h2>RAG / индексация</h2>
+          <label className={errors.chunk_size_tokens ? 'model-params__row model-params__row--error' : 'model-params__row'}>
+            <span>Chunk size</span>
+            <input
+              type="number"
+              aria-label="Chunk size"
+              value={form.rag.chunk_size_tokens}
+              disabled={!canEdit}
+              onChange={(event) => setRag('chunk_size_tokens', Number(event.target.value))}
+            />
+            {errors.chunk_size_tokens && <small role="alert">{errors.chunk_size_tokens}</small>}
+          </label>
+          <label className={errors.chunk_overlap_tokens ? 'model-params__row model-params__row--error' : 'model-params__row'}>
+            <span>Overlap</span>
+            <input
+              type="number"
+              aria-label="Overlap"
+              value={form.rag.chunk_overlap_tokens}
+              disabled={!canEdit}
+              onChange={(event) => setRag('chunk_overlap_tokens', Number(event.target.value))}
+            />
+            {errors.chunk_overlap_tokens && <small role="alert">{errors.chunk_overlap_tokens}</small>}
+          </label>
+          <label className={errors.context_inclusion ? 'model-params__row model-params__row--error' : 'model-params__row'}>
+            <span>Порог в контекст</span>
+            <input
+              type="number"
+              aria-label="Порог в контекст"
+              min={0}
+              max={100}
+              step={1}
+              value={toPercent(form.rag.context_inclusion)}
+              disabled={!canEdit}
+              data-testid="model-params-context-threshold"
+              onChange={(event) => setRag('context_inclusion', fromPercent(Number(event.target.value)))}
+            />
+            <em>%</em>
+            {errors.context_inclusion && <small role="alert">{errors.context_inclusion}</small>}
+          </label>
+          <label className={errors.deterministic_answer ? 'model-params__row model-params__row--error' : 'model-params__row'}>
+            <span>Детерм. из БЗ</span>
+            <input
+              type="number"
+              aria-label="Детерминированный ответ из БЗ"
+              min={0}
+              max={100}
+              step={1}
+              value={toPercent(form.rag.deterministic_answer)}
+              disabled={!canEdit}
+              data-testid="model-params-deterministic"
+              onChange={(event) => setRag('deterministic_answer', fromPercent(Number(event.target.value)))}
+            />
+            <em>%</em>
+            {errors.deterministic_answer && <small role="alert">{errors.deterministic_answer}</small>}
+          </label>
+        </section>
+
+        <section className="model-params__column model-params__column--readonly" aria-label="Read-only">
+          <h2>Read-only</h2>
+          <Card>
+            <span>Контекстное окно</span>
+            <strong>{data.read_only.context_window ?? '≥8200'}</strong>
+          </Card>
+          <Card>
+            <span>Модель LLM</span>
+            <strong>{data.read_only.llm_model_label ?? data.read_only.dev_model ?? '—'}</strong>
+          </Card>
+        </section>
+      </div>
+
+      <Card className="model-params__callout" role="note">
+        Порог понимания запросов настраивается в разделе «Понимание запросов».
       </Card>
 
-      <Card className="model-params__section">
-        <header>
-          <div>
-            <h2>Фрагментация и поиск</h2>
-            <p>Калибровка фрагментов и порогов включения контекста.</p>
-          </div>
-          <StatusBadge status="warning">kb_cc_production</StatusBadge>
-        </header>
-        <div className="model-params__fields">
-          <NumberField label="Размер фрагмента, токены" value={form.rag.chunk_size_tokens} error={errors.chunk_size_tokens} disabled={!canEdit} onChange={(value) => setRag('chunk_size_tokens', value)} />
-          <NumberField label="Перекрытие фрагментов, токены" value={form.rag.chunk_overlap_tokens} error={errors.chunk_overlap_tokens} disabled={!canEdit} onChange={(value) => setRag('chunk_overlap_tokens', value)} />
-          <NumberField label="Включение контекста" value={form.rag.context_inclusion} error={errors.context_inclusion} disabled={!canEdit} step={0.01} onChange={(value) => setRag('context_inclusion', value)} />
-          <NumberField label="Детерминированный ответ" value={form.rag.deterministic_answer} error={errors.deterministic_answer} disabled={!canEdit} step={0.01} onChange={(value) => setRag('deterministic_answer', value)} />
-        </div>
-      </Card>
+      <div className="model-params__actions">
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!canEdit || saving}
+          onClick={() => void resetToPlatform()}
+          data-testid="model-params-reset-platform"
+        >
+          Сброс к дефолту платформы
+        </Button>
+        <Button
+          type="button"
+          disabled={!canEdit || saving || !dirty || !valid}
+          onClick={() => void save()}
+          data-testid="model-params-save"
+        >
+          {saving ? 'Сохранение…' : 'Сохранить'}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => openAdminScreen('/ai-hub/admin/qu_admin')}
+          data-testid="model-params-test"
+        >
+          Тест с параметрами
+        </Button>
+      </div>
+
+      {message && (
+        <p className="model-params__message" role="status">{message}</p>
+      )}
     </div>
   )
 })
 
 ModelParamsScreen.displayName = 'ModelParamsScreen'
-
-function NumberField({
-  label,
-  value,
-  error,
-  disabled,
-  step = 1,
-  onChange,
-}: {
-  label: string
-  value: number
-  error?: string
-  disabled: boolean
-  step?: number
-  onChange: (value: number) => void
-}) {
-  return (
-    <label className={error ? 'model-params__field model-params__field--error' : 'model-params__field'}>
-      <span>{label}</span>
-      <input
-        type="number"
-        value={value}
-        step={step}
-        disabled={disabled}
-        aria-invalid={Boolean(error)}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
-      {error && <small role="alert">{error}</small>}
-    </label>
-  )
-}

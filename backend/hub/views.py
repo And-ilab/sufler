@@ -24,14 +24,18 @@ from hub.assistant_admin import (
     AssistantAdminError,
     create_assistant_kb,
     create_prompt,
+    delete_assistant_document,
     delete_assistant_kb,
     delete_prompt,
+    get_assistant_kb,
     get_prompt,
     list_assistant_kbs,
     list_capabilities,
     list_prompts,
+    reindex_assistant_kb,
     update_capability,
     update_prompt,
+    upload_assistant_document,
 )
 from hub.kb_admin import (
     KnowledgeBaseError,
@@ -114,6 +118,7 @@ def _parse_update_payload(request: HttpRequest) -> dict[str, Any]:
         "top_p",
         "max_tokens",
         "response_chars_max",
+        "preset",
     }
     rag_fields = {
         "chunk_size_tokens",
@@ -127,6 +132,9 @@ def _parse_update_payload(request: HttpRequest) -> dict[str, Any]:
     ):
         missing = fields - set(section)
         unknown = set(section) - fields
+        # preset is optional for backward-compatible clients
+        if section_name == "generation":
+            missing -= {"preset"}
         if missing:
             raise ValueError(
                 f"{section_name} is missing: {', '.join(sorted(missing))}"
@@ -136,8 +144,11 @@ def _parse_update_payload(request: HttpRequest) -> dict[str, Any]:
                 f"{section_name} has unknown fields: "
                 f"{', '.join(sorted(unknown))}"
             )
-    return {
-        **generation,
+    flat = {
+        "temperature": generation.get("temperature"),
+        "top_p": generation.get("top_p"),
+        "max_tokens": generation.get("max_tokens"),
+        "response_chars_max": generation.get("response_chars_max"),
         "chunk_size_tokens": rag.get("chunk_size_tokens"),
         "chunk_overlap_tokens": rag.get("chunk_overlap_tokens"),
         "context_inclusion_threshold": rag.get("context_inclusion"),
@@ -145,6 +156,9 @@ def _parse_update_payload(request: HttpRequest) -> dict[str, Any]:
             "deterministic_answer"
         ),
     }
+    if "preset" in generation:
+        flat["preset"] = generation.get("preset")
+    return flat
 
 
 @require_http_methods(["GET", "PUT"])
@@ -393,19 +407,84 @@ def assistant_knowledge_bases(request: HttpRequest) -> JsonResponse:
     return JsonResponse(created, status=201)
 
 
-@require_http_methods(["DELETE"])
+@require_http_methods(["GET", "DELETE"])
 @require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
 def assistant_knowledge_base_detail(
     request: HttpRequest,
     kb_id: int,
 ) -> JsonResponse:
     try:
-        delete_assistant_kb(kb_id)
+        if request.method == "DELETE":
+            delete_assistant_kb(kb_id)
+            return JsonResponse({"ok": True})
+        return JsonResponse(get_assistant_kb(kb_id))
+    except AssistantAdminError as exc:
+        if str(exc) in {"KB not found", "document not found"}:
+            return JsonResponse({"error": "not_found"}, status=404)
+        return _assistant_validation_error(exc)
+
+
+@require_http_methods(["POST"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_knowledge_base_upload(
+    request: HttpRequest,
+    kb_id: int,
+) -> JsonResponse:
+    uploaded = request.FILES.get("file")
+    if uploaded is None:
+        return _assistant_validation_error(
+            AssistantAdminError("file is required")
+        )
+    # Default true for single-file API compat; UI batch upload sends reindex=0.
+    reindex_raw = str(
+        request.POST.get("reindex")
+        if "reindex" in request.POST
+        else request.GET.get("reindex") or "1"
+    ).strip().lower()
+    reindex = reindex_raw not in {"0", "false", "no", "off"}
+    try:
+        result = upload_assistant_document(
+            kb_id,
+            filename=uploaded.name,
+            content_type=getattr(uploaded, "content_type", "") or "",
+            data=uploaded.read(),
+            username=request.user.get_username(),
+            reindex=reindex,
+        )
     except AssistantAdminError as exc:
         if str(exc) == "KB not found":
             return JsonResponse({"error": "not_found"}, status=404)
         return _assistant_validation_error(exc)
-    return JsonResponse({"ok": True})
+    return JsonResponse(result, status=201)
+
+
+@require_http_methods(["POST"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_knowledge_base_reindex(
+    request: HttpRequest,
+    kb_id: int,
+) -> JsonResponse:
+    try:
+        return JsonResponse(reindex_assistant_kb(kb_id))
+    except AssistantAdminError as exc:
+        if str(exc) == "KB not found":
+            return JsonResponse({"error": "not_found"}, status=404)
+        return _assistant_validation_error(exc)
+
+
+@require_http_methods(["DELETE"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_knowledge_base_document_detail(
+    request: HttpRequest,
+    kb_id: int,
+    document_id: int,
+) -> JsonResponse:
+    try:
+        return JsonResponse(delete_assistant_document(kb_id, document_id))
+    except AssistantAdminError as exc:
+        if str(exc) in {"KB not found", "document not found"}:
+            return JsonResponse({"error": "not_found"}, status=404)
+        return _assistant_validation_error(exc)
 
 
 @require_http_methods(["GET", "POST"])

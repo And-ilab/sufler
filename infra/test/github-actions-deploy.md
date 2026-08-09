@@ -15,11 +15,19 @@ Local Compose stays separate: [`docker-compose.prod-like.yml`](./docker-compose.
 
 ## Pipeline (non–dry-run)
 
-1. Build `backend` (`backend/Dockerfile`) and `frontend` (`frontend/Dockerfile.prod`)
-2. Tag + push to registry (default **GHCR**: `ghcr.io/<owner>/<repo>/backend:<tag>`)
-3. SSH to TEST VM → `infra/test/deploy.sh pull-up` with `BACKEND_IMAGE` / `FRONTEND_IMAGE`
+1. Build and push images:
+   - `backend` (`backend/Dockerfile`)
+   - `frontend` (`frontend/Dockerfile.prod`)
+   - `embedding` (`backend/services/embedding/Dockerfile`) — CPU E5
+   - LLM: official `ollama/ollama` (not a custom image; no `:8080` llama.cpp service)
+2. SSH to TEST VM → sync git tag/checkout → `deploy.sh pull-up --cpu-inference` → `cpu-verify`
+   (`--remove-orphans` removes legacy `sufler-*-llm-1` if present)
+3. On the VM, pull a model: `docker compose --profile cpu-inference exec ollama ollama pull …`
 
 App secrets (Postgres, LDAP, SUZ HMAC, …) stay in **`infra/test/.env` on the VM** — not in GitHub Actions.
+
+CPU inference is **on by default**. Disable for a manual run with workflow input
+`skip_cpu_inference=true`, or on the VM with `./deploy.sh pull-up --no-cpu-inference`.
 
 ## Required GitHub configuration
 
@@ -78,6 +86,7 @@ Ensure the Actions SSH key can reach the host and the user can run `docker` / `d
 | --- | --- |
 | `dry_run` | `true` = build + secrets checklist only |
 | `image_tag` | Override tag (default: dispatch → `manual-<sha>`; tag push → tag name) |
+| `skip_cpu_inference` | `true` = do not build/deploy `llm` + `embedding` |
 
 ## Security notes
 

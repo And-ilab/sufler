@@ -1,21 +1,24 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Button, Card, StatusBadge, type StatusBadgeStatus } from '../components'
 import {
   FEEDBACK_LABELS,
   type AssistantMessage,
+  type AssistantSource,
   type AssistantToolState,
   type FeedbackKind,
   type ToolId,
   type ToolRunState,
 } from './types'
-import {
-  ensureDevSession,
-  resetDevSessionCache,
-} from '../auth/ensureDevSession'
+import { ensureDevSession } from '../auth/ensureDevSession'
 import {
   fetchAssistantKnowledgeBases,
   type AssistantKbOption,
 } from './api/knowledgeBases'
+import {
+  fetchLocalLlmModels,
+  selectLocalLlmModel,
+  type LocalLlmModel,
+} from './api/localModels'
 import { useAssistantChat } from './useAssistantChat'
 import './AssistantChat.css'
 
@@ -87,21 +90,87 @@ function FeedbackBar({
   )
 }
 
+function sourceHref(source: AssistantSource): string | null {
+  const link = (source.permalink || '').trim()
+  if (!link || link === '#') return null
+  if (link.includes('hub.local')) {
+    // Dev placeholder — keep as document anchor for UI continuity.
+    return link
+  }
+  return link
+}
+
+function SourceItem({ source }: { source: AssistantSource }) {
+  const [open, setOpen] = useState(false)
+  const href = sourceHref(source)
+  const hasQuote = Boolean(source.snippet?.trim())
+
+  return (
+    <li className="asst-source-item" data-testid={`source-item-${source.id}`}>
+      <div className="asst-source-item__row">
+        <StatusBadge status="success">
+          {source.relevance_percent}%
+        </StatusBadge>
+        {href ? (
+          <a
+            className="asst-source-item__link"
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            title="Открыть статью / документ"
+          >
+            {source.title}
+          </a>
+        ) : (
+          <span className="asst-source-item__title">{source.title}</span>
+        )}
+        {hasQuote ? (
+          <Button
+            type="button"
+            variant={open ? 'secondary' : 'ghost'}
+            onClick={() => setOpen((value) => !value)}
+            data-testid={`source-quote-${source.id}`}
+          >
+            {open ? 'Скрыть цитату' : 'Цитата'}
+          </Button>
+        ) : null}
+      </div>
+      {open && hasQuote ? (
+        <blockquote className="asst-source-item__quote" data-testid={`source-quote-text-${source.id}`}>
+          {source.snippet}
+        </blockquote>
+      ) : null}
+    </li>
+  )
+}
+
 function MessageLenta({
   messages,
   streaming,
+  readOnly = false,
   onFeedback,
   onStop,
 }: {
   messages: AssistantMessage[]
   streaming: boolean
+  readOnly?: boolean
   onFeedback: (id: string, kind: FeedbackKind) => void
   onStop: () => void
 }) {
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
+  }, [messages, streaming])
+
   if (!messages.length) {
     return (
       <div className="asst-lenta asst-lenta--empty" data-testid="asst-lenta">
-        <p>Выберите базы знаний и задайте вопрос</p>
+        <p>
+          {readOnly
+            ? 'Просмотр чата · отправка сообщений недоступна. Откройте ≡ → отчётность.'
+            : 'Выберите базы знаний и задайте вопрос'}
+        </p>
       </div>
     )
   }
@@ -139,21 +208,14 @@ function MessageLenta({
                   <strong>Источники ({message.sources.length})</strong>
                   <ul>
                     {message.sources.map((source) => (
-                      <li key={source.id}>
-                        <StatusBadge status="success">
-                          {source.title} · {source.relevance_percent}%
-                        </StatusBadge>
-                        {source.permalink ? (
-                          <a href={source.permalink} target="_blank" rel="noreferrer">
-                            Открыть
-                          </a>
-                        ) : null}
-                      </li>
+                      <SourceItem key={source.id} source={source} />
                     ))}
                   </ul>
                 </div>
               ) : null}
-              <FeedbackBar message={message} onFeedback={onFeedback} />
+              {!readOnly ? (
+                <FeedbackBar message={message} onFeedback={onFeedback} />
+              ) : null}
             </Card>
           )}
         </div>
@@ -163,6 +225,7 @@ function MessageLenta({
           Стриминг токенов…
         </div>
       ) : null}
+      <div ref={bottomRef} aria-hidden />
     </div>
   )
 }
@@ -234,6 +297,8 @@ function ToolsPanel({
 export interface AssistantChatProps {
   demoMode?: boolean
   compact?: boolean
+  /** TZ III.2 п.10: аналитик — просмотр без отправки сообщений. */
+  readOnly?: boolean
   username?: string
   initialDraft?: string
   /** Optional override (Storybook); otherwise loaded from `/api/v1/assistant/kbs/`. */
@@ -241,11 +306,34 @@ export interface AssistantChatProps {
 }
 
 export function AssistantChat({
-  demoMode = true,
+  demoMode = false,
   compact = false,
+  readOnly = false,
   initialDraft = '',
   knowledgeBases: knowledgeBasesProp,
 }: AssistantChatProps) {
+  const [draft, setDraft] = useState(initialDraft)
+  const [kbOpen, setKbOpen] = useState(false)
+  const [kbCatalog, setKbCatalog] = useState<AssistantKbOption[]>(
+    () => (knowledgeBasesProp ? [...knowledgeBasesProp] : []),
+  )
+  const [kbStatus, setKbStatus] = useState<'loading' | 'ready' | 'error'>(
+    () => (knowledgeBasesProp ? 'ready' : 'loading'),
+  )
+  const [kbSelected, setKbSelected] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries((knowledgeBasesProp ?? []).map((kb) => [kb.id, true])),
+  )
+  const [modelCatalog, setModelCatalog] = useState<LocalLlmModel[]>([])
+  const [activeModelId, setActiveModelId] = useState('')
+  const [modelStatus, setModelStatus] = useState<
+    'loading' | 'ready' | 'switching' | 'error'
+  >('loading')
+  const [modelError, setModelError] = useState('')
+  const kbSlugsRef = useRef<string[]>([])
+  kbSlugsRef.current = kbCatalog
+    .filter((kb) => kbSelected[kb.id])
+    .map((kb) => kb.slug)
+
   const {
     messages,
     tools,
@@ -258,24 +346,78 @@ export function AssistantChat({
     setFeedback,
     runTool,
     newDialog,
-  } = useAssistantChat({ demoMode })
-
-  const [draft, setDraft] = useState(initialDraft)
-  const [kbOpen, setKbOpen] = useState(false)
-  const [kbCatalog, setKbCatalog] = useState<AssistantKbOption[]>(
-    () => (knowledgeBasesProp ? [...knowledgeBasesProp] : []),
-  )
-  const [kbStatus, setKbStatus] = useState<'loading' | 'ready' | 'error'>(
-    () => (knowledgeBasesProp ? 'ready' : 'loading'),
-  )
-  const [kbSelected, setKbSelected] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries((knowledgeBasesProp ?? []).map((kb) => [kb.id, true])),
-  )
+  } = useAssistantChat({
+    demoMode,
+    getKbSlugs: () => kbSlugsRef.current,
+  })
   const maxChars = 500
   const charCount = draft.length
   const charProgress = Math.max(0, Math.min(100, Math.round((charCount / maxChars) * 100)))
   const charMeterTone =
     charCount >= maxChars ? 'danger' : charCount >= maxChars * 0.8 ? 'warn' : 'ok'
+
+  useEffect(() => {
+    let cancelled = false
+    setModelStatus('loading')
+    void (async () => {
+      try {
+        await ensureDevSession()
+        const status = await fetchLocalLlmModels()
+        if (cancelled) return
+        setModelCatalog(status.models)
+        setActiveModelId(status.active_model_id ?? status.models[0]?.id ?? '')
+        setModelError(
+          status.manager_reachable === false
+            ? status.last_error || 'Ollama недоступна'
+            : status.last_error || '',
+        )
+        setModelStatus(
+          status.manager_reachable === false || !status.models.length
+            ? 'error'
+            : 'ready',
+        )
+      } catch (loadError) {
+        if (cancelled) return
+        setModelCatalog([])
+        setActiveModelId('')
+        setModelError(
+          loadError instanceof Error
+            ? loadError.message
+            : 'Не удалось загрузить список моделей Ollama',
+        )
+        setModelStatus('error')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const onModelChange = async (modelId: string) => {
+    if (!modelId || modelId === activeModelId || modelStatus === 'switching') {
+      return
+    }
+    const previous = activeModelId
+    setActiveModelId(modelId)
+    setModelStatus('switching')
+    setModelError('')
+    try {
+      await ensureDevSession()
+      const status = await selectLocalLlmModel(modelId)
+      setModelCatalog(status.models)
+      setActiveModelId(status.active_model_id ?? modelId)
+      setModelError('')
+      setModelStatus('ready')
+    } catch (switchError) {
+      setActiveModelId(previous)
+      setModelError(
+        switchError instanceof Error
+          ? switchError.message
+          : 'Не удалось переключить модель',
+      )
+      setModelStatus('error')
+    }
+  }
 
   useEffect(() => {
     if (knowledgeBasesProp) {
@@ -333,7 +475,7 @@ export function AssistantChat({
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
-    if (!draft.trim() || streaming) return
+    if (readOnly || !draft.trim() || streaming) return
     const text = draft
     setDraft('')
     void sendMessage(text)
@@ -341,15 +483,75 @@ export function AssistantChat({
 
   return (
     <div
-      className={`asst-chat${compact ? ' asst-chat--compact' : ''}`}
+      className={`asst-chat${compact ? ' asst-chat--compact' : ''}${
+        readOnly ? ' asst-chat--readonly' : ''
+      }`}
       data-testid="assistant-chat"
+      data-readonly={readOnly ? 'true' : undefined}
     >
+      {readOnly ? (
+        <div className="asst-readonly-banner" role="status" data-testid="asst-readonly-banner">
+          <StatusBadge status="neutral">Только просмотр</StatusBadge>
+          <span>Нет права на отправку (I.4). Отчёты и настройки — через меню ≡</span>
+        </div>
+      ) : null}
       <div className="asst-toolbar">
+        <label className="asst-model" data-testid="asst-model">
+          <span className="asst-model__label">Модель</span>
+          <select
+            className="asst-model__select"
+            value={activeModelId}
+            disabled={
+              readOnly ||
+              modelStatus === 'loading' ||
+              modelStatus === 'switching' ||
+              modelCatalog.length === 0
+            }
+            onChange={(event) => void onModelChange(event.target.value)}
+            data-testid="asst-model-select"
+            title={modelError || 'Модели из Ollama (ollama list)'}
+          >
+            {modelStatus === 'loading' ? (
+              <option value="">Загрузка…</option>
+            ) : modelCatalog.length === 0 ? (
+              <option value="">Нет моделей в Ollama</option>
+            ) : (
+              <>
+                {/* Keep controlled <select> valid if active id is briefly missing */}
+                {activeModelId &&
+                !modelCatalog.some((model) => model.id === activeModelId) ? (
+                  <option value={activeModelId}>{activeModelId}</option>
+                ) : null}
+                {modelCatalog.map((model) => (
+                  <option
+                    key={model.id}
+                    value={model.id}
+                    disabled={model.available === false}
+                  >
+                    {model.label}
+                    {model.description ? ` · ${model.description}` : ''}
+                  </option>
+                ))}
+              </>
+            )}
+          </select>
+          {modelStatus === 'switching' ? (
+            <span className="asst-model__hint" data-testid="asst-model-switching">
+              Переключение…
+            </span>
+          ) : null}
+        </label>
+        {modelError ? (
+          <span className="asst-model__error" data-testid="asst-model-error" title={modelError}>
+            {modelError}
+          </span>
+        ) : null}
         <div className="asst-kb" data-testid="asst-kb">
           <button
             type="button"
             className="asst-kb__trigger"
             aria-expanded={kbOpen}
+            disabled={readOnly}
             onClick={() => setKbOpen((value) => !value)}
             data-testid="asst-kb-trigger"
           >
@@ -400,10 +602,16 @@ export function AssistantChat({
             </div>
           ) : null}
         </div>
-        <Button type="button" variant="secondary" onClick={newDialog} data-testid="asst-new">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={newDialog}
+          disabled={readOnly}
+          data-testid="asst-new"
+        >
           + Новый
         </Button>
-        <Button type="button" variant="ghost" data-testid="asst-history">
+        <Button type="button" variant="ghost" disabled={readOnly} data-testid="asst-history">
           История диалогов
         </Button>
       </div>
@@ -411,18 +619,21 @@ export function AssistantChat({
       <MessageLenta
         messages={messages}
         streaming={streaming}
+        readOnly={readOnly}
         onFeedback={setFeedback}
         onStop={stopStreaming}
       />
 
-      <ToolsPanel
-        tools={tools}
-        open={toolsOpen}
-        onClose={() => setToolsOpen(false)}
-        onRun={runTool}
-      />
+      {!readOnly ? (
+        <ToolsPanel
+          tools={tools}
+          open={toolsOpen}
+          onClose={() => setToolsOpen(false)}
+          onRun={runTool}
+        />
+      ) : null}
 
-      {error ? (
+      {error && !readOnly ? (
         <Card className="asst-error" role="alert">
           <StatusBadge status="danger">Ошибка</StatusBadge>
           <p>{error}</p>
@@ -434,7 +645,7 @@ export function AssistantChat({
 
       <form className="asst-composer" onSubmit={onSubmit} data-testid="asst-composer">
         <div className="asst-composer__extras">
-          <Button type="button" variant="ghost">
+          <Button type="button" variant="ghost" disabled={readOnly}>
             Прикрепить
           </Button>
           <Button
@@ -442,6 +653,7 @@ export function AssistantChat({
             variant={toolsOpen ? 'secondary' : 'ghost'}
             aria-expanded={toolsOpen}
             aria-controls="asst-tools-panel"
+            disabled={readOnly}
             onClick={() => setToolsOpen((value) => !value)}
             data-testid="asst-composer-tools"
           >
@@ -453,8 +665,10 @@ export function AssistantChat({
           id="asst-draft"
           value={draft}
           maxLength={maxChars}
-          placeholder="Задайте вопрос…"
+          placeholder={readOnly ? 'Отправка сообщений недоступна для аналитика' : 'Задайте вопрос…'}
           data-testid="asst-draft"
+          disabled={readOnly}
+          readOnly={readOnly}
           onChange={(event) => setDraft(event.target.value)}
         />
         <div className="asst-composer__footer">
@@ -463,7 +677,7 @@ export function AssistantChat({
           </span>
           <Button
             type="submit"
-            disabled={!draft.trim() || streaming}
+            disabled={readOnly || !draft.trim() || streaming}
             data-testid="asst-send"
           >
             {streaming ? 'Стриминг…' : 'Отправить'}

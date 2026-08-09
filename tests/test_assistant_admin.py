@@ -18,8 +18,10 @@ from django.contrib.auth.models import Group  # noqa: E402
 from django.test import Client, TestCase  # noqa: E402
 
 from auth.roles import ROLES_BY_CODE  # noqa: E402
+from django.core.files.uploadedfile import SimpleUploadedFile  # noqa: E402
+
 from hub.models import AssistantKnowledgeBase  # noqa: E402
-from ingest.models import CCProductionChunk  # noqa: E402
+from ingest.models import AssistantProductionChunk, CCProductionChunk  # noqa: E402
 
 
 class AssistantAdminApiTest(TestCase):
@@ -73,6 +75,36 @@ class AssistantAdminApiTest(TestCase):
             content_type="application/json",
         )
         self.assertEqual(rejected.status_code, 400)
+
+        kb_id = body["id"]
+        upload = client.post(
+            f"/api/admin/assistant/kb/{kb_id}/upload/",
+            data={
+                "file": SimpleUploadedFile(
+                    "policy.txt",
+                    b"Assistant policy text for RAG index.\n" * 20,
+                    content_type="text/plain",
+                )
+            },
+        )
+        self.assertEqual(upload.status_code, 201, upload.content)
+        uploaded = upload.json()
+        self.assertEqual(uploaded["knowledge_base"]["status"], "ready")
+        self.assertGreaterEqual(uploaded["document"]["chunk_count"], 1)
+        self.assertTrue(
+            AssistantProductionChunk.objects.filter(
+                kb_slug="assistant_legal"
+            ).exists()
+        )
+        self.assertFalse(
+            CCProductionChunk.objects.filter(
+                title="policy.txt"
+            ).exists()
+        )
+
+        detail = client.get(f"/api/admin/assistant/kb/{kb_id}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(len(detail.json()["documents"]), 1)
 
     def test_prompts_crud_and_capabilities_toggle(self):
         client = Client()

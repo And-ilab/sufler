@@ -16,6 +16,15 @@ class ModelRegistrySettings(models.Model):
         (PROFILE_SUFLER_CC, "Sufler Contact Center"),
     )
 
+    PRESET_SHORT = "short"
+    PRESET_STANDARD = "standard"
+    PRESET_LONG = "long"
+    PRESET_CHOICES = (
+        (PRESET_SHORT, "Краткий"),
+        (PRESET_STANDARD, "Стандарт"),
+        (PRESET_LONG, "Развёрнутый"),
+    )
+
     profile = models.CharField(
         max_length=32,
         choices=PROFILE_CHOICES,
@@ -25,6 +34,11 @@ class ModelRegistrySettings(models.Model):
     top_p = models.FloatField()
     max_tokens = models.PositiveIntegerField()
     response_chars_max = models.PositiveIntegerField()
+    preset = models.CharField(
+        max_length=16,
+        choices=PRESET_CHOICES,
+        default=PRESET_STANDARD,
+    )
     chunk_size_tokens = models.PositiveIntegerField()
     chunk_overlap_tokens = models.PositiveIntegerField()
     context_inclusion_threshold = models.FloatField()
@@ -53,10 +67,17 @@ class ModelRegistrySettings(models.Model):
             errors["top_p"] = "Top P must be greater than 0 and at most 1."
         if not 1 <= self.max_tokens <= 32768:
             errors["max_tokens"] = "Max tokens must be between 1 and 32768."
-        if not 1 <= self.response_chars_max <= 500:
+        response_max = 500 if self.profile == self.PROFILE_SUFLER_CC else 4000
+        if not 1 <= self.response_chars_max <= response_max:
             errors["response_chars_max"] = (
-                "Response length must be between 1 and 500 characters."
+                f"Response length must be between 1 and {response_max} characters."
             )
+        if self.preset not in {
+            self.PRESET_SHORT,
+            self.PRESET_STANDARD,
+            self.PRESET_LONG,
+        }:
+            errors["preset"] = "Preset must be short, standard, or long."
         if self.chunk_size_tokens <= 0:
             errors["chunk_size_tokens"] = "Chunk size must be positive."
         if not 0 <= self.chunk_overlap_tokens < self.chunk_size_tokens:
@@ -107,10 +128,23 @@ class ContactCenterKnowledgeBase(models.Model):
         (STATUS_ERROR, "Error"),
     )
 
+    SOURCE_MANUAL = "manual"
+    SOURCE_SUZ_BITRIX = "suz_bitrix"
+    SOURCE_CHOICES = (
+        (SOURCE_MANUAL, "Ручная загрузка"),
+        (SOURCE_SUZ_BITRIX, "СУЗ Битрикс"),
+    )
+
     name = models.CharField(max_length=200, unique=True)
     slug = models.SlugField(max_length=200, unique=True)
     scope = models.CharField(max_length=64, default="contact_center")
     description = models.TextField(blank=True)
+    source = models.CharField(
+        max_length=32,
+        choices=SOURCE_CHOICES,
+        default=SOURCE_MANUAL,
+        db_index=True,
+    )
     status = models.CharField(
         max_length=16,
         choices=STATUS_CHOICES,
@@ -177,10 +211,12 @@ class AssistantKnowledgeBase(models.Model):
     """Assistant module KB namespace ``assistant_*`` (isolated from cc_production)."""
 
     STATUS_IDLE = "idle"
+    STATUS_INDEXING = "indexing"
     STATUS_READY = "ready"
     STATUS_ERROR = "error"
     STATUS_CHOICES = (
         (STATUS_IDLE, "Idle"),
+        (STATUS_INDEXING, "Indexing"),
         (STATUS_READY, "Ready"),
         (STATUS_ERROR, "Error"),
     )
@@ -195,7 +231,10 @@ class AssistantKnowledgeBase(models.Model):
         default=STATUS_IDLE,
         db_index=True,
     )
+    status_message = models.CharField(max_length=500, blank=True)
     document_count = models.PositiveIntegerField(default=0)
+    chunk_count = models.PositiveIntegerField(default=0)
+    last_reindexed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.CharField(max_length=150, blank=True)
@@ -205,6 +244,47 @@ class AssistantKnowledgeBase(models.Model):
 
     def __str__(self) -> str:
         return self.slug
+
+
+class AssistantKnowledgeBaseDocument(models.Model):
+    """Uploaded source document for an assistant_* KB (isolated from КЦ)."""
+
+    STATUS_UPLOADED = "uploaded"
+    STATUS_INDEXED = "indexed"
+    STATUS_ERROR = "error"
+    STATUS_CHOICES = (
+        (STATUS_UPLOADED, "Uploaded"),
+        (STATUS_INDEXED, "Indexed"),
+        (STATUS_ERROR, "Error"),
+    )
+
+    knowledge_base = models.ForeignKey(
+        AssistantKnowledgeBase,
+        on_delete=models.CASCADE,
+        related_name="documents",
+    )
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=128, blank=True)
+    size_bytes = models.PositiveIntegerField(default=0)
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_UPLOADED,
+        db_index=True,
+    )
+    status_message = models.CharField(max_length=500, blank=True)
+    extracted_text = models.TextField(blank=True)
+    chunk_count = models.PositiveIntegerField(default=0)
+    article_id = models.BigIntegerField(unique=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    indexed_at = models.DateTimeField(null=True, blank=True)
+    uploaded_by = models.CharField(max_length=150, blank=True)
+
+    class Meta:
+        ordering = ("-uploaded_at",)
+
+    def __str__(self) -> str:
+        return self.filename
 
 
 class AssistantPromptTemplate(models.Model):
@@ -233,6 +313,8 @@ class AssistantPromptTemplate(models.Model):
         db_index=True,
     )
     scope = models.CharField(max_length=64, default="bank")
+    # Orchestration event for Task skills (capabilities screen), e.g. «Перевод RU→EN».
+    event_trigger = models.CharField(max_length=128, blank=True, default="")
     body = models.TextField()
     status = models.CharField(
         max_length=16,

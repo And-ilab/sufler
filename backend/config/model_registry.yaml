@@ -71,7 +71,9 @@ slots:
     status: evaluating
 
   llm_sufler_cc:
-    dev_model: "stub:sufler_cc"
+    # Local CPU baseline via llama.cpp OpenAI-compatible server.
+    # Override with MODEL_GATEWAY_MODE=openai + OPENAI_BASE_URL.
+    dev_model: "qwen2.5-1.5b-instruct"
     prod_candidate: null
     kpi:
       profile: sufler_cc
@@ -95,7 +97,9 @@ slots:
     status: approved_dev
 
   llm_assistant_bank:
-    dev_model: "stub:assistant_bank"
+    # Local CPU baseline via llama.cpp OpenAI-compatible server.
+    # Override with MODEL_GATEWAY_MODE=openai + OPENAI_BASE_URL.
+    dev_model: "qwen2.5-1.5b-instruct"
     prod_candidate: null
     kpi:
       profile: assistant_bank

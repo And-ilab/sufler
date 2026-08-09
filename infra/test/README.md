@@ -194,7 +194,23 @@ verify_inference_tier: OK
 
 To use the Vosk approved_dev candidate on a GPU/CPU host: set `ASR_MODE=vosk`,
 mount weights, and optionally add Compose `device_requests` for NVIDIA.
-For a real LLM candidate: set registry/`MODEL_GATEWAY_MODE=openai` + `OPENAI_BASE_URL`.
+
+### CPU LLM + embeddings (Linux server)
+
+Compose profile **`cpu-inference`**: services `ollama` (official image) and
+`embedding` (E5-large). No GPU. Details: [`../local-inference/README.md`](../local-inference/README.md).
+
+Manual on the VM:
+
+```bash
+./deploy.sh up --cpu-inference
+docker compose --profile cpu-inference exec ollama ollama pull qwen2.5:3b
+./deploy.sh cpu-verify
+```
+
+This sets `MODEL_GATEWAY_MODE=openai`, `OPENAI_BASE_URL=http://ollama:11434/v1`,
+`OPENAI_MODEL=qwen2.5:3b`, `OLLAMA_BASE_URL=http://ollama:11434`,
+`EMBEDDING_MODE=http`, `EMBEDDING_BASE_URL=http://embedding:8090`.
 
 Env: `AI_INFERENCE_PROFILE=test` (default on TEST compose).
 

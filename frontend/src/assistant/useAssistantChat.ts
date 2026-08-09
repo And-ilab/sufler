@@ -1,5 +1,10 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { streamAssistantChat, streamDemoChat } from './api/chatStream'
+import {
+  clearPersistedChat,
+  loadPersistedChat,
+  savePersistedChat,
+} from './chatPersistence'
 import {
   DEFAULT_TOOLS,
   SEED_MESSAGES,
@@ -17,19 +22,39 @@ export interface UseAssistantChatOptions {
   demoMode?: boolean
   initialMessages?: AssistantMessage[]
   sessionId?: string
+  /** Selected assistant_* KB slugs for RAG. */
+  getKbSlugs?: () => string[]
+  /** Persist chat across remounts / full-page open (sessionStorage). */
+  persist?: boolean
 }
 
 export function useAssistantChat({
   demoMode = false,
-  initialMessages = SEED_MESSAGES,
-  sessionId = `sess-${Date.now()}`,
+  initialMessages,
+  sessionId: sessionIdProp,
+  getKbSlugs,
+  persist = true,
 }: UseAssistantChatOptions = {}) {
-  const [messages, setMessages] = useState<AssistantMessage[]>(initialMessages)
+  const restored = persist && !demoMode ? loadPersistedChat() : null
+  const [sessionId] = useState(
+    () => sessionIdProp || restored?.sessionId || `sess-${Date.now()}`,
+  )
+  const [messages, setMessages] = useState<AssistantMessage[]>(() => {
+    if (initialMessages) return initialMessages
+    if (demoMode) return SEED_MESSAGES
+    if (restored?.messages?.length) return restored.messages
+    return []
+  })
   const [tools, setTools] = useState<AssistantToolState[]>(DEFAULT_TOOLS)
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    if (!persist || demoMode || streaming) return
+    savePersistedChat(sessionId, messages)
+  }, [demoMode, messages, persist, sessionId, streaming])
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort()
@@ -104,6 +129,8 @@ export function useAssistantChat({
                   title: 'Регламент HR-12',
                   relevance_percent: 92,
                   permalink: 'https://suz.local/articles/hr-12',
+                  snippet:
+                    'Заявление на отпуск подаётся в HR-портале не позднее чем за 14 календарных дней.',
                 },
               ]
             : [],
@@ -121,10 +148,30 @@ export function useAssistantChat({
           : streamAssistantChat({
               message: trimmed,
               sessionId,
+              kbSlugs: getKbSlugs?.() ?? [],
               signal: controller.signal,
             })
 
         for await (const chunk of stream) {
+          if (chunk.sources?.length) {
+            setMessages((current) =>
+              current.map((item) =>
+                item.id === assistantId
+                  ? {
+                      ...item,
+                      sources: chunk.sources!.map((source, index) => ({
+                        id: source.id || `src-${index}`,
+                        title: source.title || 'Источник',
+                        relevance_percent: source.relevance_percent ?? 0,
+                        permalink: source.permalink || '',
+                        snippet: source.snippet || '',
+                        kb_slug: source.kb_slug,
+                      })),
+                    }
+                  : item,
+              ),
+            )
+          }
           if (chunk.content) {
             setMessages((current) =>
               current.map((item) =>
@@ -167,7 +214,7 @@ export function useAssistantChat({
         setStreaming(false)
       }
     },
-    [demoMode, sessionId, streaming],
+    [demoMode, getKbSlugs, sessionId, streaming],
   )
 
   const newDialog = useCallback(() => {
@@ -175,7 +222,8 @@ export function useAssistantChat({
     setMessages([])
     setError('')
     setTools(DEFAULT_TOOLS)
-  }, [stopStreaming])
+    if (persist && !demoMode) clearPersistedChat()
+  }, [demoMode, persist, stopStreaming])
 
   return {
     messages,

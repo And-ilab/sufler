@@ -11,7 +11,7 @@ from pgvector.django import CosineDistance
 
 from hub.model_registry_store import get_model_settings
 from ingest.models import CCProductionChunk
-from ingest.pipeline import deterministic_embedding
+from core.embeddings import embed_query
 from qu.models import QuReferenceExample
 
 
@@ -38,7 +38,7 @@ def _best_example(
         (
             _cosine_similarity(
                 query_embedding,
-                deterministic_embedding(example.question),
+                embed_query(example.question),
             ),
             example,
         )
@@ -58,7 +58,7 @@ def preview_query(query: str, *, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
     if not 1 <= limit <= MAX_LIMIT:
         raise ValueError(f"limit must be between 1 and {MAX_LIMIT}")
 
-    query_embedding = deterministic_embedding(normalized_query)
+    query_embedding = embed_query(normalized_query)
     chunk_query = CCProductionChunk.objects.filter(is_active=True).only(
         "article_id",
         "chunk_index",

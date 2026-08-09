@@ -184,11 +184,6 @@
   gap: var(--space-3);
 }
 
-.portal-launcher__admin-link {
-  font-weight: 700;
-  color: var(--color-primary);
-}
-
 .portal-launcher__settings-btn {
   display: inline-flex;
   align-items: center;
@@ -351,16 +346,19 @@
 }
 
 .portal-module-window--maximized {
-  position: fixed;
-  inset: var(--space-4);
-  z-index: 60;
-  width: auto;
-  height: auto;
+  inset: 12px;
+  right: 12px;
+  left: 12px;
+  bottom: 12px;
+  width: auto !important;
+  height: auto !important;
   max-width: none;
   max-height: none;
+  z-index: 40;
 }
 
 .portal-module-window__header {
+  position: relative;
   display: flex;
   min-height: 56px;
   align-items: center;
@@ -420,6 +418,35 @@
   background: color-mix(in srgb, var(--color-white) 16%, transparent);
 }
 
+.portal-module-window__menu {
+  position: absolute;
+  top: 52px;
+  right: var(--space-3);
+  z-index: 5;
+  display: grid;
+  min-width: 220px;
+  padding: var(--space-2);
+  box-shadow: var(--shadow-md);
+}
+
+.portal-module-window__menu a,
+.portal-module-window__menu button {
+  padding: var(--space-3);
+  color: var(--color-text);
+  text-align: left;
+  text-decoration: none;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  cursor: pointer;
+}
+
+.portal-module-window__menu a:hover,
+.portal-module-window__menu button:hover {
+  color: var(--color-primary);
+  background: var(--color-info-bg);
+}
+
 .portal-module-window__body {
   display: flex;
   min-height: 0;
@@ -433,6 +460,20 @@
 .portal-module-window__body--assistant {
   gap: var(--space-2);
   padding: var(--space-3);
+  overflow: hidden;
+}
+
+.portal-assistant-chat-host {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.portal-assistant-chat-host > .asst-chat {
+  flex: 1;
+  min-height: 0;
 }
 
 .portal-module-window__body--sufler-app {

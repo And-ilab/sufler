@@ -117,6 +117,8 @@ Support tier (Redis + Celery + MinIO): [`test/README.md`](test/README.md#support
 
 Inference tier (ASR + LLM, `profile=test`): [`test/README.md`](test/README.md#ai-inference-tier-asr--llm-gateway-profiletest).
 
+CPU LLM + embeddings (Linux): [`local-inference/README.md`](local-inference/README.md) · `./local-inference/up-cpu.sh` · TEST: `./test/deploy.sh up --cpu-inference`.
+
 Edge TLS (HTTPS only): [`test/nginx.conf`](test/nginx.conf) · [`test/README.md`](test/README.md#edge-tls-nginx).
 
 Cutover (SUZ/Oktell/AD + INT-T): [`test/cutover-checklist.md`](test/cutover-checklist.md).
