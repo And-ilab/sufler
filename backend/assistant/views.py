@@ -96,8 +96,8 @@ def assistant_models(request: HttpRequest) -> JsonResponse:
         return JsonResponse(select_model(model_id))
     except RuntimeError as exc:
         return JsonResponse(
-            {"error": "switch_disabled", "details": str(exc)},
-            status=501,
+            {"error": "switch_failed", "details": str(exc)},
+            status=502,
         )
     except ValueError as exc:
         return JsonResponse(

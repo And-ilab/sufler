@@ -1,4 +1,7 @@
-/** Optional status helper for Ollama (UI switcher removed). */
+function csrfToken(): string {
+  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : ''
+}
 
 export interface LocalLlmModel {
   id: string
@@ -34,6 +37,7 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
+/** Models pulled in Ollama + currently active chat model. */
 export async function fetchLocalLlmModels(): Promise<LocalLlmStatus> {
   const response = await fetch('/api/v1/assistant/models/', {
     credentials: 'include',
@@ -45,11 +49,20 @@ export async function fetchLocalLlmModels(): Promise<LocalLlmStatus> {
   return (await response.json()) as LocalLlmStatus
 }
 
-/** @deprecated Model switching via UI is disabled — use OPENAI_MODEL + ollama pull. */
-export async function selectLocalLlmModel(_modelId: string): Promise<LocalLlmStatus> {
-  throw new Error(
-    'Переключение модели в UI отключено. '
-      + 'docker compose exec ollama ollama pull <name>, '
-      + 'затем OPENAI_MODEL=<name> в .env и restart backend.',
-  )
+/** Select active Ollama model for subsequent chat requests (no container restart). */
+export async function selectLocalLlmModel(modelId: string): Promise<LocalLlmStatus> {
+  const response = await fetch('/api/v1/assistant/models/', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-CSRFToken': csrfToken(),
+    },
+    body: JSON.stringify({ model_id: modelId }),
+  })
+  if (!response.ok) {
+    throw new Error(await parseError(response))
+  }
+  return (await response.json()) as LocalLlmStatus
 }

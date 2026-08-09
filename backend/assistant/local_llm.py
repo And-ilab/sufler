@@ -1,4 +1,4 @@
-"""Status helper for local Ollama (OpenAI-compatible) — no custom switcher."""
+"""Ollama catalog + runtime active model for the assistant chat UI."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 
@@ -27,12 +28,45 @@ def openai_base_url() -> str:
     ).rstrip("/")
 
 
-def active_model_id() -> str:
+def _env_default_model() -> str:
     return (
         os.environ.get("OPENAI_MODEL")
         or os.environ.get("OLLAMA_MODEL")
         or ""
     ).strip()
+
+
+def _state_path() -> Path:
+    raw = os.environ.get("OLLAMA_ACTIVE_MODEL_PATH")
+    if raw:
+        return Path(raw)
+    # Persist under backend tree (dev bind-mount) or /tmp in plain containers.
+    here = Path(__file__).resolve()
+    candidate = here.parents[1] / "var" / "active_openai_model"
+    return candidate
+
+
+def _read_runtime_model() -> str | None:
+    path = _state_path()
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return value or None
+
+
+def _write_runtime_model(model_id: str) -> None:
+    path = _state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(model_id.strip() + "\n", encoding="utf-8")
+
+
+def active_model_id() -> str:
+    """Runtime UI selection, then env default."""
+    runtime = _read_runtime_model()
+    if runtime:
+        return runtime
+    return _env_default_model()
 
 
 def _timeout() -> float:
@@ -50,6 +84,31 @@ def _get_json(url: str, *, timeout: float | None = None) -> Any:
     return json.loads(raw or "{}")
 
 
+def _list_pulled_models() -> list[dict[str, Any]]:
+    payload = _get_json(f"{ollama_base_url()}/api/tags", timeout=5.0)
+    models: list[dict[str, Any]] = []
+    for item in payload.get("models") or []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name") or item.get("model")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        size = item.get("size")
+        desc = ""
+        if isinstance(size, (int, float)) and size > 0:
+            desc = f"{size / (1024 ** 3):.1f} GB"
+        models.append(
+            {
+                "id": name.strip(),
+                "label": name.strip(),
+                "description": desc,
+                "available": True,
+            }
+        )
+    models.sort(key=lambda row: row["id"])
+    return models
+
+
 def offline_status(*, error: str | None = None) -> dict[str, Any]:
     model = active_model_id() or None
     return {
@@ -63,7 +122,7 @@ def offline_status(*, error: str | None = None) -> dict[str, Any]:
                 {
                     "id": model,
                     "label": model,
-                    "description": "Задана через OPENAI_MODEL / OLLAMA_MODEL",
+                    "description": "Задана локально / через OPENAI_MODEL",
                     "available": True,
                 }
             ]
@@ -72,38 +131,48 @@ def offline_status(*, error: str | None = None) -> dict[str, Any]:
         ),
         "last_error": error
         or (
-            "Ollama недоступна. Поднимите сервис: "
-            "COMPOSE_PROFILES=cpu-inference docker compose "
-            "-f docker-compose.yml -f local-inference/docker-compose.cpu.yml up -d ollama"
+            "Ollama недоступна. Поднимите сервис ollama "
+            "(COMPOSE_PROFILES=cpu-inference)."
         ),
     }
 
 
 def get_models_status() -> dict[str, Any]:
-    base = ollama_base_url()
     try:
-        payload = _get_json(f"{base}/api/tags", timeout=5.0)
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError, json.JSONDecodeError) as exc:
+        models = _list_pulled_models()
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        ValueError,
+        OSError,
+        json.JSONDecodeError,
+    ) as exc:
         return offline_status(error=f"Ollama недоступна ({exc})")
 
-    models: list[dict[str, Any]] = []
-    for item in payload.get("models") or []:
-        if not isinstance(item, dict):
-            continue
-        name = item.get("name") or item.get("model")
-        if not isinstance(name, str) or not name.strip():
-            continue
-        models.append(
-            {
-                "id": name,
-                "label": name,
-                "description": "",
-                "available": True,
-            }
-        )
+    ids = {item["id"] for item in models}
+    runtime = _read_runtime_model()
+    env_default = _env_default_model()
+    active: str | None = None
+    if runtime and runtime in ids:
+        active = runtime
+    elif env_default and env_default in ids:
+        active = env_default
+    elif runtime:
+        # Selected but not currently listed (retag / unload) — still show as active.
+        active = runtime
+        if runtime not in ids:
+            models.insert(
+                0,
+                {
+                    "id": runtime,
+                    "label": runtime,
+                    "description": "выбрана, но нет в ollama list",
+                    "available": False,
+                },
+            )
+    elif models:
+        active = models[0]["id"]
 
-    configured = active_model_id()
-    active = configured or (models[0]["id"] if models else None)
     return {
         "active_model_id": active,
         "switching": False,
@@ -114,16 +183,46 @@ def get_models_status() -> dict[str, Any]:
         "last_error": None
         if models
         else (
-            "В Ollama нет скачанных моделей. Пример: "
-            "docker compose exec ollama ollama pull qwen2.5:3b"
+            "В Ollama нет скачанных моделей. "
+            "docker compose exec ollama ollama pull <name>"
         ),
     }
 
 
 def select_model(model_id: str) -> dict[str, Any]:
-    """Model switching via UI is disabled — change OPENAI_MODEL and restart backend."""
-    raise RuntimeError(
-        "Переключение модели в UI отключено. "
-        "Скачайте модель: docker compose exec ollama ollama pull <name>, "
-        "задайте OPENAI_MODEL=<name> в infra/.env и перезапустите backend."
-    )
+    """Set active Ollama model for subsequent assistant chat requests."""
+    model_id = model_id.strip()
+    if not model_id:
+        raise ValueError("model_id is required")
+    try:
+        models = _list_pulled_models()
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        ValueError,
+        OSError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise RuntimeError(f"Ollama недоступна: {exc}") from exc
+
+    ids = {item["id"] for item in models}
+    # Allow exact tag or bare name match (llama3.2:3b vs llama3.2:3b-instruct-q4…)
+    if model_id not in ids:
+        prefix_hits = [
+            item["id"] for item in models if item["id"].startswith(model_id + ":")
+        ]
+        if len(prefix_hits) == 1:
+            model_id = prefix_hits[0]
+        else:
+            available = ", ".join(sorted(ids)) or "(пусто)"
+            raise ValueError(
+                f"Модель {model_id!r} не найдена среди скачанных в Ollama. "
+                f"Доступно: {available}"
+            )
+
+    try:
+        _write_runtime_model(model_id)
+    except OSError as exc:
+        raise RuntimeError(f"Не удалось сохранить выбор модели: {exc}") from exc
+
+    return get_models_status()

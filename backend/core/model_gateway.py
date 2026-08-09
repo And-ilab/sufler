@@ -251,7 +251,15 @@ class ModelGateway:
         return headers
 
     def _resolve_model(self, profile: GatewayProfile) -> str:
-        """Prefer OPENAI_MODEL / OLLAMA_MODEL (Ollama tags) over registry stub names."""
+        """Runtime UI selection → env OPENAI_MODEL → registry slot name."""
+        try:
+            from assistant.local_llm import active_model_id
+
+            runtime = (active_model_id() or "").strip()
+            if runtime:
+                return runtime
+        except Exception:
+            pass
         for key in ("OPENAI_MODEL", "OLLAMA_MODEL"):
             override = (os.environ.get(key) or "").strip()
             if override:
