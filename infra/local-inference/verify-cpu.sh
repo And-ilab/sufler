@@ -1,14 +1,5 @@
 #!/usr/bin/env bash
-# Smoke-check CPU inference services (llm + embedding).
-#
-# Dev (from infra/):
-#   ./local-inference/verify-cpu.sh
-#
-# TEST prod-like (from infra/test/ via deploy.sh cpu-verify):
-#   COMPOSE_PROJECT_NAME=sufler-test \
-#   COMPOSE_FILE=docker-compose.prod-like.yml \
-#   COMPOSE_DIR=.../infra/test \
-#   ./verify-cpu.sh
+# Smoke-check Ollama + embedding.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,8 +24,6 @@ compose() {
     args+=(-f "${EXTRA_COMPOSE_FILE}")
   elif [[ "${COMPOSE_FILE}" == "docker-compose.yml" && -f "${COMPOSE_DIR}/local-inference/docker-compose.cpu.yml" ]]; then
     args+=(-f local-inference/docker-compose.cpu.yml)
-  elif [[ "${COMPOSE_FILE}" == docker-compose.yml && -f "${ROOT}/docker-compose.cpu.yml" && "${COMPOSE_DIR}" == "${INFRA}" ]]; then
-    args+=(-f local-inference/docker-compose.cpu.yml)
   fi
   COMPOSE_PROFILES=cpu-inference docker compose "${args[@]}" "$@"
 }
@@ -54,6 +43,13 @@ wait_http() {
       echo "OK: ${label} is up"
       return 0
     fi
+    # Ollama image has no python — use ollama CLI / wget inside container
+    if [[ "${service}" == "ollama" ]]; then
+      if compose exec -T ollama ollama list >/dev/null 2>&1; then
+        echo "OK: ${label} is up"
+        return 0
+      fi
+    fi
     compose ps "${service}" || true
     sleep 5
   done
@@ -62,65 +58,35 @@ wait_http() {
   die "${label} not ready within ${WAIT_SECONDS}s"
 }
 
-wait_llama_ready() {
-  local deadline=$((SECONDS + WAIT_SECONDS))
-  echo "Waiting for manager ready=true and OpenAI /v1/models 200…"
-  while (( SECONDS < deadline )); do
-    local body
-    body="$(compose exec -T llm \
-      python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8070/health', timeout=5).read().decode())" \
-      2>/dev/null || true)"
-    local openai_ok=0
-    if compose exec -T llm \
-      python -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8080/v1/models', timeout=5); assert r.status==200" \
-      >/dev/null 2>&1; then
-      openai_ok=1
-    fi
-    # Prefer explicit ready flag; also accept active_model_id + not switching.
-    if [[ "${openai_ok}" -eq 1 ]] && {
-      [[ "${body}" == *'"ready": true'* ]] || [[ "${body}" == *'"ready":true'* ]] ||
-      { [[ "${body}" == *'"active_model_id": "'* ]] && [[ "${body}" != *'"active_model_id": null'* ]] && [[ "${body}" != *'"switching": true'* ]]; }
-    }; then
-      echo "${body}"
-      return 0
-    fi
-    if [[ -n "${body}" ]]; then
-      echo "  still starting (openai_ok=${openai_ok}): $(echo "${body}" | head -c 240)…"
-    else
-      echo "  manager health not ready yet…"
-    fi
-    sleep 5
-  done
-  echo "---- llm logs (tail) ----" >&2
-  compose logs --tail=120 llm >&2 || true
-  die "llama did not become ready within ${WAIT_SECONDS}s"
-}
-
 echo "=== container status ==="
-compose ps llm embedding backend || true
+compose ps ollama embedding backend || true
 
-echo "=== llm manager /health ==="
-wait_http llm "http://127.0.0.1:8070/health" "llm manager"
-wait_llama_ready
+echo "=== ollama ==="
+wait_http ollama "http://127.0.0.1:11434/api/tags" "ollama"
+compose exec -T ollama ollama list || die "ollama list failed"
 
-echo "=== llama OpenAI /v1/models ==="
-compose exec -T llm \
-  python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/v1/models', timeout=5).read().decode()[:400])" \
-  || die "llama /v1/models failed"
+echo "=== ollama OpenAI /v1/models ==="
+compose exec -T backend \
+  python -c "
+import os, urllib.request
+oa = os.environ.get('OPENAI_BASE_URL', 'http://ollama:11434/v1').rstrip('/')
+print(urllib.request.urlopen(oa + '/models', timeout=10).read().decode()[:500])
+" || die "OpenAI /v1/models via backend failed"
 
 echo "=== embedding /health ==="
 wait_http embedding "http://127.0.0.1:8090/health" "embedding"
 
-echo "=== backend → llm / embedding DNS ==="
+echo "=== backend → ollama / embedding ==="
 compose exec -T backend \
   python -c "
 import os, urllib.request
-mgr = os.environ.get('LOCAL_LLM_MANAGER_URL', 'http://llm:8070').rstrip('/')
+oa = os.environ.get('OPENAI_BASE_URL', 'http://ollama:11434/v1').rstrip('/')
 emb = os.environ.get('EMBEDDING_BASE_URL', 'http://embedding:8090').rstrip('/')
-print('manager', urllib.request.urlopen(mgr + '/health', timeout=5).status)
-print('embedding', urllib.request.urlopen(emb + '/health', timeout=5).status)
-oa = os.environ.get('OPENAI_BASE_URL', 'http://llm:8080/v1').rstrip('/')
+ollama = os.environ.get('OLLAMA_BASE_URL', 'http://ollama:11434').rstrip('/')
+print('ollama tags', urllib.request.urlopen(ollama + '/api/tags', timeout=5).status)
 print('openai', urllib.request.urlopen(oa + '/models', timeout=5).status)
+print('embedding', urllib.request.urlopen(emb + '/health', timeout=5).status)
+print('OPENAI_MODEL', os.environ.get('OPENAI_MODEL'))
 " || die "backend cannot reach inference services"
 
-echo "OK: CPU inference pipeline ready"
+echo "OK: Ollama + embedding ready"

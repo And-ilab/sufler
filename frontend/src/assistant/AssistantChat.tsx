@@ -14,11 +14,6 @@ import {
   fetchAssistantKnowledgeBases,
   type AssistantKbOption,
 } from './api/knowledgeBases'
-import {
-  fetchLocalLlmModels,
-  selectLocalLlmModel,
-  type LocalLlmModel,
-} from './api/localModels'
 import { useAssistantChat } from './useAssistantChat'
 import './AssistantChat.css'
 
@@ -323,12 +318,6 @@ export function AssistantChat({
   const [kbSelected, setKbSelected] = useState<Record<string, boolean>>(() =>
     Object.fromEntries((knowledgeBasesProp ?? []).map((kb) => [kb.id, true])),
   )
-  const [modelCatalog, setModelCatalog] = useState<LocalLlmModel[]>([])
-  const [activeModelId, setActiveModelId] = useState('')
-  const [modelStatus, setModelStatus] = useState<
-    'loading' | 'ready' | 'switching' | 'error'
-  >('loading')
-  const [modelError, setModelError] = useState('')
   const kbSlugsRef = useRef<string[]>([])
   kbSlugsRef.current = kbCatalog
     .filter((kb) => kbSelected[kb.id])
@@ -398,63 +387,6 @@ export function AssistantChat({
     }
   }, [knowledgeBasesProp])
 
-  useEffect(() => {
-    let cancelled = false
-    setModelStatus('loading')
-    void (async () => {
-      try {
-        await ensureDevSession()
-        const status = await fetchLocalLlmModels()
-        if (cancelled) return
-        setModelCatalog(status.models)
-        setActiveModelId(status.active_model_id ?? status.models[0]?.id ?? '')
-        setModelError(
-          status.manager_reachable === false
-            ? status.last_error || 'LLM manager недоступен'
-            : '',
-        )
-        setModelStatus(status.manager_reachable === false ? 'error' : 'ready')
-      } catch (error) {
-        if (cancelled) return
-        setModelCatalog([])
-        setActiveModelId('')
-        setModelError(
-          error instanceof Error ? error.message : 'Не удалось загрузить модели',
-        )
-        setModelStatus('error')
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const onModelChange = async (modelId: string) => {
-    if (!modelId || modelId === activeModelId || modelStatus === 'switching') {
-      return
-    }
-    const previous = activeModelId
-    setActiveModelId(modelId)
-    setModelStatus('switching')
-    setModelError('')
-    try {
-      await ensureDevSession()
-      const status = await selectLocalLlmModel(modelId)
-      setModelCatalog(status.models)
-      setActiveModelId(status.active_model_id ?? modelId)
-      setModelError('')
-      setModelStatus('ready')
-    } catch (error) {
-      setActiveModelId(previous)
-      setModelError(
-        error instanceof Error
-          ? error.message
-          : 'Не удалось переключить модель. Запустите start-llm-manager.ps1',
-      )
-      setModelStatus('error')
-    }
-  }
-
   const selectedLabel = useMemo(
     () => kbSummary(kbCatalog, kbSelected, kbStatus),
     [kbCatalog, kbSelected, kbStatus],
@@ -490,48 +422,6 @@ export function AssistantChat({
         </div>
       ) : null}
       <div className="asst-toolbar">
-        <label className="asst-model" data-testid="asst-model">
-          <span className="asst-model__label">Модель</span>
-          <select
-            className="asst-model__select"
-            value={activeModelId}
-            disabled={
-              readOnly ||
-              modelStatus === 'loading' ||
-              modelStatus === 'switching' ||
-              modelCatalog.length === 0
-            }
-            onChange={(event) => void onModelChange(event.target.value)}
-            data-testid="asst-model-select"
-            title={modelError || undefined}
-          >
-            {modelStatus === 'loading' ? (
-              <option value="">Загрузка…</option>
-            ) : modelCatalog.length === 0 ? (
-              <option value="">Нет моделей</option>
-            ) : (
-              modelCatalog.map((model) => (
-                <option
-                  key={model.id}
-                  value={model.id}
-                  disabled={model.available === false}
-                >
-                  {model.label}
-                </option>
-              ))
-            )}
-          </select>
-          {modelStatus === 'switching' ? (
-            <span className="asst-model__hint" data-testid="asst-model-switching">
-              Переключение… (до ~30 с)
-            </span>
-          ) : null}
-        </label>
-        {modelError ? (
-          <span className="asst-model__error" data-testid="asst-model-error" title={modelError}>
-            {modelError}
-          </span>
-        ) : null}
         <div className="asst-kb" data-testid="asst-kb">
           <button
             type="button"

@@ -1,13 +1,4 @@
-function csrfToken(): string {
-  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/)
-  return match ? decodeURIComponent(match[1]) : ''
-}
-
-/** Browser can reach host manager even when Docker proxy cannot. */
-const HOST_MANAGER_URLS = [
-  'http://127.0.0.1:8070',
-  'http://localhost:8070',
-] as const
+/** Optional status helper for Ollama (UI switcher removed). */
 
 export interface LocalLlmModel {
   id: string
@@ -43,47 +34,7 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
-async function fetchHostManager(
-  method: 'GET' | 'PUT',
-  body?: { model_id: string },
-): Promise<LocalLlmStatus | null> {
-  for (const base of HOST_MANAGER_URLS) {
-    try {
-      const response = await fetch(`${base}/models`, {
-        method,
-        headers: {
-          Accept: 'application/json',
-          ...(body ? { 'Content-Type': 'application/json' } : {}),
-        },
-        body: body ? JSON.stringify(body) : undefined,
-      })
-      if (!response.ok) continue
-      const payload = (await response.json()) as LocalLlmStatus
-      return { ...payload, manager_reachable: true, last_error: null }
-    } catch {
-      // try next host URL
-    }
-  }
-  return null
-}
-
 export async function fetchLocalLlmModels(): Promise<LocalLlmStatus> {
-  try {
-    const response = await fetch('/api/v1/assistant/models/', {
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-    })
-    if (response.ok) {
-      const payload = (await response.json()) as LocalLlmStatus
-      if (payload.manager_reachable !== false) {
-        return payload
-      }
-    }
-  } catch {
-    // fall through to host manager
-  }
-  const direct = await fetchHostManager('GET')
-  if (direct) return direct
   const response = await fetch('/api/v1/assistant/models/', {
     credentials: 'include',
     headers: { Accept: 'application/json' },
@@ -94,32 +45,11 @@ export async function fetchLocalLlmModels(): Promise<LocalLlmStatus> {
   return (await response.json()) as LocalLlmStatus
 }
 
-export async function selectLocalLlmModel(modelId: string): Promise<LocalLlmStatus> {
-  try {
-    const response = await fetch('/api/v1/assistant/models/', {
-      method: 'PUT',
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        'X-CSRFToken': csrfToken(),
-      },
-      body: JSON.stringify({ model_id: modelId }),
-    })
-    if (response.ok) {
-      return (await response.json()) as LocalLlmStatus
-    }
-    // If backend cannot reach manager, try browser→host directly.
-    if (response.status === 502 || response.status === 503) {
-      const direct = await fetchHostManager('PUT', { model_id: modelId })
-      if (direct) return direct
-    }
-    throw new Error(await parseError(response))
-  } catch (error) {
-    if (error instanceof Error && !error.message.includes('HTTP')) {
-      const direct = await fetchHostManager('PUT', { model_id: modelId })
-      if (direct) return direct
-    }
-    throw error
-  }
+/** @deprecated Model switching via UI is disabled — use OPENAI_MODEL + ollama pull. */
+export async function selectLocalLlmModel(_modelId: string): Promise<LocalLlmStatus> {
+  throw new Error(
+    'Переключение модели в UI отключено. '
+      + 'docker compose exec ollama ollama pull <name>, '
+      + 'затем OPENAI_MODEL=<name> в .env и restart backend.',
+  )
 }

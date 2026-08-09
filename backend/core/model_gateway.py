@@ -250,6 +250,14 @@ class ModelGateway:
             headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
 
+    def _resolve_model(self, profile: GatewayProfile) -> str:
+        """Prefer OPENAI_MODEL / OLLAMA_MODEL (Ollama tags) over registry stub names."""
+        for key in ("OPENAI_MODEL", "OLLAMA_MODEL"):
+            override = (os.environ.get(key) or "").strip()
+            if override:
+                return override
+        return profile.model
+
     def _payload(
         self,
         profile: GatewayProfile,
@@ -259,7 +267,7 @@ class ModelGateway:
         parameters: Mapping[str, Any],
     ) -> dict[str, Any]:
         return {
-            "model": profile.model,
+            "model": self._resolve_model(profile),
             "messages": _validate_messages(messages),
             "stream": stream,
             **_validate_parameters(parameters),

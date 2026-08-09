@@ -107,9 +107,11 @@ services:
       AI_INFERENCE_PROFILE: ${AI_INFERENCE_PROFILE:-test}
       MODEL_GATEWAY_MODE: ${MODEL_GATEWAY_MODE:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-local}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
+      OPENAI_MODEL: ${OPENAI_MODEL:-qwen2.5:3b}
       OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-600}
-      LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-http://llm:8070}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-}
       EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
@@ -177,9 +179,11 @@ services:
       AI_INFERENCE_PROFILE: ${AI_INFERENCE_PROFILE:-test}
       MODEL_GATEWAY_MODE: ${MODEL_GATEWAY_MODE:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-local}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
+      OPENAI_MODEL: ${OPENAI_MODEL:-qwen2.5:3b}
       OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-600}
-      LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-http://llm:8070}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-}
       EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
@@ -211,43 +215,21 @@ services:
       retries: 5
       start_period: 40s
 
-  # CPU LLM (llama.cpp + model switcher). Enable: COMPOSE_PROFILES=cpu-inference
-  llm:
+  # CPU LLM via official Ollama. Enable: COMPOSE_PROFILES=cpu-inference
+  # Pull models: docker compose --profile cpu-inference exec ollama ollama pull qwen2.5:3b
+  ollama:
     profiles: ["cpu-inference"]
-    image: ${LLM_IMAGE:-sufler-llm:local}
-    build:
-      context: ../local-inference
-      dockerfile: Dockerfile.llm
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     restart: unless-stopped
-    environment:
-      LLM_MANAGER_HOST: "0.0.0.0"
-      LLM_MANAGER_PORT: "8070"
-      LLAMA_HOST: "0.0.0.0"
-      LLAMA_PORT: "8080"
-      LLAMA_SERVER_PATH: /usr/local/bin/llama-server
-      MODELS_DIR: /models
-      GGUF_DIR: /models/llm
-      CATALOG_PATH: /opt/llm/models.json
-      STATE_PATH: /var/lib/llm-manager/state.json
-      LLM_DEFAULT_MODEL_ID: ${LLM_DEFAULT_MODEL_ID:-qwen2.5-1.5b-instruct}
-      LLM_CTX: ${LLM_CTX:-4096}
-      LLM_THREADS: ${LLM_THREADS:-}
     volumes:
-      - ../../models:/models
-      - llm_manager_state:/var/lib/llm-manager
+      - ollama_data:/root/.ollama
     networks: [internal]
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8070/health', timeout=3)",
-        ]
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
       interval: 15s
-      timeout: 5s
+      timeout: 10s
       retries: 20
-      start_period: 120s
+      start_period: 30s
 
   # CPU embeddings (E5-large). Enable: COMPOSE_PROFILES=cpu-inference
   embedding:
@@ -366,4 +348,4 @@ volumes:
   minio_data:
   audit_data:
   static_data:
-  llm_manager_state:
+  ollama_data:

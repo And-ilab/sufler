@@ -1,108 +1,83 @@
-# Local / server CPU inference (LLM + embeddings)
+# Local CPU inference — Ollama + embeddings
 
-Для интеллектуального чата с RAG по `assistant_*` на **CPU** (Windows host или Linux Docker).
+Простой стек: **официальный контейнер Ollama** для LLM и отдельный сервис embedding.
+Без кастомного llama-manager и без скриптов переключения моделей.
 
-## Модели
-
-| Роль | Модель |
-|------|--------|
-| LLM | `Qwen2.5-1.5B/3B-Instruct` Q4_K_M (GGUF) via llama.cpp |
-| Embedding | `intfloat/multilingual-e5-large` (1024-d) |
-
-По умолчанию на сервере стартует **1.5B** (меньше RAM). В чате можно переключить на 3B.
-
----
-
-## Linux server (рекомендуется) — в пайплайне Compose
-
-### 1. Скачать веса
-
-```bash
-chmod +x infra/local-inference/*.sh
-./infra/local-inference/download-models.sh
-# опционально прогреть E5 в volume:
-# PREFETCH_E5=1 ./infra/local-inference/download-models.sh
-```
-
-### 2a. Dev compose (`infra/`)
+## Быстрый старт (dev compose)
 
 ```bash
 cd infra
 ./local-inference/up-cpu.sh
+# скачать модель (пример — лёгкая для CPU):
+docker compose --profile cpu-inference \
+  -f docker-compose.yml -f local-inference/docker-compose.cpu.yml \
+  exec ollama ollama pull qwen2.5:3b
+
 ./local-inference/verify-cpu.sh
 ```
 
-Поднимает `llm` (:8070 manager + :8080 OpenAI) и `embedding` (:8090), прописывает в `.env`:
+В `infra/.env` скрипт пропишет:
 
 ```text
 MODEL_GATEWAY_MODE=openai
-OPENAI_BASE_URL=http://llm:8080/v1
-LOCAL_LLM_MANAGER_URL=http://llm:8070
+OPENAI_BASE_URL=http://ollama:11434/v1
+OPENAI_API_KEY=ollama
+OPENAI_MODEL=qwen2.5:3b
+OLLAMA_BASE_URL=http://ollama:11434
 EMBEDDING_MODE=http
 EMBEDDING_BASE_URL=http://embedding:8090
 ```
 
-### 2b. TEST prod-like (`infra/test/`)
+Порты на хосте: Ollama `:11434`, embedding `:8090`.
 
-Через пайплайн **Deploy TEST** (тег `v*` / `test-*` или Actions → Run):
-собирает `llm`+`embedding`, на VM делает `pull-up --cpu-inference` и `cpu-verify`.
+## Смена / проба моделей
 
-Вручную:
+Только стандартный CLI Ollama:
+
+```bash
+# список
+docker compose --profile cpu-inference \
+  -f docker-compose.yml -f local-inference/docker-compose.cpu.yml \
+  exec ollama ollama list
+
+# скачать другую
+docker compose --profile cpu-inference \
+  -f docker-compose.yml -f local-inference/docker-compose.cpu.yml \
+  exec ollama ollama pull llama3.2:3b
+
+# активировать в чате — имя в .env и рестарт backend
+# OPENAI_MODEL=llama3.2:3b
+docker compose restart backend
+```
+
+С хоста (если порт проброшен): `ollama pull …` / `http://127.0.0.1:11434`.
+
+Переключателя моделей в UI чата больше нет.
+
+## TEST prod-like
 
 ```bash
 cd infra/test
-./deploy.sh models-pull
+# в .env:
+# MODEL_GATEWAY_MODE=openai
+# OPENAI_BASE_URL=http://ollama:11434/v1
+# OPENAI_MODEL=qwen2.5:3b
+# OLLAMA_BASE_URL=http://ollama:11434
 ./deploy.sh up --cpu-inference
-./deploy.sh cpu-verify
+docker compose --profile cpu-inference exec ollama ollama pull qwen2.5:3b
 ```
 
-Сервисы `llm` / `embedding` в profile `cpu-inference` (internal network, без публикации наружу).
+## Embedding
 
-Workflow **Deploy** (main → rsync) на сервере вызывает `up-cpu.sh` + `verify-cpu.sh`.
+Сервис `embedding` (E5-large) без изменений. Веса кэшируются в `infra/models` / volume.
 
----
+Опционально прогреть кэш:
 
-## Windows (host processes, без Docker для LLM)
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\infra\local-inference\download-models.ps1
-powershell -ExecutionPolicy Bypass -File .\infra\local-inference\start-llm.ps1
-powershell -ExecutionPolicy Bypass -File .\infra\local-inference\start-embedding.ps1
+```bash
+# PREFETCH_E5=1 ./local-inference/download-models.sh
 ```
 
-В `infra/.env` для Docker backend:
+## Устаревшее
 
-```text
-MODEL_GATEWAY_MODE=openai
-OPENAI_BASE_URL=http://host.docker.internal:8080/v1
-LOCAL_LLM_MANAGER_URL=http://host.docker.internal:8070
-EMBEDDING_MODE=http
-EMBEDDING_BASE_URL=http://host.docker.internal:8090
-```
-
----
-
-## Переключатель моделей
-
-В чате ассистента — селект **Модель**.  
-`PUT` → Django → `LOCAL_LLM_MANAGER_URL` → рестарт llama.cpp с другим GGUF.  
-OpenAI alias остаётся `qwen2.5-1.5b-instruct` (совместимость с ModelGateway).
-
-## RAM (ориентир)
-
-| Компонент | RAM |
-|-----------|-----|
-| Qwen 1.5B Q4 | ~2–3 GB |
-| Qwen 3B Q4 | ~3–4 GB |
-| e5-large | ~2–3 GB |
-| Итого комфортно | **≥12 GB** свободной RAM на хосте |
-
-## Файлы
-
-| Файл | Назначение |
-|------|------------|
-| `Dockerfile.llm` | llama.cpp + manager |
-| `backend/services/embedding/Dockerfile` | E5 HTTP |
-| `docker-compose.cpu.yml` | overlay profile `cpu-inference` |
-| `download-models.sh` | GGUF на диск |
-| `up-cpu.sh` / `verify-cpu.sh` | поднять / проверить |
+`llm_manager.py`, `start-llm*.ps1`, `Dockerfile.llm` и GGUF-каталог — **legacy**.
+Новый путь — только образ `ollama/ollama`.

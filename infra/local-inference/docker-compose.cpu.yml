@@ -1,57 +1,32 @@
-# CPU inference overlay (LLM manager + embedding).
-#
-# Paths are relative to infra/ (the first -f compose file in up-cpu.sh).
-# Compose resolves relative build/volume paths from the first compose file.
+# CPU inference: Ollama (LLM) + embedding service.
 #
 # From infra/:
-#   chmod +x local-inference/download-models.sh local-inference/up-cpu.sh
-#   ./local-inference/download-models.sh
-#   ./local-inference/up-cpu.sh
-#
-# Or manually:
 #   COMPOSE_PROFILES=cpu-inference docker compose \
-#     -f docker-compose.yml -f local-inference/docker-compose.cpu.yml up -d --build
+#     -f docker-compose.yml -f local-inference/docker-compose.cpu.yml up -d
+#
+# Pull a model (example):
+#   docker compose -f docker-compose.yml -f local-inference/docker-compose.cpu.yml \
+#     --profile cpu-inference exec ollama ollama pull qwen2.5:3b
+#
+# Or: ./local-inference/up-cpu.sh
 name: sufler
 
 services:
-  llm:
+  ollama:
     profiles: ["cpu-inference"]
-    build:
-      context: ./local-inference
-      dockerfile: Dockerfile.llm
-    image: ${LLM_IMAGE:-sufler-llm:local}
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     restart: unless-stopped
-    environment:
-      LLM_MANAGER_HOST: "0.0.0.0"
-      LLM_MANAGER_PORT: "8070"
-      LLAMA_HOST: "0.0.0.0"
-      LLAMA_PORT: "8080"
-      LLAMA_SERVER_PATH: /usr/local/bin/llama-server
-      MODELS_DIR: /models
-      GGUF_DIR: /models/llm
-      CATALOG_PATH: /opt/llm/models.json
-      STATE_PATH: /var/lib/llm-manager/state.json
-      LLM_DEFAULT_MODEL_ID: ${LLM_DEFAULT_MODEL_ID:-qwen2.5-1.5b-instruct}
-      LLM_CTX: ${LLM_CTX:-4096}
-      LLM_THREADS: ${LLM_THREADS:-}
     volumes:
-      - ../models:/models
-      - llm_manager_state:/var/lib/llm-manager
+      - ollama_data:/root/.ollama
     ports:
-      - "${LLM_MANAGER_PORT_HOST:-8070}:8070"
-      - "${LLM_PORT_HOST:-8080}:8080"
+      - "${OLLAMA_PORT_HOST:-11434}:11434"
+    # Enough time for first model pull / load on CPU
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8070/health', timeout=3)",
-        ]
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
       interval: 15s
-      timeout: 5s
+      timeout: 10s
       retries: 20
-      start_period: 120s
+      start_period: 30s
 
   embedding:
     profiles: ["cpu-inference"]
@@ -84,4 +59,4 @@ services:
       start_period: 240s
 
 volumes:
-  llm_manager_state:
+  ollama_data:
