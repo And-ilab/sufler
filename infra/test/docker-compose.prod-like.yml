@@ -221,6 +221,9 @@ services:
     profiles: ["cpu-inference"]
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:--1}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-1}
     volumes:
       - ollama_data:/root/.ollama
     networks: [internal]

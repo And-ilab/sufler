@@ -54,6 +54,21 @@ docker compose restart backend
 
 Переключателя моделей в UI чата больше нет.
 
+## Чтобы модель не выгружалась из RAM
+
+В compose для `ollama` задано `OLLAMA_KEEP_ALIVE=-1` (держать загруженной постоянно).
+После изменения пересоздайте контейнер:
+
+```bash
+docker compose --profile cpu-inference \
+  -f docker-compose.yml -f local-inference/docker-compose.cpu.yml \
+  up -d --force-recreate ollama
+```
+
+Первый запрос после рестарта всё равно загрузит модель в память; дальше она не уходит по таймауту.
+Чтобы заранее «прогреть»: `docker compose … exec ollama ollama run llama3.2:3b ""`  
+(или любой короткий `curl` на `/v1/chat/completions`).
+
 ## TEST prod-like
 
 ```bash
@@ -79,5 +94,7 @@ docker compose --profile cpu-inference exec ollama ollama pull qwen2.5:3b
 
 ## Устаревшее
 
-`llm_manager.py`, `start-llm*.ps1`, `Dockerfile.llm` и GGUF-каталог — **legacy**.
-Новый путь — только образ `ollama/ollama`.
+Сервис `llm` (порт **8080**, образ `sufler-llm`) **удалён** из compose.
+При `up` / `deploy.sh` используется `--remove-orphans` — старый `sufler-llm-1` снимается сам.
+
+`llm_manager.py`, `start-llm*.ps1`, `Dockerfile.llm` — не используются; LLM только `ollama/ollama` (:11434).

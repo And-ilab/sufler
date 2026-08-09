@@ -45,11 +45,12 @@ set_env ASSISTANT_MAX_TOKENS "${ASSISTANT_MAX_TOKENS:-256}"
 set_env COMPOSE_PROFILES cpu-inference
 
 export COMPOSE_PROFILES=cpu-inference
+# --remove-orphans drops legacy sufler-llm-1 (old llama.cpp on :8080)
 docker compose \
   --env-file "${ENV_FILE}" \
   -f docker-compose.yml \
   -f local-inference/docker-compose.cpu.yml \
-  up -d "$@"
+  up -d --remove-orphans "$@"
 
 echo
 echo "Stack started. Pull / switch models with plain Ollama CLI:"

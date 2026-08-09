@@ -185,7 +185,8 @@ case "${cmd}" in
     fi
     compose config --quiet
     echo "Bringing up ${PROJECT} (prod-like)…"
-    compose up --build -d
+    # --remove-orphans drops legacy sufler-*-llm-1 (old llama.cpp :8080)
+    compose up --build -d --remove-orphans
     echo
     echo "Stack started. HTTPS UI: https://localhost/  (HTTP :80 redirects to HTTPS)"
     echo "Health:  curl -k https://localhost/health/"
@@ -211,7 +212,8 @@ case "${cmd}" in
     if [[ "${cpu_inference}" -eq 1 ]]; then
       compose pull ollama embedding
     fi
-    compose up -d --no-build
+    # --remove-orphans drops legacy sufler-*-llm-1 (old llama.cpp :8080)
+    compose up -d --no-build --remove-orphans
     echo
     echo "Stack started from registry images (edge TLS)."
     echo "BACKEND_IMAGE=${BACKEND_IMAGE}"

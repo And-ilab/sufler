@@ -18,10 +18,11 @@ Local Compose stays separate: [`docker-compose.prod-like.yml`](./docker-compose.
 1. Build and push images:
    - `backend` (`backend/Dockerfile`)
    - `frontend` (`frontend/Dockerfile.prod`)
-   - `llm` (`infra/local-inference/Dockerfile.llm`) — CPU llama.cpp + model switcher
    - `embedding` (`backend/services/embedding/Dockerfile`) — CPU E5
+   - LLM: official `ollama/ollama` (not a custom image; no `:8080` llama.cpp service)
 2. SSH to TEST VM → sync git tag/checkout → `deploy.sh pull-up --cpu-inference` → `cpu-verify`
-3. On the VM, `models-pull` downloads GGUF weights into `models/` if missing
+   (`--remove-orphans` removes legacy `sufler-*-llm-1` if present)
+3. On the VM, pull a model: `docker compose --profile cpu-inference exec ollama ollama pull …`
 
 App secrets (Postgres, LDAP, SUZ HMAC, …) stay in **`infra/test/.env` on the VM** — not in GitHub Actions.
 
