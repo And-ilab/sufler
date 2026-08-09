@@ -50,6 +50,8 @@ docker compose --profile cpu-inference \
 docker compose restart backend
 ```
 
+`up-cpu.sh` / `deploy.sh` **не затирают** уже заданный `OPENAI_MODEL` (default `qwen2.5:3b` только если ключа нет).
+
 С хоста (если порт проброшен): `ollama pull …` / `http://127.0.0.1:11434`.
 
 Переключателя моделей в UI чата больше нет.

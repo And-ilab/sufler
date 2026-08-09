@@ -76,12 +76,32 @@ set_env_key() {
   fi
 }
 
+# Write only when key is absent or empty (preserve OPENAI_MODEL across redeploys).
+set_env_key_default() {
+  local key="$1"
+  local value="$2"
+  local current=""
+  if grep -qE "^${key}=" "${ENV_FILE}"; then
+    current="$(grep -E "^${key}=" "${ENV_FILE}" | head -n1 | cut -d= -f2-)"
+    if [[ -n "${current}" ]]; then
+      return 0
+    fi
+  fi
+  set_env_key "${key}" "${value}"
+}
+
+env_file_get() {
+  local key="$1"
+  grep -E "^${key}=" "${ENV_FILE}" | head -n1 | cut -d= -f2- || true
+}
+
 enable_cpu_inference_env() {
   # Wire backend to in-compose Ollama + embedding.
   set_env_key MODEL_GATEWAY_MODE openai
   set_env_key OPENAI_BASE_URL http://ollama:11434/v1
   set_env_key OPENAI_API_KEY ollama
-  set_env_key OPENAI_MODEL "${OPENAI_MODEL:-qwen2.5:3b}"
+  # Do not overwrite a model already set in .env (e.g. llama3.2:3b).
+  set_env_key_default OPENAI_MODEL "${OPENAI_MODEL:-qwen2.5:3b}"
   set_env_key OLLAMA_BASE_URL http://ollama:11434
   set_env_key OPENAI_TIMEOUT_SECONDS 600
   set_env_key EMBEDDING_MODE http
@@ -95,6 +115,7 @@ enable_cpu_inference_env() {
   export MODEL_GATEWAY_MODE=openai
   export OPENAI_BASE_URL=http://ollama:11434/v1
   export OLLAMA_BASE_URL=http://ollama:11434
+  export OPENAI_MODEL="$(env_file_get OPENAI_MODEL)"
   export OPENAI_MODEL="${OPENAI_MODEL:-qwen2.5:3b}"
   export EMBEDDING_MODE=http
   export EMBEDDING_BASE_URL=http://embedding:8090
