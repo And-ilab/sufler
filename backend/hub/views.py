@@ -118,6 +118,7 @@ def _parse_update_payload(request: HttpRequest) -> dict[str, Any]:
         "top_p",
         "max_tokens",
         "response_chars_max",
+        "preset",
     }
     rag_fields = {
         "chunk_size_tokens",
@@ -131,6 +132,9 @@ def _parse_update_payload(request: HttpRequest) -> dict[str, Any]:
     ):
         missing = fields - set(section)
         unknown = set(section) - fields
+        # preset is optional for backward-compatible clients
+        if section_name == "generation":
+            missing -= {"preset"}
         if missing:
             raise ValueError(
                 f"{section_name} is missing: {', '.join(sorted(missing))}"
@@ -140,8 +144,11 @@ def _parse_update_payload(request: HttpRequest) -> dict[str, Any]:
                 f"{section_name} has unknown fields: "
                 f"{', '.join(sorted(unknown))}"
             )
-    return {
-        **generation,
+    flat = {
+        "temperature": generation.get("temperature"),
+        "top_p": generation.get("top_p"),
+        "max_tokens": generation.get("max_tokens"),
+        "response_chars_max": generation.get("response_chars_max"),
         "chunk_size_tokens": rag.get("chunk_size_tokens"),
         "chunk_overlap_tokens": rag.get("chunk_overlap_tokens"),
         "context_inclusion_threshold": rag.get("context_inclusion"),
@@ -149,6 +156,9 @@ def _parse_update_payload(request: HttpRequest) -> dict[str, Any]:
             "deterministic_answer"
         ),
     }
+    if "preset" in generation:
+        flat["preset"] = generation.get("preset")
+    return flat
 
 
 @require_http_methods(["GET", "PUT"])

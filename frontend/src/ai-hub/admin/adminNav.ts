@@ -94,7 +94,7 @@ export const ADMIN_NAV: readonly AdminNavItem[] = [
   { id: 'model_params', label: 'Параметры модели LLM', group: 'АССИСТЕНТ', profile: 'assistant', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
   { id: 'prompts_assistant', label: 'Промпты ассистента', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
   { id: 'capabilities', label: 'Навыки и инструменты', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
-  { id: 'kb_admin', label: 'Базы знаний КЦ', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
+  { id: 'kb_admin', label: 'Базы знаний', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
   { id: 'qu_admin', label: 'Модуль понимания', group: 'АССИСТЕНТ', roleCodes: QU_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
   { id: 'data_sources', label: 'Источники данных', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
   { id: 'assistant_tools', label: 'Инструменты ассистента', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },

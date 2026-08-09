@@ -2,6 +2,8 @@ import { ensureCsrfToken, ensureDevSession } from '../../../auth/ensureDevSessio
 
 export type KnowledgeBaseStatus = 'idle' | 'indexing' | 'ready' | 'error'
 export type DocumentStatus = 'uploaded' | 'indexed' | 'error'
+export type KnowledgeBaseSource = 'manual' | 'suz_bitrix'
+export type WebhookStatus = 'OK' | 'ERROR' | 'IDLE'
 
 export interface KnowledgeBaseDocument {
   id: number
@@ -11,9 +13,14 @@ export interface KnowledgeBaseDocument {
   status: DocumentStatus
   status_message: string
   chunk_count: number
+  index_percent: number
+  source: KnowledgeBaseSource
+  source_label: string
+  readonly?: boolean
   uploaded_at: string
   indexed_at: string | null
   uploaded_by: string
+  permalink?: string
 }
 
 export interface KnowledgeBase {
@@ -22,10 +29,16 @@ export interface KnowledgeBase {
   slug: string
   scope: string
   description: string
+  source: KnowledgeBaseSource
+  source_label: string
   status: KnowledgeBaseStatus
   status_message: string
   document_count: number
   chunk_count: number
+  index_percent: number
+  webhook_status: WebhookStatus
+  webhook_label: string
+  readonly?: boolean
   last_reindexed_at: string | null
   created_at: string
   updated_at: string

@@ -14,7 +14,12 @@ from ingest.models import AssistantProductionChunk
 
 
 DEFAULT_LIMIT = 5
-MAX_LIMIT = 5
+MAX_LIMIT = 8
+# Keep a short preview for UI citations; LLM must see the full chunk text.
+SNIPPET_PREVIEW_CHARS = 800
+# One chunk per document often drops the clause that answers the question
+# (e.g. «сроком на 5 лет» deeper in the form). Keep up to two per article.
+MAX_CHUNKS_PER_ARTICLE = 2
 
 
 def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
@@ -78,22 +83,32 @@ def preview_assistant_query(
             for chunk in chunks
         ]
 
-    best_chunks: dict[tuple[str, int], tuple[float, AssistantProductionChunk]] = {}
+    scored_chunks.sort(
+        key=lambda item: (
+            -item[0],
+            item[1].kb_slug,
+            item[1].article_id,
+            item[1].chunk_index,
+        )
+    )
+    per_article: dict[tuple[str, int], int] = {}
+    ranked: list[tuple[float, AssistantProductionChunk]] = []
     for score, chunk in scored_chunks:
         key = (chunk.kb_slug, chunk.article_id)
-        current = best_chunks.get(key)
-        if current is None or score > current[0]:
-            best_chunks[key] = (score, chunk)
+        taken = per_article.get(key, 0)
+        if taken >= MAX_CHUNKS_PER_ARTICLE:
+            continue
+        per_article[key] = taken + 1
+        ranked.append((score, chunk))
+        if len(ranked) >= limit:
+            break
 
-    ranked = sorted(
-        best_chunks.values(),
-        key=lambda item: (-item[0], item[1].kb_slug, item[1].article_id),
-    )[:limit]
     threshold = get_model_settings(
         "assistant_bank"
     ).context_inclusion_threshold
     documents = []
     for rank, (score, chunk) in enumerate(ranked, start=1):
+        content = chunk.content or ""
         documents.append(
             {
                 "rank": rank,
@@ -102,7 +117,8 @@ def preview_assistant_query(
                 "chunk_index": chunk.chunk_index,
                 "title": chunk.title,
                 "permalink": chunk.permalink,
-                "snippet": chunk.content[:800],
+                "content": content,
+                "snippet": content[:SNIPPET_PREVIEW_CHARS],
                 "relevance_score": round(score, 4),
                 "relevance_percent": round(score * 100),
                 "meets_min_relevance": score >= threshold,

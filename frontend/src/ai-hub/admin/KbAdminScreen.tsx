@@ -6,6 +6,17 @@ import {
 } from '../../auth/ensureDevSession'
 import { Button, Card, StatusBadge } from '../../components'
 import {
+  createAssistantKb,
+  deleteAssistantKb,
+  deleteAssistantKbDocument,
+  getAssistantKb,
+  listAssistantKbs,
+  reindexAssistantKb,
+  uploadAssistantKbDocument,
+  type AssistantKb,
+  type AssistantKbDocument,
+} from './api/assistantAdmin'
+import {
   createKnowledgeBase,
   deleteKnowledgeBase,
   deleteKnowledgeDocument,
@@ -15,14 +26,49 @@ import {
   reindexKnowledgeBase,
   uploadKnowledgeDocument,
   type KnowledgeBase,
+  type KnowledgeBaseDocument,
   type KnowledgeBaseStatus,
+  type WebhookStatus,
 } from './api/kbAdmin'
 
 interface KbAdminScreenProps {
   canEdit?: boolean
 }
 
-function statusBadge(status: KnowledgeBaseStatus): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
+type KbKind = 'cc' | 'assistant'
+type UnifiedKey = `${KbKind}:${number}`
+type CreateTarget = 'assistant' | 'cc'
+
+interface UnifiedDocument {
+  id: number
+  filename: string
+  size_bytes: number
+  status: string
+  index_percent: number
+  source_label: string
+  readonly?: boolean
+}
+
+interface UnifiedKb {
+  key: UnifiedKey
+  kind: KbKind
+  id: number
+  name: string
+  description: string
+  source: string
+  source_label: string
+  module_label: string
+  status: KnowledgeBaseStatus | string
+  status_message: string
+  document_count: number
+  index_percent: number
+  webhook_status: WebhookStatus | string
+  webhook_label: string
+  readonly?: boolean
+  documents?: UnifiedDocument[]
+}
+
+function statusBadge(status: string): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
   if (status === 'ready') return 'success'
   if (status === 'indexing') return 'info'
   if (status === 'error') return 'danger'
@@ -30,7 +76,7 @@ function statusBadge(status: KnowledgeBaseStatus): 'success' | 'warning' | 'dang
   return 'neutral'
 }
 
-function statusLabel(status: KnowledgeBaseStatus): string {
+function statusLabel(status: string): string {
   switch (status) {
     case 'ready':
       return 'Индекс актуален'
@@ -43,16 +89,104 @@ function statusLabel(status: KnowledgeBaseStatus): string {
   }
 }
 
+function webhookBadge(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
+  if (status === 'OK') return 'success'
+  if (status === 'ERROR') return 'danger'
+  return 'neutral'
+}
+
+function sourceBadge(source: string): 'info' | 'neutral' {
+  return source === 'suz_bitrix' ? 'info' : 'neutral'
+}
+
+function docPercent(status: string, explicit?: number): number {
+  if (typeof explicit === 'number') return explicit
+  return status === 'indexed' ? 100 : 0
+}
+
+function indexFromDocs(docs: { status: string; index_percent?: number }[], fallbackStatus: string, docCount: number): number {
+  if (docs.length) {
+    const total = docs.reduce((sum, doc) => sum + docPercent(doc.status, doc.index_percent), 0)
+    return Math.round(total / docs.length)
+  }
+  if (fallbackStatus === 'ready' && docCount > 0) return 100
+  if (fallbackStatus === 'indexing') return 0
+  return 0
+}
+
+function fromCcKb(kb: KnowledgeBase): UnifiedKb {
+  const documents = (kb.documents ?? []).map((doc: KnowledgeBaseDocument) => ({
+    id: doc.id,
+    filename: doc.filename,
+    size_bytes: doc.size_bytes,
+    status: doc.status,
+    index_percent: docPercent(doc.status, doc.index_percent),
+    source_label: doc.source_label || kb.source_label || 'Ручная загрузка',
+    readonly: doc.readonly || kb.source === 'suz_bitrix',
+  }))
+  const isSuz = kb.source === 'suz_bitrix'
+  return {
+    key: `cc:${kb.id}`,
+    kind: 'cc',
+    id: kb.id,
+    name: kb.name,
+    description: kb.description,
+    source: kb.source,
+    source_label: kb.source_label || (isSuz ? 'СУЗ Битрикс' : 'Ручная загрузка'),
+    module_label: isSuz ? 'СУЗ' : 'КЦ',
+    status: kb.status,
+    status_message: kb.status_message || '',
+    document_count: kb.document_count,
+    index_percent: typeof kb.index_percent === 'number'
+      ? kb.index_percent
+      : indexFromDocs(documents, kb.status, kb.document_count),
+    webhook_status: kb.webhook_status || 'IDLE',
+    webhook_label: kb.webhook_label || '—',
+    readonly: Boolean(kb.readonly || isSuz),
+    documents: kb.documents ? documents : undefined,
+  }
+}
+
+function fromAssistantKb(kb: AssistantKb): UnifiedKb {
+  const documents = (kb.documents ?? []).map((doc: AssistantKbDocument) => ({
+    id: doc.id,
+    filename: doc.filename,
+    size_bytes: doc.size_bytes,
+    status: doc.status,
+    index_percent: docPercent(doc.status),
+    source_label: 'Ручная загрузка',
+    readonly: false,
+  }))
+  return {
+    key: `assistant:${kb.id}`,
+    kind: 'assistant',
+    id: kb.id,
+    name: kb.name,
+    description: kb.description || '',
+    source: 'manual',
+    source_label: 'Ручная загрузка',
+    module_label: 'Ассистент',
+    status: kb.status,
+    status_message: kb.status_message || '',
+    document_count: kb.document_count,
+    index_percent: indexFromDocs(documents, String(kb.status), kb.document_count),
+    webhook_status: 'IDLE',
+    webhook_label: '—',
+    readonly: false,
+    documents: kb.documents ? documents : undefined,
+  }
+}
+
 function formatKbError(error: unknown, fallback: string): string {
   if (error instanceof KnowledgeBaseApiError) {
     if (error.message === 'authentication_required') {
-      return 'Нет сессии Django. Нажмите «Повторить» — в DEV выполнится вход как dev-role-01 (проверьте VITE_DEV_AUTH_PASSWORD = AUTH_MOCK_LDAP_DEFAULT_PASSWORD).'
+      return 'Нет сессии Django. Нажмите «Повторить» — в DEV выполнится вход как dev-role-01.'
     }
     if (error.message === 'csrf_failed') {
-      return 'Сбой CSRF-токена после входа. Нажмите «Повторить» — сессия и токен обновятся автоматически.'
+      return 'Сбой CSRF-токена после входа. Нажмите «Повторить».'
     }
     if (error.message === 'permission_denied') {
-      return 'Недостаточно прав (kb.admin) для этой операции.'
+      return 'Недостаточно прав для этой операции.'
     }
     return error.message
   }
@@ -60,45 +194,73 @@ function formatKbError(error: unknown, fallback: string): string {
   return fallback
 }
 
-function documentStatusLabel(status: string): string {
-  if (status === 'indexed') return 'проиндексирован'
-  if (status === 'error') return 'ошибка'
-  if (status === 'uploaded') return 'загружен'
-  return status
+function makeKey(kind: KbKind, id: number): UnifiedKey {
+  return `${kind}:${id}`
 }
 
 export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
-  const [items, setItems] = useState<KnowledgeBase[]>([])
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [selected, setSelected] = useState<KnowledgeBase | null>(null)
+  const [items, setItems] = useState<UnifiedKb[]>([])
+  const [selectedKey, setSelectedKey] = useState<UnifiedKey | null>(null)
+  const [selected, setSelected] = useState<UnifiedKb | null>(null)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [createTarget, setCreateTarget] = useState<CreateTarget>('assistant')
+  const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const selectedIdRef = useRef<number | null>(null)
+  const selectedKeyRef = useRef<UnifiedKey | null>(null)
 
   useEffect(() => {
-    selectedIdRef.current = selectedId
-  }, [selectedId])
+    selectedKeyRef.current = selectedKey
+  }, [selectedKey])
 
-  const refreshList = useCallback(async (preferId?: number | null) => {
-    const next = await listKnowledgeBases()
+  const loadDetail = useCallback(async (key: UnifiedKey): Promise<UnifiedKb> => {
+    const [kind, rawId] = key.split(':') as [KbKind, string]
+    const id = Number(rawId)
+    if (kind === 'assistant') {
+      return fromAssistantKb(await getAssistantKb(id))
+    }
+    return fromCcKb(await getKnowledgeBase(id))
+  }, [])
+
+  const refreshList = useCallback(async (preferKey?: UnifiedKey | null) => {
+    const [ccItems, assistantItems] = await Promise.all([
+      listKnowledgeBases(),
+      listAssistantKbs(),
+    ])
+    const next = [
+      ...assistantItems.map(fromAssistantKb),
+      ...ccItems.map(fromCcKb),
+    ].sort((a, b) => a.name.localeCompare(b.name, 'ru'))
     setItems(next)
-    // preferId / selected / first — use ?? so null also falls through to auto-select
-    const targetId = preferId ?? selectedIdRef.current ?? next[0]?.id ?? null
-    setSelectedId(targetId)
-    if (targetId == null) {
+    const targetKey = preferKey ?? selectedKeyRef.current ?? next[0]?.key ?? null
+    setSelectedKey(targetKey)
+    if (targetKey == null) {
       setSelected(null)
       return null
     }
-    const detail = await getKnowledgeBase(targetId)
+    const detail = await loadDetail(targetKey)
     setSelected(detail)
+    setItems((current) =>
+      current.map((item) => (item.key === detail.key
+        ? {
+            ...item,
+            status: detail.status,
+            status_message: detail.status_message,
+            document_count: detail.document_count,
+            index_percent: detail.index_percent,
+            source_label: detail.source_label,
+            webhook_status: detail.webhook_status,
+            webhook_label: detail.webhook_label,
+          }
+        : item)),
+    )
     return detail
-  }, [])
+  }, [loadDetail])
 
   const loadInitial = useCallback(async (forceRelogin = false) => {
     setLoading(true)
@@ -107,7 +269,6 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
       if (forceRelogin) resetDevSessionCache()
       let ok = await ensureDevSession()
       if (!ok) {
-        // One automatic retry after clearing cache (common after first DEV boot).
         resetDevSessionCache()
         ok = await ensureDevSession()
       }
@@ -130,27 +291,25 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
   }, [refreshList])
 
   useEffect(() => {
-    // Soft start: reuse existing session/CSRF; force only on explicit Retry.
     void loadInitial(false)
   }, [loadInitial])
 
-  // Poll while selected KB is indexing.
   useEffect(() => {
     if (!selected || selected.status !== 'indexing') return
     const timer = window.setInterval(() => {
       void (async () => {
         try {
-          const detail = await getKnowledgeBase(selected.id)
+          const detail = await loadDetail(selected.key)
           setSelected(detail)
           setItems((current) =>
             current.map((item) =>
-              item.id === detail.id
+              item.key === detail.key
                 ? {
                     ...item,
                     status: detail.status,
                     status_message: detail.status_message,
                     document_count: detail.document_count,
-                    chunk_count: detail.chunk_count,
+                    index_percent: detail.index_percent,
                   }
                 : item,
             ),
@@ -159,12 +318,12 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
             setNotice('Индексация завершена. Документы доступны для поиска.')
           }
         } catch {
-          /* keep polling until next success or status change */
+          /* keep polling */
         }
       })()
     }, 1500)
     return () => window.clearInterval(timer)
-  }, [selected])
+  }, [selected, loadDetail])
 
   const runKbAction = async (
     action: () => Promise<void>,
@@ -177,8 +336,7 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
       await action()
     } catch (requestError) {
       const message = formatKbError(requestError, fallback)
-      const raw =
-        requestError instanceof Error ? requestError.message : ''
+      const raw = requestError instanceof Error ? requestError.message : ''
       if (isAuthErrorMessage(message) || isAuthErrorMessage(raw)) {
         resetDevSessionCache()
         const ok = await ensureDevSession()
@@ -198,11 +356,11 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
     }
   }
 
-  const selectKb = async (id: number) => {
-    setSelectedId(id)
+  const selectKb = async (key: UnifiedKey) => {
+    setSelectedKey(key)
     setNotice('')
     await runKbAction(async () => {
-      setSelected(await getKnowledgeBase(id))
+      setSelected(await loadDetail(key))
     }, 'Не удалось открыть базу знаний')
   }
 
@@ -212,6 +370,18 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
     const nextName = name.trim()
     const nextDescription = description.trim()
     await runKbAction(async () => {
+      if (createTarget === 'assistant') {
+        const created = await createAssistantKb({
+          name: nextName,
+          description: nextDescription,
+        })
+        setName('')
+        setDescription('')
+        setShowCreate(false)
+        await refreshList(makeKey('assistant', created.id))
+        setNotice(`БЗ «${created.name}» создана для ассистента (появится в чате).`)
+        return
+      }
       const created = await createKnowledgeBase({
         name: nextName,
         description: nextDescription,
@@ -219,24 +389,33 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
       })
       setName('')
       setDescription('')
-      await refreshList(created.id)
-      setNotice(`БЗ «${created.name}» создана. Загрузите документы справа.`)
+      setShowCreate(false)
+      await refreshList(makeKey('cc', created.id))
+      setNotice(`БЗ «${created.name}» создана для КЦ (источник: Ручная загрузка).`)
     }, 'Не удалось создать базу знаний')
   }
 
   const uploadFiles = async (files: FileList | File[] | null | undefined) => {
-    if (!canEdit || !selected || busy) return
+    if (!canEdit || !selected || selected.readonly || busy) return
     const list = files ? [...files] : []
     if (!list.length) return
-    const kbId = selected.id
+    const current = selected
     await runKbAction(async () => {
-      let last = selected
-      for (const file of list) {
-        const result = await uploadKnowledgeDocument(kbId, file)
-        last = result.knowledge_base
+      if (current.kind === 'assistant') {
+        for (let index = 0; index < list.length; index += 1) {
+          await uploadAssistantKbDocument(current.id, list[index], { reindex: false })
+        }
+        const indexed = await reindexAssistantKb(current.id)
+        setSelected(fromAssistantKb(indexed))
+      } else {
+        let last = current
+        for (const file of list) {
+          const result = await uploadKnowledgeDocument(current.id, file)
+          last = fromCcKb(result.knowledge_base)
+        }
+        setSelected(last)
       }
-      setSelected(last)
-      await refreshList(kbId)
+      await refreshList(current.key)
       setNotice(
         list.length === 1
           ? `Файл «${list[0].name}» загружен. Индексация выполняется автоматически.`
@@ -247,32 +426,43 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
   }
 
   const onReindex = async () => {
-    if (!canEdit || !selected || busy) return
-    const kbId = selected.id
+    if (!canEdit || !selected || selected.readonly || busy) return
+    const current = selected
     await runKbAction(async () => {
-      const updated = await reindexKnowledgeBase(kbId)
-      setSelected(updated)
-      await refreshList(kbId)
+      if (current.kind === 'assistant') {
+        setSelected(fromAssistantKb(await reindexAssistantKb(current.id)))
+      } else {
+        setSelected(fromCcKb(await reindexKnowledgeBase(current.id)))
+      }
+      await refreshList(current.key)
       setNotice('Переиндексация запущена. Дождитесь статуса «Индекс актуален».')
     }, 'Не удалось выполнить переиндексацию')
   }
 
   const onDeleteKb = async () => {
-    if (!canEdit || !selected || busy) return
+    if (!canEdit || !selected || selected.readonly || busy) return
+    const current = selected
     await runKbAction(async () => {
-      await deleteKnowledgeBase(selected.id)
+      if (current.kind === 'assistant') {
+        await deleteAssistantKb(current.id)
+      } else {
+        await deleteKnowledgeBase(current.id)
+      }
       await refreshList()
       setNotice('База знаний удалена.')
     }, 'Не удалось удалить базу знаний')
   }
 
   const onDeleteDocument = async (documentId: number) => {
-    if (!canEdit || !selected || busy) return
-    const kbId = selected.id
+    if (!canEdit || !selected || selected.readonly || busy) return
+    const current = selected
     await runKbAction(async () => {
-      const updated = await deleteKnowledgeDocument(kbId, documentId)
-      setSelected(updated)
-      await refreshList(kbId)
+      if (current.kind === 'assistant') {
+        setSelected(fromAssistantKb(await deleteAssistantKbDocument(current.id, documentId)))
+      } else {
+        setSelected(fromCcKb(await deleteKnowledgeDocument(current.id, documentId)))
+      }
+      await refreshList(current.key)
     }, 'Не удалось удалить документ')
   }
 
@@ -283,40 +473,16 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
   }
 
   if (loading) {
-    return <Card className="kb-admin-loading">Загрузка баз знаний КЦ…</Card>
+    return <Card className="kb-admin-loading">Загрузка баз знаний…</Card>
   }
+
+  const webhookStatus = selected?.webhook_status ?? 'IDLE'
+  const webhookLabel = selected?.webhook_label ?? '—'
+  const indexPercent = selected?.index_percent ?? 0
+  const isSuz = Boolean(selected?.readonly || selected?.source === 'suz_bitrix')
 
   return (
     <div className="kb-admin" data-testid="kb-admin-screen">
-      <section className="admin-stats" aria-label="Сводка баз знаний КЦ">
-        <Card>
-          <span>Базы знаний</span>
-          <strong>{items.length}</strong>
-          <small>Создано в Hub</small>
-        </Card>
-        <Card>
-          <span>Документы</span>
-          <strong>{selected?.document_count ?? 0}</strong>
-          <small>В выбранной БЗ</small>
-        </Card>
-        <Card>
-          <span>Чанки индекса</span>
-          <strong>{selected?.chunk_count ?? 0}</strong>
-          <small>cc_production</small>
-        </Card>
-      </section>
-
-      <ol className="kb-admin__flow" aria-label="Сценарий работы с БЗ">
-        <li className={items.length ? 'is-done' : 'is-current'}>1. Создать БЗ</li>
-        <li className={selected ? 'is-done' : items.length ? 'is-current' : ''}>2. Выбрать в списке</li>
-        <li className={selected && (selected.document_count ?? 0) > 0 ? 'is-done' : selected ? 'is-current' : ''}>
-          3. Загрузить файлы
-        </li>
-        <li className={selected?.status === 'ready' ? 'is-done' : selected?.status === 'indexing' ? 'is-current' : ''}>
-          4. Дождаться индексации
-        </li>
-      </ol>
-
       {error && (
         <Card className="kb-admin__error" role="alert" data-testid="kb-admin-error">
           <div className="kb-admin__error-main">
@@ -347,8 +513,8 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
         <Card className="kb-admin__list">
           <header>
             <div>
-              <h2>Базы знаний КЦ</h2>
-              <p>Создание и редактирование статей БЗ</p>
+              <h2>Базы знаний</h2>
+              <p>Ассистент, КЦ и СУЗ Битрикс — один список</p>
             </div>
             <Button
               type="button"
@@ -357,49 +523,89 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
               onClick={() => void loadInitial(true)}
               data-testid="kb-refresh-list"
             >
-              Обновить список
+              Обновить
             </Button>
           </header>
-          <form className="kb-admin__create" onSubmit={(event) => void createKb(event)}>
-            <label>
-              <span>Название</span>
-              <input
-                value={name}
-                disabled={!canEdit || busy}
-                placeholder="Например: Регламенты КЦ"
-                onChange={(event) => setName(event.target.value)}
-                data-testid="kb-create-name"
-              />
-            </label>
-            <label>
-              <span>Описание</span>
-              <input
-                value={description}
-                disabled={!canEdit || busy}
-                placeholder="Краткое описание"
-                onChange={(event) => setDescription(event.target.value)}
-              />
-            </label>
+
+          <div className="kb-admin__create-bar">
             <Button
-              type="submit"
-              disabled={!canEdit || busy || !name.trim()}
-              data-testid="kb-create-submit"
+              type="button"
+              disabled={!canEdit || busy}
+              onClick={() => setShowCreate((value) => !value)}
+              data-testid="kb-create-toggle"
             >
               + Создать БЗ
             </Button>
-          </form>
+          </div>
+
+          {showCreate && (
+            <form className="kb-admin__create" onSubmit={(event) => void createKb(event)}>
+              <label>
+                <span>Название</span>
+                <input
+                  value={name}
+                  disabled={!canEdit || busy}
+                  placeholder="Например: HR policies"
+                  onChange={(event) => setName(event.target.value)}
+                  data-testid="kb-create-name"
+                />
+              </label>
+              <label>
+                <span>Описание</span>
+                <input
+                  value={description}
+                  disabled={!canEdit || busy}
+                  placeholder="Краткое описание"
+                  onChange={(event) => setDescription(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Куда создать</span>
+                <select
+                  value={createTarget}
+                  disabled={!canEdit || busy}
+                  onChange={(event) => setCreateTarget(event.target.value as CreateTarget)}
+                  data-testid="kb-create-target"
+                >
+                  <option value="assistant">Ассистент (чат · выпадающий список)</option>
+                  <option value="cc">КЦ / суфлёр</option>
+                </select>
+              </label>
+              <p className="kb-admin__create-hint">
+                Источник: <strong>Ручная загрузка</strong>
+                {' · '}
+                {createTarget === 'assistant' ? 'видна в чате ассистента' : 'индекс КЦ'}
+              </p>
+              <Button
+                type="submit"
+                disabled={!canEdit || busy || !name.trim()}
+                data-testid="kb-create-submit"
+              >
+                Создать
+              </Button>
+            </form>
+          )}
+
           <ul className="kb-admin__kb-list" data-testid="kb-list">
             {items.map((item) => (
-              <li key={item.id}>
+              <li key={item.key}>
                 <button
                   type="button"
-                  className={item.id === selectedId ? 'is-active' : undefined}
-                  onClick={() => void selectKb(item.id)}
-                  data-testid={`kb-item-${item.id}`}
+                  className={item.key === selectedKey ? 'is-active' : undefined}
+                  onClick={() => void selectKb(item.key)}
+                  data-testid={`kb-item-${item.key}`}
                 >
-                  <strong>{item.name}</strong>
-                  <StatusBadge status={statusBadge(item.status)}>
-                    {statusLabel(item.status)}
+                  <span className="kb-admin__kb-meta">
+                    <strong>{item.name}</strong>
+                    <span className="kb-admin__kb-tags">
+                      <StatusBadge status="neutral">{item.module_label}</StatusBadge>
+                      <StatusBadge status={sourceBadge(item.source)}>
+                        {item.source_label}
+                      </StatusBadge>
+                    </span>
+                  </span>
+                  <StatusBadge status={statusBadge(String(item.status))}>
+                    {`${item.index_percent}%`}
                   </StatusBadge>
                 </button>
               </li>
@@ -407,7 +613,6 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
             {!items.length && (
               <li className="kb-admin__empty">
                 <p>Список пуст или не загрузился с сервера.</p>
-                <p>Если документы уже залиты скриптом — нажмите «Обновить список».</p>
                 <Button
                   type="button"
                   variant="secondary"
@@ -427,69 +632,115 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
               <header>
                 <div>
                   <h2>{selected.name}</h2>
-                  <p>{selected.description || 'Документы для индекса суфлёра КЦ.'}</p>
+                  <p>
+                    {selected.description
+                      || (isSuz
+                        ? 'Статьи из интеграции СУЗ Битрикс (webhook).'
+                        : selected.kind === 'assistant'
+                          ? 'Документы для ИИ-чата ассистента.'
+                          : 'Документы для индекса суфлёра КЦ.')}
+                  </p>
                 </div>
-                <StatusBadge status={statusBadge(selected.status)}>
-                  {statusLabel(selected.status)}
-                </StatusBadge>
+                <span className="kb-admin__kb-tags">
+                  <StatusBadge status="neutral">{selected.module_label}</StatusBadge>
+                  <StatusBadge status={sourceBadge(selected.source)}>
+                    {selected.source_label}
+                  </StatusBadge>
+                </span>
               </header>
 
-              <div
-                className={`kb-admin__dropzone${dragOver ? ' is-dragover' : ''}`}
-                data-testid="kb-upload-zone"
-                onDragEnter={(event) => {
-                  event.preventDefault()
-                  setDragOver(true)
-                }}
-                onDragOver={(event) => {
-                  event.preventDefault()
-                  setDragOver(true)
-                }}
-                onDragLeave={(event) => {
-                  event.preventDefault()
-                  setDragOver(false)
-                }}
-                onDrop={onDrop}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.doc,.docx,.txt,.rtf,.xlsx,.pptx,.png,.jpg,.jpeg"
-                  multiple
-                  hidden
-                  disabled={!canEdit || busy}
-                  onChange={(event) => void uploadFiles(event.target.files)}
-                  data-testid="kb-upload-input"
-                />
-                <strong>Ручная загрузка документов</strong>
-                <p>Перетащите PDF/DOCX сюда или выберите файлы. Индексация запустится автоматически.</p>
-                <div className="kb-admin__actions">
-                  <div>
+              <section className="kb-admin__detail-stats admin-stats" aria-label="Статус выбранной БЗ">
+                <Card>
+                  <span>Индекс</span>
+                  <strong data-testid="kb-stat-index">{indexPercent}%</strong>
+                  <small>{statusLabel(String(selected.status))}</small>
+                </Card>
+                <Card>
+                  <span>Документов</span>
+                  <strong data-testid="kb-stat-docs">{selected.document_count}</strong>
+                  <small>В выбранной БЗ</small>
+                </Card>
+                <Card>
+                  <span>Webhook СУЗ</span>
+                  <strong data-testid="kb-stat-webhook">
+                    <StatusBadge status={webhookBadge(String(webhookStatus))}>
+                      {webhookLabel}
+                    </StatusBadge>
+                  </strong>
+                  <small>{isSuz ? 'Интеграция Битрикс' : 'для СУЗ-БЗ'}</small>
+                </Card>
+              </section>
+
+              {isSuz ? (
+                <div className="kb-admin__suz-note" data-testid="kb-suz-readonly">
+                  <strong>Источник: СУЗ Битрикс</strong>
+                  <p>
+                    Документы поступают через webhook. Ручная загрузка недоступна.
+                    БЗ ассистента (те, что в выпадашке чата) — в этом же списке слева с меткой «Ассистент».
+                  </p>
+                </div>
+              ) : (
+                <div
+                  className={`kb-admin__dropzone${dragOver ? ' is-dragover' : ''}`}
+                  data-testid="kb-upload-zone"
+                  onDragEnter={(event) => {
+                    event.preventDefault()
+                    setDragOver(true)
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault()
+                    setDragOver(true)
+                  }}
+                  onDragLeave={(event) => {
+                    event.preventDefault()
+                    setDragOver(false)
+                  }}
+                  onDrop={onDrop}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.doc,.docx,.txt,.rtf,.xlsx,.pptx,.png,.jpg,.jpeg"
+                    multiple
+                    hidden
+                    disabled={!canEdit || busy}
+                    onChange={(event) => void uploadFiles(event.target.files)}
+                    data-testid="kb-upload-input"
+                  />
+                  <strong>Ручная загрузка документов</strong>
+                  <p>
+                    {selected.kind === 'assistant'
+                      ? 'Файлы попадут в чат ассистента (выпадающий список БЗ).'
+                      : 'Файлы попадут в индекс КЦ / суфлёра.'}
+                  </p>
+                  <div className="kb-admin__actions">
+                    <div>
+                      <Button
+                        disabled={!canEdit || busy}
+                        onClick={() => fileInputRef.current?.click()}
+                        data-testid="kb-upload-button"
+                      >
+                        Загрузить файлы
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        disabled={!canEdit || busy || !(selected.documents ?? []).length}
+                        onClick={() => void onReindex()}
+                        data-testid="kb-reindex-button"
+                      >
+                        Переиндексировать
+                      </Button>
+                    </div>
                     <Button
+                      variant="ghost"
                       disabled={!canEdit || busy}
-                      onClick={() => fileInputRef.current?.click()}
-                      data-testid="kb-upload-button"
+                      onClick={() => void onDeleteKb()}
                     >
-                      Загрузить файлы
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      disabled={!canEdit || busy || !(selected.documents ?? []).length}
-                      onClick={() => void onReindex()}
-                      data-testid="kb-reindex-button"
-                    >
-                      Переиндексировать
+                      Удалить БЗ
                     </Button>
                   </div>
-                  <Button
-                    variant="ghost"
-                    disabled={!canEdit || busy}
-                    onClick={() => void onDeleteKb()}
-                  >
-                    Удалить БЗ
-                  </Button>
                 </div>
-              </div>
+              )}
 
               {selected.status === 'indexing' && (
                 <p className="kb-admin__status-msg kb-admin__status-msg--indexing" data-testid="kb-indexing">
@@ -505,9 +756,9 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
                   <thead>
                     <tr>
                       <th scope="col">Документ</th>
-                      <th scope="col">Статус</th>
-                      <th scope="col">Чанки</th>
-                      <th scope="col">Действия</th>
+                      <th scope="col">Источник</th>
+                      <th scope="col">%</th>
+                      {!isSuz && <th scope="col">Действия</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -515,37 +766,33 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
                       <tr key={document.id}>
                         <td>
                           <strong>{document.filename}</strong>
-                          <small>{Math.round(document.size_bytes / 1024)} КБ</small>
+                          {document.size_bytes > 0 && (
+                            <small>{Math.round(document.size_bytes / 1024)} КБ</small>
+                          )}
                         </td>
                         <td>
-                          <StatusBadge
-                            status={
-                              document.status === 'indexed'
-                                ? 'success'
-                                : document.status === 'error'
-                                  ? 'danger'
-                                  : 'warning'
-                            }
-                          >
-                            {documentStatusLabel(document.status)}
-                          </StatusBadge>
+                          <StatusBadge status="neutral">{document.source_label}</StatusBadge>
                         </td>
-                        <td>{document.chunk_count}</td>
-                        <td>
-                          <Button
-                            variant="ghost"
-                            disabled={!canEdit || busy}
-                            onClick={() => void onDeleteDocument(document.id)}
-                          >
-                            Удалить
-                          </Button>
-                        </td>
+                        <td>{document.index_percent}</td>
+                        {!isSuz && (
+                          <td>
+                            <Button
+                              variant="ghost"
+                              disabled={!canEdit || busy || document.readonly}
+                              onClick={() => void onDeleteDocument(document.id)}
+                            >
+                              Удалить
+                            </Button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                     {!(selected.documents ?? []).length && (
                       <tr>
-                        <td colSpan={4} className="kb-admin__empty">
-                          Документов пока нет — загрузите PDF или DOCX в зону выше.
+                        <td colSpan={isSuz ? 3 : 4} className="kb-admin__empty">
+                          {isSuz
+                            ? 'Статей из СУЗ пока нет — ожидается webhook Битрикс.'
+                            : 'Документов пока нет — загрузите PDF или DOCX в зону выше.'}
                         </td>
                       </tr>
                     )}
@@ -556,13 +803,7 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
           ) : (
             <div className="kb-admin__empty-detail">
               <h2>Выберите или создайте базу знаний</h2>
-              <p>Управление документами КЦ</p>
-              <ol>
-                <li>Создайте БЗ в форме слева</li>
-                <li>Выберите её в списке</li>
-                <li>Загрузите файлы (pdf/docx)</li>
-                <li>Дождитесь статуса «Индекс актуален»</li>
-              </ol>
+              <p>Ассистент (чат), КЦ и СУЗ Битрикс — в одном списке.</p>
             </div>
           )}
         </Card>

@@ -11,6 +11,7 @@ from xml.etree import ElementTree as ET
 from zipfile import BadZipFile
 
 from django.db import transaction
+from django.db.models import Count, Max
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -22,9 +23,15 @@ from ingest.pipeline import (
     chunk_text,
     normalize_text,
 )
-from ingest.models import CCProductionChunk
+from ingest.models import CCProductionChunk, KnowledgeIngestEvent, SuzReconcileState
 
 ARTICLE_ID_BASE = 2_000_000_000
+SUZ_KB_SLUG = "suz-bitrix"
+SUZ_KB_NAME = "СУЗ Битрикс"
+SOURCE_LABELS = {
+    ContactCenterKnowledgeBase.SOURCE_MANUAL: "Ручная загрузка",
+    ContactCenterKnowledgeBase.SOURCE_SUZ_BITRIX: "СУЗ Битрикс",
+}
 ALLOWED_EXTENSIONS = frozenset(
     {
         ".pdf",
@@ -60,7 +67,142 @@ def _unique_slug(name: str) -> str:
     return candidate
 
 
-def serialize_document(document: KnowledgeBaseDocument) -> dict[str, Any]:
+def _source_label(source: str) -> str:
+    return SOURCE_LABELS.get(source, source)
+
+
+def _document_index_percent(status: str) -> int:
+    if status == KnowledgeBaseDocument.STATUS_INDEXED:
+        return 100
+    if status == KnowledgeBaseDocument.STATUS_UPLOADED:
+        return 0
+    return 0
+
+
+def _index_percent_from_statuses(statuses: list[str]) -> int:
+    if not statuses:
+        return 0
+    total = sum(_document_index_percent(status) for status in statuses)
+    return round(total / len(statuses))
+
+
+def webhook_suz_status() -> dict[str, str]:
+    """Global Bitrix SUZ webhook / reconcile health for the unified KB UI."""
+    state = SuzReconcileState.objects.filter(pk=1).first()
+    if state and state.last_error:
+        return {"status": "ERROR", "label": "ERROR"}
+    last_event = KnowledgeIngestEvent.objects.order_by("-received_at").first()
+    if last_event is not None or (state and state.last_run_at):
+        return {"status": "OK", "label": "OK"}
+    return {"status": "IDLE", "label": "—"}
+
+
+def _suz_article_rows() -> list[dict[str, Any]]:
+    """Active Bitrix articles in cc_production (article_id below admin range)."""
+    rows = (
+        CCProductionChunk.objects.filter(
+            is_active=True,
+            article_id__lt=ARTICLE_ID_BASE,
+        )
+        .values("article_id")
+        .annotate(
+            chunk_count=Count("id"),
+            title=Max("title"),
+            permalink=Max("permalink"),
+            indexed_at=Max("indexed_at"),
+        )
+        .order_by("article_id")
+    )
+    documents: list[dict[str, Any]] = []
+    for row in rows:
+        title = (row["title"] or f"Статья {row['article_id']}").strip()
+        documents.append(
+            {
+                "id": int(row["article_id"]),
+                "filename": title,
+                "content_type": "suz/bitrix",
+                "size_bytes": 0,
+                "status": KnowledgeBaseDocument.STATUS_INDEXED,
+                "status_message": "",
+                "chunk_count": int(row["chunk_count"] or 0),
+                "index_percent": 100,
+                "source": ContactCenterKnowledgeBase.SOURCE_SUZ_BITRIX,
+                "source_label": _source_label(
+                    ContactCenterKnowledgeBase.SOURCE_SUZ_BITRIX
+                ),
+                "readonly": True,
+                "uploaded_at": (
+                    row["indexed_at"].isoformat() if row["indexed_at"] else ""
+                ),
+                "indexed_at": (
+                    row["indexed_at"].isoformat() if row["indexed_at"] else None
+                ),
+                "uploaded_by": "suz_bitrix",
+                "permalink": row["permalink"] or "",
+            }
+        )
+    return documents
+
+
+def sync_suz_knowledge_base(
+    kb: ContactCenterKnowledgeBase | None = None,
+) -> ContactCenterKnowledgeBase:
+    """Ensure the system SUZ KB exists and mirrors cc_production article stats."""
+    if kb is None:
+        kb, _ = ContactCenterKnowledgeBase.objects.get_or_create(
+            slug=SUZ_KB_SLUG,
+            defaults={
+                "name": SUZ_KB_NAME,
+                "scope": "contact_center",
+                "description": (
+                    "Статьи из интеграции СУЗ Битрикс (webhook / reconcile)"
+                ),
+                "source": ContactCenterKnowledgeBase.SOURCE_SUZ_BITRIX,
+                "status": ContactCenterKnowledgeBase.STATUS_READY,
+                "status_message": "Индекс синхронизируется через webhook СУЗ",
+                "created_by": "system",
+            },
+        )
+    if kb.source != ContactCenterKnowledgeBase.SOURCE_SUZ_BITRIX:
+        kb.source = ContactCenterKnowledgeBase.SOURCE_SUZ_BITRIX
+    docs = _suz_article_rows()
+    chunk_count = sum(item["chunk_count"] for item in docs)
+    kb.name = SUZ_KB_NAME
+    kb.document_count = len(docs)
+    kb.chunk_count = chunk_count
+    if docs:
+        kb.status = ContactCenterKnowledgeBase.STATUS_READY
+        kb.status_message = "Индекс актуален (СУЗ Битрикс)"
+    else:
+        kb.status = ContactCenterKnowledgeBase.STATUS_IDLE
+        kb.status_message = "Ожидание статей из webhook СУЗ"
+    webhook = webhook_suz_status()
+    if webhook["status"] == "ERROR":
+        kb.status = ContactCenterKnowledgeBase.STATUS_ERROR
+        kb.status_message = "Ошибка webhook / reconcile СУЗ"
+    kb.save(
+        update_fields=(
+            "name",
+            "source",
+            "document_count",
+            "chunk_count",
+            "status",
+            "status_message",
+            "updated_at",
+        )
+    )
+    return kb
+
+
+def ensure_suz_knowledge_base() -> ContactCenterKnowledgeBase:
+    return sync_suz_knowledge_base()
+
+
+def serialize_document(
+    document: KnowledgeBaseDocument,
+    *,
+    source: str = ContactCenterKnowledgeBase.SOURCE_MANUAL,
+) -> dict[str, Any]:
     return {
         "id": document.pk,
         "filename": document.filename,
@@ -69,6 +211,10 @@ def serialize_document(document: KnowledgeBaseDocument) -> dict[str, Any]:
         "status": document.status,
         "status_message": document.status_message,
         "chunk_count": document.chunk_count,
+        "index_percent": _document_index_percent(document.status),
+        "source": source,
+        "source_label": _source_label(source),
+        "readonly": source == ContactCenterKnowledgeBase.SOURCE_SUZ_BITRIX,
         "uploaded_at": document.uploaded_at.isoformat(),
         "indexed_at": (
             document.indexed_at.isoformat() if document.indexed_at else None
@@ -82,16 +228,60 @@ def serialize_knowledge_base(
     *,
     include_documents: bool = False,
 ) -> dict[str, Any]:
+    source = kb.source or ContactCenterKnowledgeBase.SOURCE_MANUAL
+    is_suz = source == ContactCenterKnowledgeBase.SOURCE_SUZ_BITRIX
+    documents: list[dict[str, Any]]
+    if include_documents:
+        if is_suz:
+            documents = _suz_article_rows()
+        else:
+            documents = [
+                serialize_document(document, source=source)
+                for document in kb.documents.all()
+            ]
+    else:
+        documents = []
+
+    if is_suz and not include_documents:
+        index_percent = 100 if kb.document_count else 0
+        if kb.status == ContactCenterKnowledgeBase.STATUS_ERROR:
+            index_percent = 0
+    elif include_documents:
+        index_percent = _index_percent_from_statuses(
+            [doc["status"] for doc in documents]
+        )
+    else:
+        indexed = kb.documents.filter(
+            status=KnowledgeBaseDocument.STATUS_INDEXED
+        ).count()
+        total = kb.document_count or kb.documents.count()
+        index_percent = round(100 * indexed / total) if total else 0
+        if kb.status == ContactCenterKnowledgeBase.STATUS_INDEXING and total:
+            index_percent = min(index_percent, 99) if index_percent else 0
+
+    webhook = webhook_suz_status()
     payload: dict[str, Any] = {
         "id": kb.pk,
         "name": kb.name,
         "slug": kb.slug,
         "scope": kb.scope,
         "description": kb.description,
+        "source": source,
+        "source_label": _source_label(source),
         "status": kb.status,
         "status_message": kb.status_message,
-        "document_count": kb.document_count,
-        "chunk_count": kb.chunk_count,
+        "document_count": (
+            len(documents) if include_documents and is_suz else kb.document_count
+        ),
+        "chunk_count": (
+            sum(doc["chunk_count"] for doc in documents)
+            if include_documents and is_suz
+            else kb.chunk_count
+        ),
+        "index_percent": index_percent,
+        "webhook_status": webhook["status"],
+        "webhook_label": webhook["label"],
+        "readonly": is_suz,
         "last_reindexed_at": (
             kb.last_reindexed_at.isoformat() if kb.last_reindexed_at else None
         ),
@@ -100,14 +290,12 @@ def serialize_knowledge_base(
         "created_by": kb.created_by,
     }
     if include_documents:
-        payload["documents"] = [
-            serialize_document(document)
-            for document in kb.documents.all()
-        ]
+        payload["documents"] = documents
     return payload
 
 
 def list_knowledge_bases() -> list[dict[str, Any]]:
+    ensure_suz_knowledge_base()
     return [
         serialize_knowledge_base(kb)
         for kb in ContactCenterKnowledgeBase.objects.all()
@@ -118,6 +306,10 @@ def get_knowledge_base(kb_id: int) -> dict[str, Any]:
     kb = ContactCenterKnowledgeBase.objects.prefetch_related("documents").get(
         pk=kb_id
     )
+    if kb.source == ContactCenterKnowledgeBase.SOURCE_SUZ_BITRIX or (
+        kb.slug == SUZ_KB_SLUG
+    ):
+        kb = sync_suz_knowledge_base(kb)
     return serialize_knowledge_base(kb, include_documents=True)
 
 
@@ -132,6 +324,10 @@ def create_knowledge_base(
     cleaned_name = name.strip()
     if not cleaned_name:
         raise KnowledgeBaseError("name must be a non-empty string")
+    if cleaned_name.lower() == SUZ_KB_NAME.lower():
+        raise KnowledgeBaseError(
+            "name «СУЗ Битрикс» зарезервировано для интеграции"
+        )
     if ContactCenterKnowledgeBase.objects.filter(name__iexact=cleaned_name).exists():
         raise KnowledgeBaseError("knowledge base with this name already exists")
     kb = ContactCenterKnowledgeBase.objects.create(
@@ -139,15 +335,28 @@ def create_knowledge_base(
         slug=_unique_slug(cleaned_name),
         scope=(scope or "contact_center").strip() or "contact_center",
         description=description.strip(),
+        source=ContactCenterKnowledgeBase.SOURCE_MANUAL,
         status=ContactCenterKnowledgeBase.STATUS_IDLE,
         created_by=username,
     )
     return serialize_knowledge_base(kb, include_documents=True)
 
 
+def _require_manual_kb(kb: ContactCenterKnowledgeBase) -> None:
+    if (
+        kb.source == ContactCenterKnowledgeBase.SOURCE_SUZ_BITRIX
+        or kb.slug == SUZ_KB_SLUG
+    ):
+        raise KnowledgeBaseError(
+            "База СУЗ Битрикс управляется через webhook; "
+            "ручная загрузка и удаление недоступны"
+        )
+
+
 @transaction.atomic
 def delete_knowledge_base(kb_id: int) -> None:
     kb = ContactCenterKnowledgeBase.objects.get(pk=kb_id)
+    _require_manual_kb(kb)
     article_ids = list(kb.documents.values_list("article_id", flat=True))
     if article_ids:
         CCProductionChunk.objects.filter(article_id__in=article_ids).delete()
@@ -248,6 +457,7 @@ def upload_document(
     reindex: bool = True,
 ) -> dict[str, Any]:
     kb = ContactCenterKnowledgeBase.objects.select_for_update().get(pk=kb_id)
+    _require_manual_kb(kb)
     cleaned_name = Path(filename).name.strip()
     if not cleaned_name:
         raise KnowledgeBaseError("filename is required")
@@ -296,6 +506,7 @@ def upload_document(
 @transaction.atomic
 def delete_document(kb_id: int, document_id: int) -> dict[str, Any]:
     kb = ContactCenterKnowledgeBase.objects.select_for_update().get(pk=kb_id)
+    _require_manual_kb(kb)
     document = kb.documents.get(pk=document_id)
     CCProductionChunk.objects.filter(article_id=document.article_id).delete()
     document.delete()
@@ -316,6 +527,7 @@ def delete_document(kb_id: int, document_id: int) -> dict[str, Any]:
 @transaction.atomic
 def reindex_knowledge_base(kb_id: int) -> dict[str, Any]:
     kb = ContactCenterKnowledgeBase.objects.select_for_update().get(pk=kb_id)
+    _require_manual_kb(kb)
     kb.status = ContactCenterKnowledgeBase.STATUS_INDEXING
     kb.status_message = "Индексация выполняется"
     kb.save(update_fields=("status", "status_message", "updated_at"))

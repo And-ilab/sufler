@@ -71,7 +71,8 @@
   overflow: auto;
 }
 
-.asst-admin-library button {
+/* Only list rows — do not strip styles from .ui-button (Add / Delete). */
+.asst-admin-library ul button {
   width: 100%;
   display: grid;
   gap: 2px;
@@ -82,15 +83,22 @@
   background: transparent;
   color: var(--color-text);
   cursor: pointer;
+  font: inherit;
 }
 
-.asst-admin-library button small {
+.asst-admin-library ul button small {
   color: var(--color-text-muted);
 }
 
-.asst-admin-library button.is-active {
+.asst-admin-library ul button.is-active {
   border-color: var(--color-primary);
   background: var(--color-info-bg);
+}
+
+.asst-admin-library > .ui-button {
+  width: 100%;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .asst-admin-form {
@@ -188,14 +196,99 @@
   flex: 1;
 }
 
+.asst-admin-kb-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.asst-admin-kb-link p {
+  margin: 6px 0 0;
+  color: var(--color-text-muted);
+  font-size: .8125rem;
+}
+
 .asst-admin-kb-block {
   margin-top: var(--space-4);
+}
+
+.asst-admin-task-skills__section {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.asst-admin-task-skills__section h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.asst-admin-task-skills__layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--space-3);
+  min-height: 420px;
+  align-items: stretch;
+}
+
+.asst-admin-task-skills .asst-admin-library {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.asst-admin-task-skills .asst-admin-library ul {
+  flex: 1;
+  max-height: none;
+}
+
+.asst-admin-task-skills__row {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.asst-admin-task-skills__row > span:first-child {
+  font-size: .875rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.asst-admin-task-skills .asst-admin-editor header {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.asst-admin-task-skills__preview {
+  margin-top: var(--space-3);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.asst-admin-task-skills__preview > .ui-button {
+  justify-self: start;
+}
+
+.asst-admin-task-skills .asst-admin-form__row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.asst-admin-task-skills .asst-admin-library > .ui-button--secondary {
+  min-height: 36px;
 }
 
 @media (max-width: 1100px) {
   .asst-admin-prompts__layout,
   .asst-admin-caps__grid,
-  .asst-admin-form__row {
+  .asst-admin-form__row,
+  .asst-admin-task-skills__layout {
     grid-template-columns: 1fr;
   }
 }

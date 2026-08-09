@@ -43,6 +43,7 @@ export interface AssistantPrompt {
   name: string
   prompt_type: PromptType
   scope: string
+  event_trigger: string
   body: string
   status: PromptStatus
   version: number
@@ -51,6 +52,17 @@ export interface AssistantPrompt {
   created_at: string
   updated_at: string
 }
+
+/** Orchestration events for Task skills on Capabilities screen. */
+export const TASK_EVENT_TRIGGERS = [
+  'Начало сессии',
+  'Ответ в чате',
+  'Запрос уточнения (QU)',
+  'Контекст истории (auto/manual)',
+  'Перевод EN→RU',
+  'Перевод RU→EN',
+  'Начало диалога',
+] as const
 
 export interface AssistantCapability {
   id: number
@@ -227,6 +239,7 @@ export async function createAssistantPrompt(payload: {
   body: string
   prompt_type?: PromptType
   scope?: string
+  event_trigger?: string
   kb_slug?: string
 }): Promise<AssistantPrompt> {
   const response = await authedFetch('/api/admin/assistant/prompts/', {
@@ -245,6 +258,7 @@ export async function updateAssistantPrompt(
     body: string
     prompt_type: PromptType
     scope: string
+    event_trigger: string
     kb_slug: string
     status: PromptStatus
   }>,

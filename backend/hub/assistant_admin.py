@@ -75,8 +75,8 @@ DEFAULT_CAPABILITIES: tuple[dict[str, Any], ...] = (
     {
         "code": "rag_kb",
         "name": "Поиск по KB (RAG)",
-        "description": "Retrieval по индексам assistant_* (не cc_production).",
-        "deep_link": "capabilities",
+        "description": "Retrieval по БЗ: ручная загрузка и СУЗ Битрикс — единый раздел «Базы знаний».",
+        "deep_link": "kb_admin",
         "category": "rag",
         "sort_order": 10,
         "enabled": True,
@@ -84,7 +84,7 @@ DEFAULT_CAPABILITIES: tuple[dict[str, Any], ...] = (
     {
         "code": "external_sources",
         "name": "Внешние источники",
-        "description": "Secure adapters / whitelist источников (VII.5 D4).",
+        "description": "Адаптеры внешних систем (не CRUD БЗ). Базы знаний СУЗ — в «Базы знаний».",
         "deep_link": "data_sources",
         "category": "integration",
         "sort_order": 20,
@@ -151,6 +151,7 @@ DEFAULT_PROMPTS: tuple[dict[str, Any], ...] = (
         "name": "System · assistant_bank",
         "prompt_type": AssistantPromptTemplate.TYPE_SYSTEM,
         "scope": "bank",
+        "event_trigger": "",
         "body": (
             "Ты внутренний ИИ-ассистент банка. Отвечай только на основе "
             "индексов {{kb}} и контекста подразделения {{dept}}. "
@@ -160,24 +161,76 @@ DEFAULT_PROMPTS: tuple[dict[str, Any], ...] = (
         "kb_slug": "assistant_hr",
     },
     {
-        "name": "Task · оформление отпуска",
-        "prompt_type": AssistantPromptTemplate.TYPE_TASK,
-        "scope": "department",
-        "body": (
-            "Сформулируй пошаговый ответ по регламенту отпусков. "
-            "Укажи сроки и необходимые согласования."
-        ),
-        "status": AssistantPromptTemplate.STATUS_DRAFT,
-        "kb_slug": "assistant_hr",
-    },
-    {
         "name": "Scope · ИБ",
         "prompt_type": AssistantPromptTemplate.TYPE_SCOPE,
         "scope": "security",
+        "event_trigger": "",
         "body": "Не раскрывай внутренние политики ИБ вне AD-scope пользователя.",
         "status": AssistantPromptTemplate.STATUS_PUBLISHED,
         "kb_slug": "assistant_security",
     },
+)
+
+# Task skills for «Навыки и инструменты» (orchestration events).
+DEFAULT_TASK_SKILL_PROMPTS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "сессии пользователя",
+        "event_trigger": "Начало сессии",
+        "body": (
+            "Учитывай контекст текущей сессии {{session_id}} "
+            "и роль пользователя {{dept}}."
+        ),
+        "status": AssistantPromptTemplate.STATUS_PUBLISHED,
+    },
+    {
+        "name": "общение в диалоге",
+        "event_trigger": "Ответ в чате",
+        "body": (
+            "Отвечай профессионально и кратко. "
+            "Сохраняй тон банка без канцелярита."
+        ),
+        "status": AssistantPromptTemplate.STATUS_PUBLISHED,
+    },
+    {
+        "name": "уточняющий вопрос",
+        "event_trigger": "Запрос уточнения (QU)",
+        "body": (
+            "Сформулируй один короткий уточняющий вопрос, чтобы сузить тему. "
+            "Не задавай более двух уточнений подряд без попытки ответа."
+        ),
+        "status": AssistantPromptTemplate.STATUS_DRAFT,
+    },
+    {
+        "name": "контекст истории",
+        "event_trigger": "Контекст истории (auto/manual)",
+        "body": (
+            "Используй последние {{history_limit}} сообщений из истории "
+            "диалога, если они релевантны запросу."
+        ),
+        "status": AssistantPromptTemplate.STATUS_PUBLISHED,
+    },
+    {
+        "name": "перевод en→ru",
+        "event_trigger": "Перевод EN→RU",
+        "body": (
+            "Переведи текст на русский язык, сохраняя терминологию банка "
+            "и форматирование."
+        ),
+        "status": AssistantPromptTemplate.STATUS_PUBLISHED,
+    },
+    {
+        "name": "перевод ru→en",
+        "event_trigger": "Перевод RU→EN",
+        "body": (
+            "Translate the text to English, preserving banking terminology "
+            "and formatting."
+        ),
+        "status": AssistantPromptTemplate.STATUS_PUBLISHED,
+    },
+)
+
+TASK_EVENT_TRIGGERS: tuple[str, ...] = tuple(
+    item["event_trigger"] for item in DEFAULT_TASK_SKILL_PROMPTS
 )
 
 DEFAULT_KBS: tuple[dict[str, str], ...] = (
@@ -218,13 +271,42 @@ def ensure_assistant_seed(username: str = "system") -> None:
                 name=item["name"],
                 prompt_type=item["prompt_type"],
                 scope=item["scope"],
+                event_trigger=item.get("event_trigger", ""),
                 body=item["body"],
                 status=item["status"],
                 kb_slug=item["kb_slug"],
                 updated_by=username,
             )
+    for item in DEFAULT_TASK_SKILL_PROMPTS:
+        matches = list(
+            AssistantPromptTemplate.objects.filter(
+                name=item["name"],
+                prompt_type=AssistantPromptTemplate.TYPE_TASK,
+            ).order_by("id")
+        )
+        if matches:
+            prompt = matches[0]
+            # Collapse accidental duplicates from repeated seed runs.
+            if len(matches) > 1:
+                AssistantPromptTemplate.objects.filter(
+                    pk__in=[row.pk for row in matches[1:]]
+                ).delete()
+            if not prompt.event_trigger:
+                prompt.event_trigger = item["event_trigger"]
+                prompt.save(update_fields=("event_trigger", "updated_at"))
+        else:
+            AssistantPromptTemplate.objects.create(
+                name=item["name"],
+                prompt_type=AssistantPromptTemplate.TYPE_TASK,
+                scope="bank",
+                event_trigger=item["event_trigger"],
+                body=item["body"],
+                status=item["status"],
+                kb_slug="",
+                updated_by=username,
+            )
     for item in DEFAULT_CAPABILITIES:
-        AssistantCapability.objects.get_or_create(
+        capability, created = AssistantCapability.objects.get_or_create(
             code=item["code"],
             defaults={
                 "name": item["name"],
@@ -235,6 +317,17 @@ def ensure_assistant_seed(username: str = "system") -> None:
                 "enabled": item["enabled"],
             },
         )
+        if not created and (
+            capability.deep_link != item["deep_link"]
+            or capability.description != item["description"]
+            or capability.name != item["name"]
+        ):
+            capability.deep_link = item["deep_link"]
+            capability.description = item["description"]
+            capability.name = item["name"]
+            capability.save(
+                update_fields=("deep_link", "description", "name", "updated_at")
+            )
 
 
 def _slugify_assistant_name(raw: str) -> str:
@@ -351,6 +444,7 @@ def serialize_prompt(prompt: AssistantPromptTemplate) -> dict[str, Any]:
         "name": prompt.name,
         "prompt_type": prompt.prompt_type,
         "scope": prompt.scope,
+        "event_trigger": prompt.event_trigger,
         "body": prompt.body,
         "status": prompt.status,
         "version": prompt.version,
@@ -673,6 +767,7 @@ def create_prompt(
         name=name,
         prompt_type=prompt_type,
         scope=str(payload.get("scope") or "bank")[:64],
+        event_trigger=str(payload.get("event_trigger") or "")[:128],
         body=body,
         status=AssistantPromptTemplate.STATUS_DRAFT,
         kb_slug=kb_slug,
@@ -713,6 +808,8 @@ def update_prompt(
         prompt.prompt_type = prompt_type
     if "scope" in payload:
         prompt.scope = str(payload.get("scope") or "bank")[:64]
+    if "event_trigger" in payload:
+        prompt.event_trigger = str(payload.get("event_trigger") or "")[:128]
     if "kb_slug" in payload:
         kb_slug = str(payload.get("kb_slug") or "").strip()
         prompt.kb_slug = _normalize_assistant_slug(kb_slug) if kb_slug else ""

@@ -86,11 +86,22 @@ class KnowledgeBaseAdminApiTest(TestCase):
         kb = create_response.json()
         self.assertEqual(kb["name"], "Регламенты КЦ")
         self.assertEqual(kb["status"], "idle")
+        self.assertEqual(kb["source"], "manual")
+        self.assertEqual(kb["source_label"], "Ручная загрузка")
         kb_id = kb["id"]
 
         list_response = client.get("/api/admin/kb/")
         self.assertEqual(list_response.status_code, 200)
-        self.assertEqual(len(list_response.json()["items"]), 1)
+        items = list_response.json()["items"]
+        sources = {item["source"] for item in items}
+        self.assertIn("manual", sources)
+        self.assertIn("suz_bitrix", sources)
+        self.assertGreaterEqual(len(items), 2)
+        suz = next(item for item in items if item["source"] == "suz_bitrix")
+        self.assertEqual(suz["name"], "СУЗ Битрикс")
+        self.assertEqual(suz["source_label"], "СУЗ Битрикс")
+        self.assertTrue(suz["readonly"])
+        self.assertIn(suz["webhook_status"], ("OK", "ERROR", "IDLE"))
 
         upload_response = client.post(
             f"/api/admin/kb/{kb_id}/upload/",
@@ -165,3 +176,48 @@ class KnowledgeBaseAdminApiTest(TestCase):
         )
         response = client.get("/api/admin/kb/")
         self.assertEqual(response.status_code, 403)
+
+    def test_suz_kb_is_readonly_and_lists_bitrix_articles(self):
+        from ingest.models import CCProductionChunk
+
+        CCProductionChunk.objects.create(
+            article_id=42,
+            version_id=1,
+            chunk_index=0,
+            title="Положение об отпусках.pdf",
+            content="текст статьи СУЗ",
+            permalink="https://suz.example/articles/42",
+            locale="ru",
+            visibility_scope=["kc_operator"],
+            checksum="sha256:test",
+            embedding_model="stub",
+            embedding=[0.0] * 1024,
+            is_active=True,
+        )
+        client = Client()
+        client.force_login(
+            self.user_for_role("llm_knowledge_base_administrator")
+        )
+        items = client.get("/api/admin/kb/").json()["items"]
+        suz = next(item for item in items if item["source"] == "suz_bitrix")
+        detail = client.get(f"/api/admin/kb/{suz['id']}/").json()
+        self.assertEqual(detail["document_count"], 1)
+        self.assertEqual(detail["documents"][0]["filename"], "Положение об отпусках.pdf")
+        self.assertEqual(detail["documents"][0]["source"], "suz_bitrix")
+        self.assertEqual(detail["documents"][0]["index_percent"], 100)
+        self.assertTrue(detail["readonly"])
+
+        upload = client.post(
+            f"/api/admin/kb/{suz['id']}/upload/",
+            data={
+                "file": SimpleUploadedFile(
+                    "manual.txt",
+                    b"should fail",
+                    content_type="text/plain",
+                )
+            },
+        )
+        self.assertEqual(upload.status_code, 400)
+
+        delete = client.delete(f"/api/admin/kb/{suz['id']}/")
+        self.assertEqual(delete.status_code, 400)

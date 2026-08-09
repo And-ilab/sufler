@@ -19,13 +19,33 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 GROUNDED_SYSTEM_PROMPT = (
     "Ты внутренний ИИ-ассистент банка. Отвечай ТОЛЬКО фактами из "
-    "переданных фрагментов базы знаний. Внимательно читай каждый фрагмент: "
-    "числа, сроки и условия уже есть в тексте — перенеси их в ответ. "
+    "переданных фрагментов базы знаний. Внимательно читай каждый фрагмент "
+    "целиком: числа, сроки и условия уже есть в тексте — перенеси их "
+    "в ответ дословно (например «сроком на 5 лет», «3 месяца»). "
     "Не утверждай, что данных нет, если они явно указаны во фрагментах. "
+    "Не выводи сроки и даты из названий файлов или URL. "
+    "Если во фрагментах несколько разных сроков — ответь по документу, "
+    "который прямо отвечает на вопрос пользователя, и не смешивай "
+    "чужие условия. "
     "Если действительно нет нужных фактов — скажи об этом. "
     "Ответ краткий, по делу. В конце укажи названия источников."
 )
-DEFAULT_RAG_LIMIT = 5
+# Local llama often runs with -c 4096; five full .doc chunks overflow (~10k tokens).
+DEFAULT_RAG_LIMIT = 3
+# Per-chunk budget for the LLM (UI citations still use short snippet).
+LLM_CHUNK_CHARS = 2800
+# Soft cap for all RAG bodies combined (leaves room for system + question + answer).
+LLM_RAG_TOTAL_CHARS = 7200
+_DURATION_MARKERS = (
+    "сроком на",
+    "срок",
+    "бессрочн",
+    "месяц",
+    "календарн",
+    "дней",
+    " лет",
+    "года",
+)
 
 
 class AssistantChatError(ValueError):
@@ -205,17 +225,67 @@ def _citation(document: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _trim_text_for_llm(text: str, max_chars: int) -> str:
+    """Fit chunk into local context; keep a window around duration clauses."""
+    cleaned = text.strip()
+    if max_chars <= 0 or not cleaned:
+        return ""
+    if len(cleaned) <= max_chars:
+        return cleaned
+
+    lower = cleaned.lower()
+    marker_at = -1
+    for marker in _DURATION_MARKERS:
+        index = lower.find(marker)
+        if index >= 0 and (marker_at < 0 or index < marker_at):
+            marker_at = index
+
+    if marker_at >= 0:
+        # Keep ~1/3 before the marker so «Настоящее согласие дается сроком…» stays intact.
+        start = max(0, marker_at - max_chars // 3)
+        end = min(len(cleaned), start + max_chars)
+        if end - start < max_chars:
+            start = max(0, end - max_chars)
+        piece = cleaned[start:end]
+        prefix = "…" if start else ""
+        suffix = "…" if end < len(cleaned) else ""
+        return f"{prefix}{piece}{suffix}"
+
+    return cleaned[:max_chars] + "…"
+
+
+def _document_raw_text(document: Mapping[str, Any]) -> str:
+    content = document.get("content")
+    if isinstance(content, str) and content.strip():
+        return content
+    snippet = document.get("snippet")
+    return snippet if isinstance(snippet, str) else ""
+
+
+def _document_context_text(document: Mapping[str, Any], max_chars: int) -> str:
+    """Chunk text for the LLM, capped to fit local llama context."""
+    return _trim_text_for_llm(_document_raw_text(document), max_chars)
+
+
 def _inject_rag_context(
     messages: Sequence[Mapping[str, str]],
     documents: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, str]]:
     context_blocks = []
+    remaining = LLM_RAG_TOTAL_CHARS
     for document in documents:
+        if remaining <= 200:
+            break
+        per_doc = min(LLM_CHUNK_CHARS, remaining)
+        body = _document_context_text(document, per_doc)
+        if not body:
+            continue
+        remaining -= len(body)
         context_blocks.append(
             f"[{document['rank']}] {document['title']} "
             f"(БЗ: {document.get('kb_slug', '')})\n"
             f"URL: {document['permalink']}\n"
-            f"{document['snippet']}"
+            f"{body}"
         )
     context = "\n\n".join(context_blocks)
     query = _last_user_text(messages)
@@ -235,8 +305,9 @@ def _inject_rag_context(
                 "content": (
                     f"Вопрос пользователя:\n{query}\n\n"
                     f"Фрагменты базы знаний:\n{context}\n\n"
-                    "Сформулируй ответ по фрагментам. Используй конкретные "
-                    "числа и сроки из текста фрагментов."
+                    "Сформулируй ответ только по тексту фрагментов. "
+                    "Числа и сроки бери дословно из тела фрагмента, "
+                    "не из имени файла. Если срока в тексте нет — так и скажи."
                 ),
             }
             break

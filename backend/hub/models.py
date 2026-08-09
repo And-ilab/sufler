@@ -16,6 +16,15 @@ class ModelRegistrySettings(models.Model):
         (PROFILE_SUFLER_CC, "Sufler Contact Center"),
     )
 
+    PRESET_SHORT = "short"
+    PRESET_STANDARD = "standard"
+    PRESET_LONG = "long"
+    PRESET_CHOICES = (
+        (PRESET_SHORT, "Краткий"),
+        (PRESET_STANDARD, "Стандарт"),
+        (PRESET_LONG, "Развёрнутый"),
+    )
+
     profile = models.CharField(
         max_length=32,
         choices=PROFILE_CHOICES,
@@ -25,6 +34,11 @@ class ModelRegistrySettings(models.Model):
     top_p = models.FloatField()
     max_tokens = models.PositiveIntegerField()
     response_chars_max = models.PositiveIntegerField()
+    preset = models.CharField(
+        max_length=16,
+        choices=PRESET_CHOICES,
+        default=PRESET_STANDARD,
+    )
     chunk_size_tokens = models.PositiveIntegerField()
     chunk_overlap_tokens = models.PositiveIntegerField()
     context_inclusion_threshold = models.FloatField()
@@ -53,10 +67,17 @@ class ModelRegistrySettings(models.Model):
             errors["top_p"] = "Top P must be greater than 0 and at most 1."
         if not 1 <= self.max_tokens <= 32768:
             errors["max_tokens"] = "Max tokens must be between 1 and 32768."
-        if not 1 <= self.response_chars_max <= 500:
+        response_max = 500 if self.profile == self.PROFILE_SUFLER_CC else 4000
+        if not 1 <= self.response_chars_max <= response_max:
             errors["response_chars_max"] = (
-                "Response length must be between 1 and 500 characters."
+                f"Response length must be between 1 and {response_max} characters."
             )
+        if self.preset not in {
+            self.PRESET_SHORT,
+            self.PRESET_STANDARD,
+            self.PRESET_LONG,
+        }:
+            errors["preset"] = "Preset must be short, standard, or long."
         if self.chunk_size_tokens <= 0:
             errors["chunk_size_tokens"] = "Chunk size must be positive."
         if not 0 <= self.chunk_overlap_tokens < self.chunk_size_tokens:
@@ -107,10 +128,23 @@ class ContactCenterKnowledgeBase(models.Model):
         (STATUS_ERROR, "Error"),
     )
 
+    SOURCE_MANUAL = "manual"
+    SOURCE_SUZ_BITRIX = "suz_bitrix"
+    SOURCE_CHOICES = (
+        (SOURCE_MANUAL, "Ручная загрузка"),
+        (SOURCE_SUZ_BITRIX, "СУЗ Битрикс"),
+    )
+
     name = models.CharField(max_length=200, unique=True)
     slug = models.SlugField(max_length=200, unique=True)
     scope = models.CharField(max_length=64, default="contact_center")
     description = models.TextField(blank=True)
+    source = models.CharField(
+        max_length=32,
+        choices=SOURCE_CHOICES,
+        default=SOURCE_MANUAL,
+        db_index=True,
+    )
     status = models.CharField(
         max_length=16,
         choices=STATUS_CHOICES,
@@ -279,6 +313,8 @@ class AssistantPromptTemplate(models.Model):
         db_index=True,
     )
     scope = models.CharField(max_length=64, default="bank")
+    # Orchestration event for Task skills (capabilities screen), e.g. «Перевод RU→EN».
+    event_trigger = models.CharField(max_length=128, blank=True, default="")
     body = models.TextField()
     status = models.CharField(
         max_length=16,
