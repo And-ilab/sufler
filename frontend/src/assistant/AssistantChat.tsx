@@ -516,16 +516,23 @@ export function AssistantChat({
             ) : modelCatalog.length === 0 ? (
               <option value="">Нет моделей в Ollama</option>
             ) : (
-              modelCatalog.map((model) => (
-                <option
-                  key={model.id}
-                  value={model.id}
-                  disabled={model.available === false}
-                >
-                  {model.label}
-                  {model.description ? ` · ${model.description}` : ''}
-                </option>
-              ))
+              <>
+                {/* Keep controlled <select> valid if active id is briefly missing */}
+                {activeModelId &&
+                !modelCatalog.some((model) => model.id === activeModelId) ? (
+                  <option value={activeModelId}>{activeModelId}</option>
+                ) : null}
+                {modelCatalog.map((model) => (
+                  <option
+                    key={model.id}
+                    value={model.id}
+                    disabled={model.available === false}
+                  >
+                    {model.label}
+                    {model.description ? ` · ${model.description}` : ''}
+                  </option>
+                ))}
+              </>
             )}
           </select>
           {modelStatus === 'switching' ? (

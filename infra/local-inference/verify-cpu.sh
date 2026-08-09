@@ -24,6 +24,9 @@ compose() {
     args+=(-f "${EXTRA_COMPOSE_FILE}")
   elif [[ "${COMPOSE_FILE}" == "docker-compose.yml" && -f "${COMPOSE_DIR}/local-inference/docker-compose.cpu.yml" ]]; then
     args+=(-f local-inference/docker-compose.cpu.yml)
+    if [[ "${FRONTEND_MODE:-prod}" == "prod" && -f "${COMPOSE_DIR}/docker-compose.frontend-prod.yml" ]]; then
+      args+=(-f docker-compose.frontend-prod.yml)
+    fi
   fi
   COMPOSE_PROFILES=cpu-inference docker compose "${args[@]}" "$@"
 }

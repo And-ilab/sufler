@@ -632,10 +632,6 @@ function defaultExpandedSections(): Record<QueueSectionId, boolean> {
   );
 }
 
-function allQueueItems(): QueueItem[] {
-  return [...QUEUE_SECTIONS, COLLEAGUES_SECTION].flatMap((section) => section.items);
-}
-
 function allSectionsExpandedState(sections: QueueSectionDef[]): Record<QueueSectionId, boolean> {
   return sections.reduce(
     (acc, section) => {

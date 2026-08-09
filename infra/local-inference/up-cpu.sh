@@ -68,12 +68,22 @@ ACTIVE_MODEL="$(env_get OPENAI_MODEL)"
 ACTIVE_MODEL="${ACTIVE_MODEL:-${FALLBACK_MODEL}}"
 
 export COMPOSE_PROFILES=cpu-inference
+# Prod SPA (nginx) by default — Vite HMR on the server causes white screens (504 on react.js).
+# Local Vite: FRONTEND_MODE=vite ./local-inference/up-cpu.sh
+FRONTEND_MODE="${FRONTEND_MODE:-prod}"
+COMPOSE_FILES=(
+  -f docker-compose.yml
+  -f local-inference/docker-compose.cpu.yml
+)
+if [[ "${FRONTEND_MODE}" == "prod" ]]; then
+  COMPOSE_FILES+=(-f docker-compose.frontend-prod.yml)
+fi
+
 # --remove-orphans drops legacy sufler-llm-1 (old llama.cpp on :8080)
 docker compose \
   --env-file "${ENV_FILE}" \
-  -f docker-compose.yml \
-  -f local-inference/docker-compose.cpu.yml \
-  up -d --remove-orphans "$@"
+  "${COMPOSE_FILES[@]}" \
+  up -d --build --remove-orphans "$@"
 
 echo
 echo "Stack started. Pull / switch models with plain Ollama CLI:"

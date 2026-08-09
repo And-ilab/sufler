@@ -3,18 +3,24 @@
 Простой стек: **официальный контейнер Ollama** для LLM и отдельный сервис embedding.
 Без кастомного llama-manager и без скриптов переключения моделей.
 
-## Быстрый старт (dev compose)
+## Быстрый старт (сервер / CPU)
+
+`up-cpu.sh` по умолчанию поднимает **production frontend** (nginx + `vite build`), не Vite.
+Иначе в Network видны `main.tsx` / `@react-refresh` и 504 → белый экран.
 
 ```bash
 cd infra
 ./local-inference/up-cpu.sh
-# скачать модель (пример — лёгкая для CPU):
+# скачать модель:
 docker compose --profile cpu-inference \
   -f docker-compose.yml -f local-inference/docker-compose.cpu.yml \
+  -f docker-compose.frontend-prod.yml \
   exec ollama ollama pull qwen2.5:3b
 
 ./local-inference/verify-cpu.sh
 ```
+
+Локально с Vite HMR: `FRONTEND_MODE=vite ./local-inference/up-cpu.sh`
 
 В `infra/.env` скрипт пропишет:
 
@@ -57,10 +63,18 @@ docker compose restart backend
 
 С хоста (если порт проброшен): `ollama pull …` / `http://127.0.0.1:11434`.
 
-## Чтобы модель не выгружалась из RAM
+## Модель в RAM / белый экран после деплоя
 
-В compose для `ollama` задано `OLLAMA_KEEP_ALIVE=-1` (держать загруженной постоянно).
-После изменения пересоздайте контейнер:
+По умолчанию `OLLAMA_KEEP_ALIVE=30m` (не `-1`).  
+На слабом сервере `-1` + embedding + redeploy часто даёт **OOM** → белый экран UI, помогает только reboot.
+
+Если RAM достаточно и нужна модель всегда в памяти — в `.env`:
+
+```text
+OLLAMA_KEEP_ALIVE=-1
+```
+
+затем:
 
 ```bash
 docker compose --profile cpu-inference \
@@ -68,9 +82,7 @@ docker compose --profile cpu-inference \
   up -d --force-recreate ollama
 ```
 
-Первый запрос после рестарта всё равно загрузит модель в память; дальше она не уходит по таймауту.
-Чтобы заранее «прогреть»: `docker compose … exec ollama ollama run llama3.2:3b ""`  
-(или любой короткий `curl` на `/v1/chat/completions`).
+Deploy workflow **больше не** гоняет `download-models.sh` (старые GGUF).
 
 ## TEST prod-like
 

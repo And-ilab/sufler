@@ -17,9 +17,9 @@ services:
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     restart: unless-stopped
     environment:
-      # Keep the loaded model in RAM forever (-1). Default is ~5m unload.
-      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:--1}
-      # Optional: how many models may stay loaded at once
+      # Keep model loaded after last request. Use -1 only on hosts with spare RAM
+      # (llama3.2:3b ≈ 2–3GB). Default 30m avoids OOM white-screens after deploy.
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
       OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-1}
     volumes:
       - ollama_data:/root/.ollama

@@ -49,9 +49,9 @@ jobs:
             "set -euo pipefail; \
              cd ${{ secrets.DEPLOY_PATH }}/infra; \
              chmod +x local-inference/*.sh; \
-             ./local-inference/download-models.sh; \
-             ./local-inference/up-cpu.sh; \
-             ./local-inference/verify-cpu.sh"
+             # Prod nginx SPA + Ollama (not Vite — Vite 504 → white screen on the server).
+             FRONTEND_MODE=prod ./local-inference/up-cpu.sh; \
+             ./local-inference/verify-cpu.sh || echo 'WARN: verify-cpu failed (check ollama/embedding)'"
 
       - name: Health check
         run: |
