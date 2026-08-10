@@ -150,6 +150,34 @@
   font-size: .75rem;
 }
 
+.admin-topbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.admin-topbar__home {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  color: var(--color-primary);
+  font-size: .8125rem;
+  font-weight: 700;
+  text-decoration: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.admin-topbar__home:hover {
+  border-color: var(--color-primary);
+  background: var(--color-info-bg);
+}
+
 .admin-role-switcher {
   display: flex;
   align-items: center;

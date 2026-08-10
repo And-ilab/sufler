@@ -394,20 +394,30 @@ export function AiHubAdminApp({
             <strong>Центр настроек AI Hub</strong>
             <span>Управление конфигурацией платформы</span>
           </div>
-          {demoRoleSwitcher && (
-            <label className="admin-role-switcher">
-              <span>Демо роль</span>
-              <select
-                value={demoRole}
-                onChange={(event) => setDemoRole(event.target.value as DemoAdminRole)}
-              >
-                {Object.entries(DEMO_ROLE_LABELS).map(([value, label]) => (
-                  <option value={value} key={value}>{label}</option>
-                ))}
-              </select>
-            </label>
-          )}
-          {!demoRoleSwitcher && <StatusBadge status="success">RBAC активен</StatusBadge>}
+          <div className="admin-topbar__actions">
+            {demoRoleSwitcher && (
+              <label className="admin-role-switcher">
+                <span>Демо роль</span>
+                <select
+                  value={demoRole}
+                  onChange={(event) => setDemoRole(event.target.value as DemoAdminRole)}
+                >
+                  {Object.entries(DEMO_ROLE_LABELS).map(([value, label]) => (
+                    <option value={value} key={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {!demoRoleSwitcher && <StatusBadge status="success">RBAC активен</StatusBadge>}
+            <a
+              href="/ai-hub"
+              className="admin-topbar__home"
+              data-testid="admin-back-to-chat"
+              title="Вернуться в чат на портал"
+            >
+              ← В чат
+            </a>
+          </div>
         </header>
 
         <main className="admin-main" data-screen-id={screen}>

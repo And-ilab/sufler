@@ -19,6 +19,10 @@ import {
   selectLocalLlmModel,
   type LocalLlmModel,
 } from './api/localModels'
+import {
+  formatDialogDate,
+  type ChatDialogSummary,
+} from './chatPersistence'
 import { useAssistantChat } from './useAssistantChat'
 import './AssistantChat.css'
 
@@ -294,6 +298,119 @@ function ToolsPanel({
   )
 }
 
+function HistoryDrawer({
+  open,
+  dialogs,
+  activeId,
+  onClose,
+  onOpen,
+  onNew,
+  onDelete,
+}: {
+  open: boolean
+  dialogs: readonly ChatDialogSummary[]
+  activeId: string
+  onClose: () => void
+  onOpen: (id: string) => void
+  onNew: () => void
+  onDelete: (id: string) => void
+}) {
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose, open])
+
+  return (
+    <div
+      className={`asst-history${open ? ' is-open' : ''}`}
+      data-testid="asst-history-shell"
+      aria-hidden={!open}
+    >
+      <button
+        type="button"
+        className="asst-history__backdrop"
+        aria-label="Закрыть историю диалогов"
+        tabIndex={open ? 0 : -1}
+        onClick={onClose}
+      />
+      <aside
+        id="asst-history-drawer"
+        className="asst-history__drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="История диалогов"
+        data-testid="asst-history-drawer"
+      >
+        <header className="asst-history__header">
+          <div>
+            <strong>История диалогов</strong>
+            <span>Название — по первым словам вопроса</span>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+            aria-label="Закрыть историю"
+            data-testid="asst-history-close"
+          >
+            ×
+          </Button>
+        </header>
+        <div className="asst-history__toolbar">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onNew}
+            data-testid="asst-history-new"
+          >
+            + Новый диалог
+          </Button>
+        </div>
+        <ul className="asst-history__list" data-testid="asst-history-list">
+          {dialogs.length === 0 ? (
+            <li className="asst-history__empty">Пока нет сохранённых диалогов</li>
+          ) : (
+            dialogs.map((dialog) => {
+              const active = dialog.id === activeId
+              return (
+                <li key={dialog.id}>
+                  <button
+                    type="button"
+                    className={`asst-history__item${active ? ' is-active' : ''}`}
+                    onClick={() => onOpen(dialog.id)}
+                    data-testid={`asst-history-item-${dialog.id}`}
+                  >
+                    <strong>{dialog.title}</strong>
+                    <span>{formatDialogDate(dialog.updatedAt)}</span>
+                    <small>{dialog.preview}</small>
+                  </button>
+                  <button
+                    type="button"
+                    className="asst-history__delete"
+                    aria-label={`Удалить диалог «${dialog.title}»`}
+                    title="Удалить"
+                    data-testid={`asst-history-delete-${dialog.id}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onDelete(dialog.id)
+                    }}
+                  >
+                    ×
+                  </button>
+                </li>
+              )
+            })
+          )}
+        </ul>
+      </aside>
+    </div>
+  )
+}
+
 export interface AssistantChatProps {
   demoMode?: boolean
   compact?: boolean
@@ -314,6 +431,8 @@ export function AssistantChat({
 }: AssistantChatProps) {
   const [draft, setDraft] = useState(initialDraft)
   const [kbOpen, setKbOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const kbRootRef = useRef<HTMLDivElement>(null)
   const [kbCatalog, setKbCatalog] = useState<AssistantKbOption[]>(
     () => (knowledgeBasesProp ? [...knowledgeBasesProp] : []),
   )
@@ -336,6 +455,7 @@ export function AssistantChat({
 
   const {
     messages,
+    dialogs,
     tools,
     streaming,
     error,
@@ -346,6 +466,9 @@ export function AssistantChat({
     setFeedback,
     runTool,
     newDialog,
+    openDialog,
+    deleteDialog,
+    sessionId,
   } = useAssistantChat({
     demoMode,
     getKbSlugs: () => kbSlugsRef.current,
@@ -473,6 +596,18 @@ export function AssistantChat({
     setKbSelected(Object.fromEntries(kbCatalog.map((kb) => [kb.id, checked])))
   }
 
+  useEffect(() => {
+    if (!kbOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      const root = kbRootRef.current
+      if (root && !root.contains(event.target as Node)) {
+        setKbOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [kbOpen])
+
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
     if (readOnly || !draft.trim() || streaming) return
@@ -546,13 +681,16 @@ export function AssistantChat({
             {modelError}
           </span>
         ) : null}
-        <div className="asst-kb" data-testid="asst-kb">
+        <div className="asst-kb" data-testid="asst-kb" ref={kbRootRef}>
           <button
             type="button"
             className="asst-kb__trigger"
             aria-expanded={kbOpen}
             disabled={readOnly}
-            onClick={() => setKbOpen((value) => !value)}
+            onClick={() => {
+              setKbOpen((value) => !value)
+              setToolsOpen(false)
+            }}
             data-testid="asst-kb-trigger"
           >
             <span>{selectedLabel}</span>
@@ -605,16 +743,47 @@ export function AssistantChat({
         <Button
           type="button"
           variant="secondary"
-          onClick={newDialog}
+          onClick={() => {
+            newDialog()
+            setHistoryOpen(false)
+          }}
           disabled={readOnly}
           data-testid="asst-new"
         >
           + Новый
         </Button>
-        <Button type="button" variant="ghost" disabled={readOnly} data-testid="asst-history">
+        <Button
+          type="button"
+          variant={historyOpen ? 'secondary' : 'ghost'}
+          disabled={readOnly}
+          aria-expanded={historyOpen}
+          aria-controls="asst-history-drawer"
+          onClick={() => {
+            setHistoryOpen((value) => !value)
+            setKbOpen(false)
+            setToolsOpen(false)
+          }}
+          data-testid="asst-history"
+        >
           История диалогов
         </Button>
       </div>
+
+      <HistoryDrawer
+        open={historyOpen}
+        dialogs={dialogs}
+        activeId={sessionId}
+        onClose={() => setHistoryOpen(false)}
+        onOpen={(id) => {
+          openDialog(id)
+          setHistoryOpen(false)
+        }}
+        onNew={() => {
+          newDialog()
+          setHistoryOpen(false)
+        }}
+        onDelete={deleteDialog}
+      />
 
       <MessageLenta
         messages={messages}
@@ -654,7 +823,10 @@ export function AssistantChat({
             aria-expanded={toolsOpen}
             aria-controls="asst-tools-panel"
             disabled={readOnly}
-            onClick={() => setToolsOpen((value) => !value)}
+            onClick={() => {
+              setToolsOpen((value) => !value)
+              setKbOpen(false)
+            }}
             data-testid="asst-composer-tools"
           >
             Инструменты

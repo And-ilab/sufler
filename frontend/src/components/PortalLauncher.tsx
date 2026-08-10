@@ -1,5 +1,7 @@
 import {
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -85,7 +87,20 @@ function ModuleWindow({
   const [size, setSize] = useState(initialSize)
   const [maximized, setMaximized] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const windowMenuRef = useRef<HTMLDivElement>(null)
   const showKbAdmin = canOpenKbAdminDeepLink(roles)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      const root = windowMenuRef.current
+      if (root && !root.contains(event.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [menuOpen])
 
   const resizeBy = (widthDelta: number, heightDelta: number) => {
     if (maximized) return
@@ -153,15 +168,41 @@ function ModuleWindow({
         </div>
         <div className="portal-module-window__controls">
           {settingsEntry && (
-            <button
-              type="button"
-              aria-label="Открыть меню AI Hub"
-              aria-expanded={menuOpen}
-              data-testid="admin-center-gear"
-              onClick={() => setMenuOpen((value) => !value)}
-            >
-              ≡
-            </button>
+            <div className="portal-module-window__menu-anchor" ref={windowMenuRef}>
+              <button
+                type="button"
+                aria-label="Открыть меню AI Hub"
+                aria-expanded={menuOpen}
+                data-testid="admin-center-gear"
+                onClick={() => setMenuOpen((value) => !value)}
+              >
+                ≡
+              </button>
+              {menuOpen && (
+                <Card className="portal-module-window__menu" role="menu">
+                  <a
+                    role="menuitem"
+                    href={settingsEntry.href}
+                    data-testid="admin-center-link"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    {settingsEntry.label}
+                  </a>
+                  {showKbAdmin && (
+                    <a
+                      role="menuitem"
+                      href="/ai-hub/admin/kb_admin"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      БЗ · полное окно
+                    </a>
+                  )}
+                  <button type="button" role="menuitem" onClick={() => setMenuOpen(false)}>
+                    Закрыть меню
+                  </button>
+                </Card>
+              )}
+            </div>
           )}
           <a href={`/${module}`} aria-label={`Открыть ${MODULE_LABELS[module]} отдельно`}>
             ↗
@@ -182,30 +223,6 @@ function ModuleWindow({
             ×
           </button>
         </div>
-        {menuOpen && settingsEntry && (
-          <Card className="portal-module-window__menu" role="menu">
-            <a
-              role="menuitem"
-              href={settingsEntry.href}
-              data-testid="admin-center-link"
-              onClick={() => setMenuOpen(false)}
-            >
-              {settingsEntry.label}
-            </a>
-            {showKbAdmin && (
-              <a
-                role="menuitem"
-                href="/ai-hub/admin/kb_admin"
-                onClick={() => setMenuOpen(false)}
-              >
-                БЗ · полное окно
-              </a>
-            )}
-            <button type="button" role="menuitem" onClick={() => setMenuOpen(false)}>
-              Закрыть меню
-            </button>
-          </Card>
-        )}
       </header>
 
       {module === 'sufler' ? (

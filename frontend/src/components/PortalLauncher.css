@@ -427,8 +427,14 @@
   gap: var(--space-1);
 }
 
-.portal-module-window__controls button,
-.portal-module-window__controls a {
+.portal-module-window__menu-anchor {
+  position: relative;
+  display: inline-grid;
+}
+
+.portal-module-window__controls > button,
+.portal-module-window__controls > a,
+.portal-module-window__menu-anchor > button {
   display: inline-grid;
   width: 32px;
   height: 32px;
@@ -441,15 +447,16 @@
   cursor: pointer;
 }
 
-.portal-module-window__controls button:hover,
-.portal-module-window__controls a:hover {
+.portal-module-window__controls > button:hover,
+.portal-module-window__controls > a:hover,
+.portal-module-window__menu-anchor > button:hover {
   background: color-mix(in srgb, var(--color-white) 16%, transparent);
 }
 
 .portal-module-window__menu {
   position: absolute;
-  top: 52px;
-  right: var(--space-3);
+  top: calc(100% + 8px);
+  right: 0;
   z-index: 5;
   display: grid;
   min-width: 220px;
