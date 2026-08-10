@@ -119,7 +119,8 @@ async def run_load_test(
 
     gateway = gateway or ModelGateway.from_registry()
     configured = gateway.get_profile(profile)
-    is_stub = gateway._mode_for(configured) == "stub"
+    mode_for = getattr(gateway, "_mode_for", lambda profile: profile.gateway_mode)
+    is_stub = mode_for(configured) == "stub"
     latency_limit_ms = float(configured.kpi["latency_p95_ms_max"])
     rps_target = float(configured.kpi["requests_per_second_min"])
     messages = [

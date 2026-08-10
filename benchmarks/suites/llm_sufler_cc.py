@@ -153,7 +153,8 @@ def run(
     hallucination_limit = float(
         configured.kpi["hallucination_percent_max"]
     )
-    is_stub = gateway._mode_for(configured) == "stub"
+    mode_for = getattr(gateway, "_mode_for", lambda profile: profile.gateway_mode)
+    is_stub = mode_for(configured) == "stub"
 
     results: list[dict[str, Any]] = []
     latencies: list[float] = []
