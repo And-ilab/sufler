@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useAiHubColorTheme } from '../ai-hub/colorTheme'
 import { StatusBadge } from '../components'
 import { AssistantChat } from './AssistantChat'
 import './AssistantWindowApp.css'
@@ -18,10 +19,15 @@ export function AssistantWindowApp({
 }: AssistantWindowAppProps) {
   const [open, setOpen] = useState(initiallyOpen)
   const [maximized, setMaximized] = useState(false)
+  const { theme: colorTheme } = useAiHubColorTheme()
 
   if (!open) {
     return (
-      <main className="asst-window-page" data-testid="assistant-window-app">
+      <main
+        className="asst-window-page"
+        data-testid="assistant-window-app"
+        data-ai-color-theme={colorTheme}
+      >
         <button
           type="button"
           className="asst-window-reopen"
@@ -35,7 +41,11 @@ export function AssistantWindowApp({
   }
 
   return (
-    <main className="asst-window-page" data-testid="assistant-window-app">
+    <main
+      className="asst-window-page"
+      data-testid="assistant-window-app"
+      data-ai-color-theme={colorTheme}
+    >
       <section
         className={`asst-window${maximized ? ' asst-window--maximized' : ''}`}
         data-testid="assistant-window"

@@ -1,3 +1,4 @@
+import type { ChatAttachmentPayload } from './attachments'
 import { DEMO_STUB_ANSWER } from '../types'
 
 export interface ChatSource {
@@ -65,6 +66,7 @@ export async function* streamAssistantChat(input: {
   message: string
   sessionId?: string
   kbSlugs?: string[]
+  attachments?: ChatAttachmentPayload[]
   signal?: AbortSignal
 }): AsyncGenerator<ChatStreamChunk> {
   let response: Response
@@ -81,6 +83,7 @@ export async function* streamAssistantChat(input: {
         message: input.message,
         session_id: input.sessionId,
         kb_slugs: input.kbSlugs ?? [],
+        attachments: input.attachments?.length ? input.attachments : undefined,
         stream: true,
       }),
       signal: input.signal,

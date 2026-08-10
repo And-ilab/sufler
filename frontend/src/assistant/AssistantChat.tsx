@@ -15,12 +15,23 @@ import {
   type AssistantKbOption,
 } from './api/knowledgeBases'
 import {
+  extractChatAttachment,
+  type ChatAttachmentPayload,
+} from './api/attachments'
+import {
   fetchLocalLlmModels,
   selectLocalLlmModel,
   type LocalLlmModel,
 } from './api/localModels'
+import {
+  formatDialogDate,
+  type ChatDialogSummary,
+} from './chatPersistence'
 import { useAssistantChat } from './useAssistantChat'
 import './AssistantChat.css'
+
+const ATTACH_ACCEPT = '.pdf,.doc,.docx,.txt,.rtf'
+const ATTACH_MAX_FILES = 5
 
 function toolBadgeStatus(state: ToolRunState): StatusBadgeStatus {
   if (state === 'done') return 'success'
@@ -187,7 +198,16 @@ function MessageLenta({
             {message.role === 'user' ? 'Вы' : 'Ассистент'}
           </div>
           {message.role === 'user' ? (
-            <p className="asst-turn__user">{message.content}</p>
+            <div className="asst-turn__user-block">
+              {message.attachments?.length ? (
+                <ul className="asst-turn__files" aria-label="Вложения">
+                  {message.attachments.map((file) => (
+                    <li key={file.name}>{file.name}</li>
+                  ))}
+                </ul>
+              ) : null}
+              <p className="asst-turn__user">{message.content}</p>
+            </div>
           ) : (
             <Card className="asst-turn__card">
               {message.pending && !message.content ? (
@@ -294,6 +314,119 @@ function ToolsPanel({
   )
 }
 
+function HistoryDrawer({
+  open,
+  dialogs,
+  activeId,
+  onClose,
+  onOpen,
+  onNew,
+  onDelete,
+}: {
+  open: boolean
+  dialogs: readonly ChatDialogSummary[]
+  activeId: string
+  onClose: () => void
+  onOpen: (id: string) => void
+  onNew: () => void
+  onDelete: (id: string) => void
+}) {
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose, open])
+
+  return (
+    <div
+      className={`asst-history${open ? ' is-open' : ''}`}
+      data-testid="asst-history-shell"
+      aria-hidden={!open}
+    >
+      <button
+        type="button"
+        className="asst-history__backdrop"
+        aria-label="Закрыть историю диалогов"
+        tabIndex={open ? 0 : -1}
+        onClick={onClose}
+      />
+      <aside
+        id="asst-history-drawer"
+        className="asst-history__drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="История диалогов"
+        data-testid="asst-history-drawer"
+      >
+        <header className="asst-history__header">
+          <div>
+            <strong>История диалогов</strong>
+            <span>Название — по первым словам вопроса</span>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+            aria-label="Закрыть историю"
+            data-testid="asst-history-close"
+          >
+            ×
+          </Button>
+        </header>
+        <div className="asst-history__toolbar">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onNew}
+            data-testid="asst-history-new"
+          >
+            + Новый диалог
+          </Button>
+        </div>
+        <ul className="asst-history__list" data-testid="asst-history-list">
+          {dialogs.length === 0 ? (
+            <li className="asst-history__empty">Пока нет сохранённых диалогов</li>
+          ) : (
+            dialogs.map((dialog) => {
+              const active = dialog.id === activeId
+              return (
+                <li key={dialog.id}>
+                  <button
+                    type="button"
+                    className={`asst-history__item${active ? ' is-active' : ''}`}
+                    onClick={() => onOpen(dialog.id)}
+                    data-testid={`asst-history-item-${dialog.id}`}
+                  >
+                    <strong>{dialog.title}</strong>
+                    <span>{formatDialogDate(dialog.updatedAt)}</span>
+                    <small>{dialog.preview}</small>
+                  </button>
+                  <button
+                    type="button"
+                    className="asst-history__delete"
+                    aria-label={`Удалить диалог «${dialog.title}»`}
+                    title="Удалить"
+                    data-testid={`asst-history-delete-${dialog.id}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onDelete(dialog.id)
+                    }}
+                  >
+                    ×
+                  </button>
+                </li>
+              )
+            })
+          )}
+        </ul>
+      </aside>
+    </div>
+  )
+}
+
 export interface AssistantChatProps {
   demoMode?: boolean
   compact?: boolean
@@ -314,6 +447,12 @@ export function AssistantChat({
 }: AssistantChatProps) {
   const [draft, setDraft] = useState(initialDraft)
   const [kbOpen, setKbOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([])
+  const [attachBusy, setAttachBusy] = useState(false)
+  const [attachError, setAttachError] = useState('')
+  const kbRootRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [kbCatalog, setKbCatalog] = useState<AssistantKbOption[]>(
     () => (knowledgeBasesProp ? [...knowledgeBasesProp] : []),
   )
@@ -336,6 +475,7 @@ export function AssistantChat({
 
   const {
     messages,
+    dialogs,
     tools,
     streaming,
     error,
@@ -346,6 +486,9 @@ export function AssistantChat({
     setFeedback,
     runTool,
     newDialog,
+    openDialog,
+    deleteDialog,
+    sessionId,
   } = useAssistantChat({
     demoMode,
     getKbSlugs: () => kbSlugsRef.current,
@@ -473,12 +616,55 @@ export function AssistantChat({
     setKbSelected(Object.fromEntries(kbCatalog.map((kb) => [kb.id, checked])))
   }
 
+  useEffect(() => {
+    if (!kbOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      const root = kbRootRef.current
+      if (root && !root.contains(event.target as Node)) {
+        setKbOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [kbOpen])
+
+  const onPickFiles = async (fileList: FileList | null) => {
+    if (!fileList?.length || readOnly) return
+    const remaining = Math.max(0, ATTACH_MAX_FILES - attachments.length)
+    if (!remaining) {
+      setAttachError(`Можно прикрепить не больше ${ATTACH_MAX_FILES} файлов`)
+      return
+    }
+    const files = Array.from(fileList).slice(0, remaining)
+    setAttachBusy(true)
+    setAttachError('')
+    try {
+      await ensureDevSession()
+      const extracted: ChatAttachmentPayload[] = []
+      for (const file of files) {
+        extracted.push(await extractChatAttachment(file))
+      }
+      setAttachments((current) => [...current, ...extracted].slice(0, ATTACH_MAX_FILES))
+    } catch (error) {
+      setAttachError(
+        error instanceof Error ? error.message : 'Не удалось прочитать файл',
+      )
+    } finally {
+      setAttachBusy(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
-    if (readOnly || !draft.trim() || streaming) return
+    if (readOnly || streaming || attachBusy) return
+    if (!draft.trim() && !attachments.length) return
     const text = draft
+    const files = attachments
     setDraft('')
-    void sendMessage(text)
+    setAttachments([])
+    setAttachError('')
+    void sendMessage(text, files)
   }
 
   return (
@@ -546,13 +732,16 @@ export function AssistantChat({
             {modelError}
           </span>
         ) : null}
-        <div className="asst-kb" data-testid="asst-kb">
+        <div className="asst-kb" data-testid="asst-kb" ref={kbRootRef}>
           <button
             type="button"
             className="asst-kb__trigger"
             aria-expanded={kbOpen}
             disabled={readOnly}
-            onClick={() => setKbOpen((value) => !value)}
+            onClick={() => {
+              setKbOpen((value) => !value)
+              setToolsOpen(false)
+            }}
             data-testid="asst-kb-trigger"
           >
             <span>{selectedLabel}</span>
@@ -605,16 +794,51 @@ export function AssistantChat({
         <Button
           type="button"
           variant="secondary"
-          onClick={newDialog}
+          onClick={() => {
+            newDialog()
+            setHistoryOpen(false)
+            setAttachments([])
+            setAttachError('')
+          }}
           disabled={readOnly}
           data-testid="asst-new"
         >
           + Новый
         </Button>
-        <Button type="button" variant="ghost" disabled={readOnly} data-testid="asst-history">
+        <Button
+          type="button"
+          variant={historyOpen ? 'secondary' : 'ghost'}
+          disabled={readOnly}
+          aria-expanded={historyOpen}
+          aria-controls="asst-history-drawer"
+          onClick={() => {
+            setHistoryOpen((value) => !value)
+            setKbOpen(false)
+            setToolsOpen(false)
+          }}
+          data-testid="asst-history"
+        >
           История диалогов
         </Button>
       </div>
+
+      <HistoryDrawer
+        open={historyOpen}
+        dialogs={dialogs}
+        activeId={sessionId}
+        onClose={() => setHistoryOpen(false)}
+        onOpen={(id) => {
+          openDialog(id)
+          setHistoryOpen(false)
+        }}
+        onNew={() => {
+          newDialog()
+          setHistoryOpen(false)
+          setAttachments([])
+          setAttachError('')
+        }}
+        onDelete={deleteDialog}
+      />
 
       <MessageLenta
         messages={messages}
@@ -637,7 +861,13 @@ export function AssistantChat({
         <Card className="asst-error" role="alert">
           <StatusBadge status="danger">Ошибка</StatusBadge>
           <p>{error}</p>
-          <Button type="button" onClick={() => draft.trim() && void sendMessage(draft)}>
+          <Button
+            type="button"
+            onClick={() =>
+              (draft.trim() || attachments.length)
+              && void sendMessage(draft, attachments)
+            }
+          >
             Повторить
           </Button>
         </Card>
@@ -645,8 +875,26 @@ export function AssistantChat({
 
       <form className="asst-composer" onSubmit={onSubmit} data-testid="asst-composer">
         <div className="asst-composer__extras">
-          <Button type="button" variant="ghost" disabled={readOnly}>
-            Прикрепить
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="asst-composer__file"
+            accept={ATTACH_ACCEPT}
+            multiple
+            hidden
+            disabled={readOnly || attachBusy || streaming}
+            onChange={(event) => void onPickFiles(event.target.files)}
+            data-testid="asst-attach-input"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={readOnly || attachBusy || streaming || attachments.length >= ATTACH_MAX_FILES}
+            onClick={() => fileInputRef.current?.click()}
+            data-testid="asst-attach"
+            title="PDF, DOC, DOCX, TXT, RTF · до 10 МБ"
+          >
+            {attachBusy ? 'Читаю файл…' : 'Прикрепить'}
           </Button>
           <Button
             type="button"
@@ -654,18 +902,52 @@ export function AssistantChat({
             aria-expanded={toolsOpen}
             aria-controls="asst-tools-panel"
             disabled={readOnly}
-            onClick={() => setToolsOpen((value) => !value)}
+            onClick={() => {
+              setToolsOpen((value) => !value)
+              setKbOpen(false)
+            }}
             data-testid="asst-composer-tools"
           >
             Инструменты
           </Button>
         </div>
+        {attachments.length > 0 ? (
+          <ul className="asst-composer__attachments" data-testid="asst-attach-list">
+            {attachments.map((file) => (
+              <li key={`${file.name}-${file.size_bytes ?? 0}`}>
+                <span>{file.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Убрать ${file.name}`}
+                  onClick={() =>
+                    setAttachments((current) =>
+                      current.filter((item) => item.name !== file.name),
+                    )
+                  }
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {attachError ? (
+          <p className="asst-composer__attach-error" role="alert" data-testid="asst-attach-error">
+            {attachError}
+          </p>
+        ) : null}
         <label htmlFor="asst-draft">Сообщение ассистенту</label>
         <textarea
           id="asst-draft"
           value={draft}
           maxLength={maxChars}
-          placeholder={readOnly ? 'Отправка сообщений недоступна для аналитика' : 'Задайте вопрос…'}
+          placeholder={
+            readOnly
+              ? 'Отправка сообщений недоступна для аналитика'
+              : attachments.length
+                ? 'Добавьте вопрос к файлу или отправьте для саммари…'
+                : 'Задайте вопрос…'
+          }
           data-testid="asst-draft"
           disabled={readOnly}
           readOnly={readOnly}
@@ -677,7 +959,12 @@ export function AssistantChat({
           </span>
           <Button
             type="submit"
-            disabled={readOnly || !draft.trim() || streaming}
+            disabled={
+              readOnly
+              || streaming
+              || attachBusy
+              || (!draft.trim() && !attachments.length)
+            }
             data-testid="asst-send"
           >
             {streaming ? 'Стриминг…' : 'Отправить'}

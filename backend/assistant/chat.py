@@ -125,8 +125,23 @@ def parse_chat_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
         raise AssistantChatError("Request body must be a JSON object")
 
-    messages = _as_messages(payload)
     attachments = payload.get("attachments")
+    has_attachments = (
+        isinstance(attachments, Sequence)
+        and not isinstance(attachments, (str, bytes))
+        and len(attachments) > 0
+    )
+    working: dict[str, Any] = dict(payload)
+    message = working.get("message")
+    if (
+        has_attachments
+        and (not isinstance(message, str) or not message.strip())
+        and not working.get("messages")
+    ):
+        # Attachment-only send: still need a user turn for the LLM.
+        working["message"] = "Суммаризируй вложение."
+
+    messages = _as_messages(working)
     if attachments is not None:
         messages = _apply_attachments(messages, attachments)
 

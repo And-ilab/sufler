@@ -1,6 +1,7 @@
 from django.urls import path
 
 from assistant.views import (
+    assistant_attachment_extract,
     assistant_chat,
     assistant_knowledge_bases,
     assistant_models,
@@ -13,6 +14,11 @@ from assistant.views import (
 
 urlpatterns = [
     path("chat", assistant_chat, name="assistant_chat"),
+    path(
+        "attachments/extract",
+        assistant_attachment_extract,
+        name="assistant_attachment_extract",
+    ),
     path("models/", assistant_models, name="assistant_models"),
     path("kbs/", assistant_knowledge_bases, name="assistant_knowledge_bases"),
     path("openapi.json", assistant_openapi, name="assistant_openapi"),
