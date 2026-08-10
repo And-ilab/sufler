@@ -48,6 +48,7 @@ def _store(
     external_user_id: str,
     text: str,
     raw: Mapping[str, Any],
+    placement: str | None = None,
 ) -> dict[str, Any]:
     existing = (
         Dialog.objects.filter(
@@ -77,7 +78,7 @@ def _store(
             text=text,
             channel=channel,
             widget_id="",
-            placement=channel,
+            placement=(placement or channel),
             client_first_name=str(raw.get("client_name") or channel.title()),
             client_external_id=external_user_id,
             entry_url=str(raw.get("page_url") or ""),

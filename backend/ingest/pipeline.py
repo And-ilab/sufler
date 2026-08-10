@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from django.db import transaction
 
-from core.embeddings import deterministic_embedding, embed_passage
+from core.embeddings import embed_passage
 from core.model_registry import ModelRegistry
 from ingest.models import CCProductionChunk, KnowledgeIngestEvent
 from ingest.schema import SuzPayload, SuzPayloadError
