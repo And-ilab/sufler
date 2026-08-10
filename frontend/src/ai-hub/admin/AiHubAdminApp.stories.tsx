@@ -11,6 +11,7 @@ const meta = {
     roles: ['software_administrator'],
     initialScreen: 'llm_config_assistant',
     demoRoleSwitcher: true,
+    skipSessionBootstrap: true,
   },
 } satisfies Meta<typeof AiHubAdminApp>
 

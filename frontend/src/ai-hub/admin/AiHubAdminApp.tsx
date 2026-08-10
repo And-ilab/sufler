@@ -38,6 +38,8 @@ interface AiHubAdminAppProps {
   initialProfile?: AdminProfile
   initialModelParams?: ModelParamsData
   demoRoleSwitcher?: boolean
+  /** Storybook/visual: skip Django login gate (no API in iframe). */
+  skipSessionBootstrap?: boolean
 }
 
 interface ScreenCopy {
@@ -209,6 +211,7 @@ export function AiHubAdminApp({
   initialProfile,
   initialModelParams,
   demoRoleSwitcher = false,
+  skipSessionBootstrap = false,
 }: AiHubAdminAppProps) {
   const resolved = resolveAdminRoute(window.location.pathname)
   const pathIsAdminRoot =
@@ -232,11 +235,12 @@ export function AiHubAdminApp({
     [],
   )
 
-  const [sessionReady, setSessionReady] = useState(false)
+  const [sessionReady, setSessionReady] = useState(skipSessionBootstrap)
   const [sessionError, setSessionError] = useState('')
   const { theme: colorTheme } = useAiHubColorTheme()
 
   useEffect(() => {
+    if (skipSessionBootstrap) return
     let cancelled = false
     void (async () => {
       // Single bootstrap for the admin shell — child screens share the session.
@@ -260,7 +264,7 @@ export function AiHubAdminApp({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [skipSessionBootstrap])
 
   const visibleNav = useMemo(
     () => demoRoleSwitcher ? ADMIN_NAV : ADMIN_NAV.filter((item) => hasRole(roles, item)),
