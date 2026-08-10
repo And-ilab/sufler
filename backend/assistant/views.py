@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Mapping
 
 from django.http import HttpRequest, HttpResponse, JsonResponse, StreamingHttpResponse
@@ -26,7 +27,13 @@ from assistant.local_llm import get_models_status, select_model
 from assistant.openapi import build_openapi_document
 from auth.decorators import require_permissions
 from auth.roles import PERM_ASSISTANT_REPORTS, PERM_ASSISTANT_USE
-from hub.assistant_admin import list_assistant_kbs
+from hub.assistant_admin import list_chat_knowledge_bases
+from hub.kb_admin import KnowledgeBaseError, extract_document_text
+
+CHAT_ATTACHMENT_EXTENSIONS = frozenset(
+    {".pdf", ".doc", ".docx", ".txt", ".rtf"}
+)
+CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 
 
 def _validation_error(exc: AssistantChatError) -> JsonResponse:
@@ -52,12 +59,12 @@ def _reports_validation_error(exc: AssReportsError) -> JsonResponse:
 @require_http_methods(["GET"])
 @require_permissions(PERM_ASSISTANT_USE, api=True)
 def assistant_knowledge_bases(request: HttpRequest) -> JsonResponse:
-    """GET /api/v1/assistant/kbs/ — actual assistant_* KB catalog for the chat UI."""
+    """GET /api/v1/assistant/kbs/ — chat catalog synced with settings «Базы знаний»."""
     return JsonResponse(
         {
-            "items": list_assistant_kbs(seed=False),
-            "namespace": "assistant_*",
-            "isolated_from": "cc_production",
+            "items": list_chat_knowledge_bases(seed=False),
+            "namespace": "chat",
+            "includes": ["assistant_*", "cc_production", "suz-bitrix"],
         }
     )
 
@@ -107,6 +114,68 @@ def assistant_models(request: HttpRequest) -> JsonResponse:
             },
             status=400,
         )
+
+
+@require_http_methods(["POST"])
+@require_permissions(PERM_ASSISTANT_USE, api=True)
+def assistant_attachment_extract(request: HttpRequest) -> JsonResponse:
+    """POST /api/v1/assistant/attachments/extract — text for chat attachments."""
+    uploaded = request.FILES.get("file")
+    if uploaded is None:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"file": ["file is required"]},
+            },
+            status=400,
+        )
+    filename = Path(getattr(uploaded, "name", "") or "file").name
+    extension = Path(filename).suffix.lower()
+    if extension not in CHAT_ATTACHMENT_EXTENSIONS:
+        allowed = ", ".join(sorted(CHAT_ATTACHMENT_EXTENSIONS))
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {
+                    "file": [f"unsupported type; allowed: {allowed}"],
+                },
+            },
+            status=400,
+        )
+    data = uploaded.read()
+    if len(data) > CHAT_ATTACHMENT_MAX_BYTES:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {
+                    "file": [
+                        f"file too large; max {CHAT_ATTACHMENT_MAX_BYTES} bytes"
+                    ],
+                },
+            },
+            status=400,
+        )
+    try:
+        text = extract_document_text(filename, data)
+    except KnowledgeBaseError as exc:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"file": [str(exc)]},
+            },
+            status=400,
+        )
+    content_type = getattr(uploaded, "content_type", "") or ""
+    kind = extension.lstrip(".") or content_type
+    return JsonResponse(
+        {
+            "name": filename,
+            "type": kind,
+            "content_type": content_type,
+            "size_bytes": len(data),
+            "text": text,
+        }
+    )
 
 
 @require_http_methods(["POST"])

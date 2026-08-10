@@ -30,7 +30,7 @@
   overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: 12px;
-  background: linear-gradient(180deg, #f7faff 0%, #edf4ff 100%);
+  background: var(--ai-panel-bg);
   box-shadow: var(--shadow-md);
 }
 
@@ -46,7 +46,7 @@
   position: relative;
   padding: 10px 108px 10px 16px;
   border-bottom: 1px solid var(--color-border);
-  background: linear-gradient(135deg, #eaf2ff 0%, #dceaff 55%, #f4f8ff 100%);
+  background: var(--ai-header-bg);
   flex-shrink: 0;
 }
 
@@ -100,8 +100,8 @@
 .asst-window__tabs .is-active {
   font-weight: 600;
   color: var(--color-text);
-  border-bottom: 2px solid #bfd3f3;
-  background: linear-gradient(135deg, #eaf2ff 0%, #f4f8ff 100%);
+  border-bottom: 2px solid var(--ai-tab-accent);
+  background: var(--ai-tab-bg);
 }
 
 .asst-window__body {
@@ -119,7 +119,7 @@
   gap: var(--space-2);
   padding: 8px 12px;
   border-top: 1px solid var(--color-border);
-  background: linear-gradient(135deg, #eaf2ff 0%, #f4f8ff 100%);
+  background: var(--ai-tab-bg);
   font-size: .75rem;
   color: var(--color-text-muted);
   flex-shrink: 0;

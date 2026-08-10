@@ -223,6 +223,34 @@
   border-color: var(--color-primary);
 }
 
+.portal-launcher__color-toggle {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  color: var(--color-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.portal-launcher__color-toggle:hover {
+  border-color: var(--color-primary);
+}
+
+.portal-launcher__color-toggle.is-emerald {
+  color: #007a43;
+  border-color: #b8dcc8;
+  background: #eaf8f1;
+}
+
+.portal-launcher__color-toggle.is-emerald:hover {
+  border-color: #007a43;
+}
+
 .portal-launcher__empty-modules {
   position: absolute;
   right: var(--space-5);
@@ -403,8 +431,14 @@
   gap: var(--space-1);
 }
 
-.portal-module-window__controls button,
-.portal-module-window__controls a {
+.portal-module-window__menu-anchor {
+  position: relative;
+  display: inline-grid;
+}
+
+.portal-module-window__controls > button,
+.portal-module-window__controls > a,
+.portal-module-window__menu-anchor > button {
   display: inline-grid;
   width: 32px;
   height: 32px;
@@ -417,15 +451,16 @@
   cursor: pointer;
 }
 
-.portal-module-window__controls button:hover,
-.portal-module-window__controls a:hover {
+.portal-module-window__controls > button:hover,
+.portal-module-window__controls > a:hover,
+.portal-module-window__menu-anchor > button:hover {
   background: color-mix(in srgb, var(--color-white) 16%, transparent);
 }
 
 .portal-module-window__menu {
   position: absolute;
-  top: 52px;
-  right: var(--space-3);
+  top: calc(100% + 8px);
+  right: 0;
   z-index: 5;
   display: grid;
   min-width: 220px;

@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./tokens.css";
+@import "./ai-hub/aiHubColorTheme.css";
 
 * {
   box-sizing: border-box;

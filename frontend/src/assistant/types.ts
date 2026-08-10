@@ -13,6 +13,11 @@ export interface AssistantSource {
   kb_slug?: string
 }
 
+export interface AssistantAttachmentRef {
+  name: string
+  type?: string
+}
+
 export interface AssistantMessage {
   id: string
   role: 'user' | 'assistant'
@@ -21,6 +26,7 @@ export interface AssistantMessage {
   sources?: AssistantSource[]
   feedback?: FeedbackKind | null
   tools?: ToolId[]
+  attachments?: AssistantAttachmentRef[]
 }
 
 export interface AssistantToolState {

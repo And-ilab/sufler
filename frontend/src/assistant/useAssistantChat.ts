@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ChatAttachmentPayload } from './api/attachments'
 import { streamAssistantChat, streamDemoChat } from './api/chatStream'
 import {
-  clearPersistedChat,
-  loadPersistedChat,
+  createDialogInHistory,
+  deleteDialogFromHistory,
+  listDialogSummaries,
+  loadChatHistory,
+  openDialogInHistory,
   savePersistedChat,
+  type ChatDialogSummary,
 } from './chatPersistence'
 import {
   DEFAULT_TOOLS,
@@ -24,7 +29,7 @@ export interface UseAssistantChatOptions {
   sessionId?: string
   /** Selected assistant_* KB slugs for RAG. */
   getKbSlugs?: () => string[]
-  /** Persist chat across remounts / full-page open (sessionStorage). */
+  /** Persist chat across remounts / full-page open (localStorage history). */
   persist?: boolean
 }
 
@@ -35,26 +40,43 @@ export function useAssistantChat({
   getKbSlugs,
   persist = true,
 }: UseAssistantChatOptions = {}) {
-  const restored = persist && !demoMode ? loadPersistedChat() : null
-  const [sessionId] = useState(
-    () => sessionIdProp || restored?.sessionId || `sess-${Date.now()}`,
+  const history = persist && !demoMode ? loadChatHistory() : null
+  const initialActive =
+    history?.dialogs.find((item) => item.id === history.activeId)
+    || history?.dialogs[0]
+  const [sessionId, setSessionId] = useState(
+    () => sessionIdProp || initialActive?.id || `sess-${Date.now()}`,
   )
   const [messages, setMessages] = useState<AssistantMessage[]>(() => {
     if (initialMessages) return initialMessages
     if (demoMode) return SEED_MESSAGES
-    if (restored?.messages?.length) return restored.messages
+    if (initialActive?.messages?.length) return initialActive.messages
     return []
   })
+  const [dialogs, setDialogs] = useState<ChatDialogSummary[]>(() =>
+    persist && !demoMode ? listDialogSummaries() : [],
+  )
   const [tools, setTools] = useState<AssistantToolState[]>(DEFAULT_TOOLS)
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+
+  const refreshDialogs = useCallback(() => {
+    if (!persist || demoMode) {
+      setDialogs([])
+      return
+    }
+    setDialogs(listDialogSummaries())
+  }, [demoMode, persist])
 
   useEffect(() => {
     if (!persist || demoMode || streaming) return
     savePersistedChat(sessionId, messages)
-  }, [demoMode, messages, persist, sessionId, streaming])
+    refreshDialogs()
+  }, [demoMode, messages, persist, refreshDialogs, sessionId, streaming])
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort()
@@ -107,16 +129,30 @@ export function useAssistantChat({
   }, [])
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, attachments: ChatAttachmentPayload[] = []) => {
       const trimmed = text.trim()
-      if (!trimmed || streaming) return
+      const readyAttachments = attachments.filter((item) => item.text?.trim())
+      if ((!trimmed && !readyAttachments.length) || streaming) return
 
+      const displayText =
+        trimmed
+        || (readyAttachments.length === 1
+          ? `Суммаризируй вложение «${readyAttachments[0].name}».`
+          : 'Суммаризируй вложения.')
       const userId = uid('user')
       const assistantId = uid('asst')
       setError('')
       setMessages((current) => [
         ...current,
-        { id: userId, role: 'user', content: trimmed },
+        {
+          id: userId,
+          role: 'user',
+          content: displayText,
+          attachments: readyAttachments.map((item) => ({
+            name: item.name,
+            type: item.type,
+          })),
+        },
         {
           id: assistantId,
           role: 'assistant',
@@ -144,11 +180,12 @@ export function useAssistantChat({
 
       try {
         const stream = demoMode
-          ? streamDemoChat(trimmed, controller.signal)
+          ? streamDemoChat(displayText, controller.signal)
           : streamAssistantChat({
               message: trimmed,
               sessionId,
               kbSlugs: getKbSlugs?.() ?? [],
+              attachments: readyAttachments,
               signal: controller.signal,
             })
 
@@ -219,14 +256,66 @@ export function useAssistantChat({
 
   const newDialog = useCallback(() => {
     stopStreaming()
-    setMessages([])
     setError('')
     setTools(DEFAULT_TOOLS)
-    if (persist && !demoMode) clearPersistedChat()
-  }, [demoMode, persist, stopStreaming])
+    if (!persist || demoMode) {
+      setMessages([])
+      setSessionId(`sess-${Date.now()}`)
+      return
+    }
+    const current = messagesRef.current
+    if (!current.length) {
+      setMessages([])
+      refreshDialogs()
+      return
+    }
+    savePersistedChat(sessionId, current)
+    const created = createDialogInHistory([])
+    setSessionId(created.id)
+    setMessages([])
+    refreshDialogs()
+  }, [demoMode, persist, refreshDialogs, sessionId, stopStreaming])
+
+  const openDialog = useCallback(
+    (dialogId: string) => {
+      if (dialogId === sessionId) return
+      stopStreaming()
+      setError('')
+      setTools(DEFAULT_TOOLS)
+      if (!persist || demoMode) return
+      savePersistedChat(sessionId, messagesRef.current)
+      const opened = openDialogInHistory(dialogId)
+      if (!opened) return
+      setSessionId(opened.id)
+      setMessages(opened.messages)
+      refreshDialogs()
+    },
+    [demoMode, persist, refreshDialogs, sessionId, stopStreaming],
+  )
+
+  const deleteDialog = useCallback(
+    (dialogId: string) => {
+      if (!persist || demoMode) return
+      stopStreaming()
+      if (dialogId === sessionId) {
+        savePersistedChat(sessionId, messagesRef.current)
+      }
+      const next = deleteDialogFromHistory(dialogId)
+      const active =
+        next.dialogs.find((item) => item.id === next.activeId) || next.dialogs[0]
+      if (!active) return
+      setSessionId(active.id)
+      setMessages(active.messages)
+      setError('')
+      setTools(DEFAULT_TOOLS)
+      refreshDialogs()
+    },
+    [demoMode, persist, refreshDialogs, sessionId, stopStreaming],
+  )
 
   return {
     messages,
+    dialogs,
     tools,
     streaming,
     error,
@@ -237,6 +326,8 @@ export function useAssistantChat({
     setFeedback,
     runTool,
     newDialog,
+    openDialog,
+    deleteDialog,
     sessionId,
   }
 }
