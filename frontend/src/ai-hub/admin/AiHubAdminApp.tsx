@@ -29,6 +29,7 @@ import {
   type AdminScreen,
   type DemoAdminRole,
 } from './adminNav'
+import { useAiHubColorTheme } from '../colorTheme'
 import './AiHubAdmin.css'
 
 interface AiHubAdminAppProps {
@@ -233,6 +234,7 @@ export function AiHubAdminApp({
 
   const [sessionReady, setSessionReady] = useState(false)
   const [sessionError, setSessionError] = useState('')
+  const { theme: colorTheme } = useAiHubColorTheme()
 
   useEffect(() => {
     let cancelled = false
@@ -306,7 +308,11 @@ export function AiHubAdminApp({
 
   if (!sessionReady) {
     return (
-      <div className="admin-center admin-center--boot" data-testid="admin-shell-boot">
+      <div
+        className="admin-center admin-center--boot"
+        data-testid="admin-shell-boot"
+        data-ai-color-theme={colorTheme}
+      >
         <Card>
           <StatusBadge status={sessionError ? 'danger' : 'info'}>
             {sessionError ? 'Ошибка входа' : 'Вход…'}
@@ -343,7 +349,11 @@ export function AiHubAdminApp({
   }
 
   return (
-    <div className="admin-center" data-testid="admin-shell">
+    <div
+      className="admin-center"
+      data-testid="admin-shell"
+      data-ai-color-theme={colorTheme}
+    >
       <aside className="admin-sidebar" data-testid="admin-sidebar">
         <a className="admin-sidebar__brand" href="/ai-hub/admin">
           <img src="/assets/belarusbank-logo.png" alt="Беларусбанк" />

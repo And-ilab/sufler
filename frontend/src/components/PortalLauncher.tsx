@@ -4,6 +4,10 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
+import {
+  useAiHubColorTheme,
+  type AiHubColorTheme,
+} from '../ai-hub/colorTheme'
 import { AssistantChat } from '../assistant/AssistantChat'
 import { SuflerPhoneApp } from '../sufler/SuflerPhoneApp'
 import { Button } from './Button'
@@ -59,6 +63,7 @@ interface ModuleWindowProps {
   roleLabel?: string | null
   roles?: readonly string[]
   settingsEntry?: SettingsMenuEntry | null
+  colorTheme?: AiHubColorTheme
   onClose: () => void
   onMinimize: () => void
 }
@@ -69,6 +74,7 @@ function ModuleWindow({
   roleLabel,
   roles = [],
   settingsEntry = null,
+  colorTheme = 'classic',
   onClose,
   onMinimize,
 }: ModuleWindowProps) {
@@ -135,6 +141,7 @@ function ModuleWindow({
       role="dialog"
       aria-label={title}
       data-testid={`${module}-window`}
+      data-ai-color-theme={module === 'assistant' ? colorTheme : undefined}
     >
       <header className="portal-module-window__header">
         <div className="portal-module-window__identity">
@@ -258,13 +265,21 @@ function PortalBackdrop({
   roleLabel,
   onChangeRole,
   settingsEntry,
+  colorTheme,
+  onToggleColorTheme,
 }: {
   children: ReactNode
   roleLabel?: string | null
   onChangeRole?: () => void
   /** ≡ on portal chrome for roles without S/A windows (analysts / OCR admin). */
   settingsEntry?: SettingsMenuEntry | null
+  colorTheme: AiHubColorTheme
+  onToggleColorTheme: () => void
 }) {
+  const colorThemeTitle =
+    colorTheme === 'classic'
+      ? 'Переключить на цветовую схему онлайн-чата'
+      : 'Вернуть текущую цветовую схему'
   return (
     <div className="portal-launcher__backdrop">
       <header className="portal-launcher__portal-header">
@@ -297,6 +312,26 @@ function PortalBackdrop({
               Роль: {roleLabel}
             </button>
           )}
+          <button
+            type="button"
+            className={`portal-launcher__color-toggle${
+              colorTheme === 'emerald' ? ' is-emerald' : ''
+            }`}
+            onClick={onToggleColorTheme}
+            title={colorThemeTitle}
+            aria-label={colorThemeTitle}
+            aria-pressed={colorTheme === 'emerald'}
+            data-testid="ai-color-theme-toggle"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+              <path
+                d="M12 3a9 9 0 0 1 0 18"
+                fill="currentColor"
+                opacity="0.35"
+              />
+            </svg>
+          </button>
           <span>Алексей Морозов</span>
         </div>
       </header>
@@ -336,6 +371,7 @@ export function PortalLauncher({
     () => (showPortalSettingsButton(roles) ? settingsEntry : null),
     [roles, settingsEntry],
   )
+  const { theme: colorTheme, toggle: toggleColorTheme } = useAiHubColorTheme()
   const [menuOpen, setMenuOpen] = useState(initialMenuOpen)
   const [openWindows, setOpenWindows] = useState<Set<LauncherModule>>(
     () => new Set(initialWindows.filter((module) => modules.includes(module))),
@@ -364,6 +400,8 @@ export function PortalLauncher({
       roleLabel={roleLabel}
       onChangeRole={onChangeRole}
       settingsEntry={portalSettingsEntry}
+      colorTheme={colorTheme}
+      onToggleColorTheme={toggleColorTheme}
     >
       {children}
 
@@ -385,6 +423,7 @@ export function PortalLauncher({
           roleLabel={roleLabel}
           roles={roles}
           settingsEntry={settingsEntry}
+          colorTheme={colorTheme}
           onClose={() => closeModule('assistant')}
           onMinimize={() => closeModule('assistant')}
         />
