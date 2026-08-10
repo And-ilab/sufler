@@ -3,6 +3,14 @@ import { resetSimulation, seedSimulation, type SeedResult } from '../api/managem
 import '../shell/Management.css'
 
 const presets = [
+  {
+    name: '1 оператор · 10 клиентов',
+    description: 'Один оператор принимает поток из десяти обращений',
+    operators: 1,
+    clients: 10,
+    messages: 2,
+    autoAssign: true,
+  },
   { name: 'Тихая смена', description: 'Небольшой поток, запас операторов', operators: 5, clients: 8, messages: 2, autoAssign: true },
   { name: 'Пик очереди', description: 'Много одновременных клиентов', operators: 4, clients: 30, messages: 4, autoAssign: true },
   { name: 'Перегрузка', description: 'Нагрузка значительно выше вместимости', operators: 2, clients: 60, messages: 8, autoAssign: false },
@@ -19,9 +27,9 @@ type SeedClient = {
 }
 
 export function ChatSimulatorApp() {
-  const [operators, setOperators] = useState(5)
-  const [clients, setClients] = useState(12)
-  const [messages, setMessages] = useState(3)
+  const [operators, setOperators] = useState(1)
+  const [clients, setClients] = useState(10)
+  const [messages, setMessages] = useState(2)
   const [autoAssign, setAutoAssign] = useState(true)
   const [resetBeforeSeed, setResetBeforeSeed] = useState(true)
   const [result, setResult] = useState<SeedResult | null>(null)
@@ -102,7 +110,7 @@ export function ChatSimulatorApp() {
           <div>
             <h1>Симулятор онлайн-чата</h1>
             <p className="chat-management__muted">
-              Локальный стенд: несколько операторов и клиентов в разных окнах браузера
+              Тестовый стенд: создайте клиентов здесь — в АРМ появятся только реальные диалоги симулятора (без заглушек).
             </p>
           </div>
           <a className="chat-button is-secondary" href="/online-chat/supervisor" target="_blank" rel="noreferrer">

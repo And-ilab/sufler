@@ -1,14 +1,13 @@
 const ONLINE_CHAT_ARM_OPERATE_ROLES = new Set([
-  'software_administrator',
   'contact_center_online_chat_operator',
 ])
 
 const ONLINE_CHAT_ARM_VIEW_ROLES = new Set([
-  'software_administrator',
   'contact_center_online_chat_operator',
   'contact_center_module_administrator',
   'contact_center_supervisor',
   'contact_center_analyst',
+  'software_administrator',
 ])
 
 /** Full operator ARM (accept / reply / presence). */

@@ -10,6 +10,7 @@ import { Button } from './Button'
 import { Card } from './Card'
 import { Fab } from './Fab'
 import { StatusBadge } from './StatusBadge'
+import { storeDemoRole } from '../auth/demoRoles'
 import {
   canOpenKbAdminDeepLink,
   canWriteAssistantChat,
@@ -345,7 +346,10 @@ export function PortalLauncher({
 
   const openModule = (module: LauncherModule) => {
     if (module === 'online_chat') {
-      window.location.assign('/online-chat')
+      const activeRole = roles[0]
+      if (activeRole) storeDemoRole(activeRole)
+      const qs = activeRole ? `?demo_role=${encodeURIComponent(activeRole)}` : ''
+      window.location.assign(`/online-chat${qs}`)
       onOpenModule?.(module)
       return
     }

@@ -102,81 +102,82 @@ function operatorStatusShade(
   key: OperatorStatusShadeKey,
 ): { inactive: StatusShadeStyle; active: StatusShadeStyle } {
   const light = t.kind === "light";
+  // Muted chips: low-saturation fills, soft active state (no neon solids).
   const map: Record<OperatorStatusShadeKey, { inactive: StatusShadeStyle; active: StatusShadeStyle }> = light
     ? {
         available: {
-          inactive: { background: "#e8f5e9", color: "#2e7d32", border: "#2e7d3240", borderLeft: "#2e7d32" },
-          active: { background: "#1B8F4A", color: "#FFFFFF", border: "#146C38", borderLeft: "#0F5A2E" },
+          inactive: { background: "#eef3f0", color: "#4a6354", border: "#c5d4cb", borderLeft: "#7a9a86" },
+          active: { background: "#dce8e1", color: "#2f4a3a", border: "#9eb5a7", borderLeft: "#5f7f6c" },
         },
         invisible: {
-          inactive: { background: "#f3e5f5", color: "#6a1b9a", border: "#6a1b9a40", borderLeft: "#6a1b9a" },
-          active: { background: "#7B1FA2", color: "#FFFFFF", border: "#6A1B9A", borderLeft: "#4A148C" },
+          inactive: { background: "#f1f0f3", color: "#5c5666", border: "#d0ccd6", borderLeft: "#8a8396" },
+          active: { background: "#e4e1e9", color: "#3f3a4a", border: "#b8b2c2", borderLeft: "#6e677c" },
         },
         break: {
-          inactive: { background: "#fff8e1", color: "#f57f17", border: "#f57f1740", borderLeft: "#f57f17" },
-          active: { background: "#F57C00", color: "#FFFFFF", border: "#E65100", borderLeft: "#BF360C" },
+          inactive: { background: "#f5f2eb", color: "#6b5f45", border: "#ddd4c2", borderLeft: "#a8946e" },
+          active: { background: "#ebe4d6", color: "#4a412f", border: "#c9b896", borderLeft: "#8a7752" },
         },
         tech_break: {
-          inactive: { background: "#fff3e0", color: "#e65100", border: "#e6510040", borderLeft: "#e65100" },
-          active: { background: "#E64A19", color: "#FFFFFF", border: "#BF360C", borderLeft: "#8D2B0A" },
+          inactive: { background: "#f4efec", color: "#6b564c", border: "#dccfc7", borderLeft: "#a88878" },
+          active: { background: "#e9dfd9", color: "#4a3a33", border: "#c9b2a6", borderLeft: "#8a6b5c" },
         },
         lunch: {
-          inactive: { background: "#fffde7", color: "#f9a825", border: "#f9a82540", borderLeft: "#f9a825" },
-          active: { background: "#F9A825", color: "#FFFFFF", border: "#F57F17", borderLeft: "#E65100" },
+          inactive: { background: "#f5f3e9", color: "#6a6348", border: "#ddd7c0", borderLeft: "#a89c6e" },
+          active: { background: "#ebe6d4", color: "#4a442f", border: "#c9c096", borderLeft: "#8a8052" },
         },
         training: {
-          inactive: { background: "#e0f2f1", color: "#00695c", border: "#00695c40", borderLeft: "#00695c" },
-          active: { background: "#00897B", color: "#FFFFFF", border: "#00695C", borderLeft: "#004D40" },
+          inactive: { background: "#eef2f2", color: "#4d5f5e", border: "#c8d2d1", borderLeft: "#7a9290" },
+          active: { background: "#dfe8e7", color: "#334241", border: "#a8b8b6", borderLeft: "#5f7775" },
         },
         meeting: {
-          inactive: { background: "#e8eaf6", color: "#3949ab", border: "#3949ab40", borderLeft: "#3949ab" },
-          active: { background: "#3949AB", color: "#FFFFFF", border: "#283593", borderLeft: "#1A237E" },
+          inactive: { background: "#eef0f4", color: "#4f5666", border: "#c9ced8", borderLeft: "#7d8699" },
+          active: { background: "#e0e4ec", color: "#353b4a", border: "#adb4c2", borderLeft: "#626b80" },
         },
         offline_queue: {
-          inactive: { background: "#e3f2fd", color: "#1565c0", border: "#1565c040", borderLeft: "#1565c0" },
-          active: { background: "#1565C0", color: "#FFFFFF", border: "#0D47A1", borderLeft: "#0A3A84" },
+          inactive: { background: "#eef2f5", color: "#4d5a66", border: "#c8d2da", borderLeft: "#7a8c9a" },
+          active: { background: "#dfe6ec", color: "#333e4a", border: "#a8b6c2", borderLeft: "#5f7180" },
         },
         offline: {
-          inactive: { background: "#eceff1", color: "#546e7a", border: "#546e7a40", borderLeft: "#546e7a" },
-          active: { background: "#546E7A", color: "#FFFFFF", border: "#37474F", borderLeft: "#263238" },
+          inactive: { background: "#f1f2f3", color: "#5a6066", border: "#d0d3d6", borderLeft: "#8a9096" },
+          active: { background: "#e4e6e8", color: "#3d4248", border: "#b8bdc2", borderLeft: "#6e747a" },
         },
       }
     : {
         available: {
-          inactive: { background: "#1F8A6524", color: "#6FD4A0", border: "#3FA26655", borderLeft: "#3FA266" },
-          active: { background: "#2E9E68", color: "#FFFFFF", border: "#52B896", borderLeft: "#6FD4A0" },
+          inactive: { background: "#2a3530", color: "#9aafa3", border: "#3d4a43", borderLeft: "#6a8074" },
+          active: { background: "#354038", color: "#c5d4cb", border: "#4d5c54", borderLeft: "#84998c" },
         },
         invisible: {
-          inactive: { background: "#6A1B9A24", color: "#CE93D8", border: "#6A1B9A55", borderLeft: "#AB47BC" },
-          active: { background: "#9C27B0", color: "#FFFFFF", border: "#CE93D8", borderLeft: "#E1BEE7" },
+          inactive: { background: "#302e34", color: "#a39eab", border: "#45424c", borderLeft: "#7a7484" },
+          active: { background: "#3b3842", color: "#cdc8d4", border: "#565260", borderLeft: "#908a9a" },
         },
         break: {
-          inactive: { background: "#F57F1724", color: "#FFB74D", border: "#F57F1755", borderLeft: "#FFB74D" },
-          active: { background: "#FB8C00", color: "#FFFFFF", border: "#FFB74D", borderLeft: "#FFCC80" },
+          inactive: { background: "#342f28", color: "#b0a48e", border: "#4a4338", borderLeft: "#85765c" },
+          active: { background: "#403a30", color: "#d4c9b4", border: "#5c5344", borderLeft: "#9a8a6e" },
         },
         tech_break: {
-          inactive: { background: "#E6510024", color: "#FFAB91", border: "#E6510055", borderLeft: "#FF7043" },
-          active: { background: "#F4511E", color: "#FFFFFF", border: "#FF8A65", borderLeft: "#FFAB91" },
+          inactive: { background: "#342c28", color: "#b09a8e", border: "#4a3e38", borderLeft: "#85705c" },
+          active: { background: "#403632", color: "#d4bfb4", border: "#5c4a44", borderLeft: "#9a7e6e" },
         },
         lunch: {
-          inactive: { background: "#F9A82524", color: "#FFD54F", border: "#F9A82555", borderLeft: "#FFCA28" },
-          active: { background: "#FBC02D", color: "#1A1A1A", border: "#FFD54F", borderLeft: "#FFECB3" },
+          inactive: { background: "#343228", color: "#b0aa8e", border: "#4a4738", borderLeft: "#857f5c" },
+          active: { background: "#403e30", color: "#d4ceb4", border: "#5c5844", borderLeft: "#9a946e" },
         },
         training: {
-          inactive: { background: "#00695C24", color: "#4DB6AC", border: "#00695C55", borderLeft: "#26A69A" },
-          active: { background: "#00897B", color: "#FFFFFF", border: "#4DB6AC", borderLeft: "#80CBC4" },
+          inactive: { background: "#2a3232", color: "#9aabaa", border: "#3d4848", borderLeft: "#6a807e" },
+          active: { background: "#353f3e", color: "#c5d4d3", border: "#4d5c5a", borderLeft: "#849997" },
         },
         meeting: {
-          inactive: { background: "#3949AB24", color: "#7986CB", border: "#3949AB55", borderLeft: "#5C6BC0" },
-          active: { background: "#5C6BC0", color: "#FFFFFF", border: "#7986CB", borderLeft: "#9FA8DA" },
+          inactive: { background: "#2c2f36", color: "#9aa0ab", border: "#40444c", borderLeft: "#6e7484" },
+          active: { background: "#383c46", color: "#c5cad4", border: "#505560", borderLeft: "#868c9a" },
         },
         offline_queue: {
-          inactive: { background: "#1565C024", color: "#64B5F6", border: "#1565C055", borderLeft: "#42A5F5" },
-          active: { background: "#1E88E5", color: "#FFFFFF", border: "#64B5F6", borderLeft: "#90CAF9" },
+          inactive: { background: "#2a3036", color: "#9aa4ab", border: "#3d464c", borderLeft: "#6a7884" },
+          active: { background: "#353c44", color: "#c5ced4", border: "#4d5860", borderLeft: "#84909a" },
         },
         offline: {
-          inactive: { background: "#546E7A24", color: "#90A4AE", border: "#546E7A55", borderLeft: "#78909C" },
-          active: { background: "#607D8B", color: "#FFFFFF", border: "#90A4AE", borderLeft: "#B0BEC5" },
+          inactive: { background: "#2e3032", color: "#9aa0a3", border: "#434648", borderLeft: "#72787a" },
+          active: { background: "#3a3c3e", color: "#c5c9cb", border: "#54585a", borderLeft: "#888e90" },
         },
       };
   return map[key];
@@ -2714,6 +2715,7 @@ export function ArmOperatorView({
   const [blockedDialogIds, setBlockedDialogIds] = useState<Record<string, boolean>>({});
   const [summaryHistory, setSummaryHistory] = useState<SummaryHistoryData>(EMPTY_SUMMARY_HISTORY);
   const [directoryOperators, setDirectoryOperators] = useState<string[]>([]);
+  const [queuesReady, setQueuesReady] = useState(false);
   const [liveWaiting, setLiveWaiting] = useState<QueueItem[]>([]);
   const [liveShared, setLiveShared] = useState<QueueItem[]>([]);
   const [liveMine, setLiveMine] = useState<QueueItem[]>([]);
@@ -2838,7 +2840,16 @@ export function ArmOperatorView({
         setLiveClosed([]);
       }
     } catch {
-      /* Backend may be offline in pure UI/story mode — keep mock queues. */
+      /* Backend may be offline — show empty live queues, never mock clients. */
+      setLiveWaiting([]);
+      setLiveShared([]);
+      setLiveMine([]);
+      setLiveColleagues([]);
+      setLiveOffline([]);
+      setLiveClosed([]);
+      setLiveInitiated([]);
+    } finally {
+      setQueuesReady(true);
     }
   }, [operatorName, viewOnly]);
 
@@ -2945,14 +2956,7 @@ export function ArmOperatorView({
     };
   }, [refreshLiveQueues]);
 
-  const liveMode =
-    liveWaiting.length > 0 ||
-    liveShared.length > 0 ||
-    liveMine.length > 0 ||
-    liveColleagues.length > 0 ||
-    liveOffline.length > 0 ||
-    liveClosed.length > 0 ||
-    liveInitiated.length > 0;
+  const liveMode = queuesReady;
 
   const liveSectionItems: Partial<Record<QueueSectionId, QueueItem[]>> = useMemo(
     () => ({
@@ -2978,24 +2982,13 @@ export function ArmOperatorView({
   const visibleSections = useMemo(() => {
     const sections = queueSectionsForRole(armRole);
     return sections.map((section) => {
-      if (liveMode) {
-        const items = liveSectionItems[section.id];
-        if (items !== undefined) {
-          return {
-            ...section,
-            items,
-            count: items.length,
-            defaultExpanded: items.length > 0 ? true : section.defaultExpanded,
-          };
-        }
-      }
-      if (section.id === "shared") {
-        return section;
-      }
-      if (section.id === "mine") {
-        return section;
-      }
-      return section;
+      const items = liveMode ? (liveSectionItems[section.id] ?? []) : [];
+      return {
+        ...section,
+        items,
+        count: items.length,
+        defaultExpanded: items.length > 0,
+      };
     });
   }, [armRole, liveMode, liveSectionItems]);
 
@@ -3004,7 +2997,7 @@ export function ArmOperatorView({
     .filter((item) => !closedDialogIds[item.id]);
   const active =
     remainingDialogs.find((q) => q.id === selectedQueue) ??
-    (liveMode ? remainingDialogs.find((q) => q.live) : undefined) ??
+    remainingDialogs.find((q) => q.live) ??
     remainingDialogs[0] ??
     null;
   const hasActiveDialog = !!active;
@@ -3761,9 +3754,19 @@ export function ArmOperatorView({
                 gap: 12,
               }}
             >
-              <Text style={{ color: t.text.secondary, fontSize: 14, textAlign: "center" }}>
-                Нет активного диалога. Выберите обращение из очереди слева.
+              <Text style={{ color: t.text.secondary, fontSize: 14, textAlign: "center", maxWidth: 420 }}>
+                {queuesReady
+                  ? "Очередь пуста. Чтобы появился поток обращений, создайте сценарий в разделе «Симулятор» (тест)."
+                  : "Загружаем очереди…"}
               </Text>
+              {queuesReady ? (
+                <a
+                  href="/online-chat/simulator"
+                  style={{ color: scheme.accentControl, fontSize: 13, fontWeight: 600 }}
+                >
+                  Открыть симулятор
+                </a>
+              ) : null}
               {composerNotice ? (
                 <div style={{ width: "100%", maxWidth: 420 }}>
                   <AutoFadeNotice message={composerNotice} onDone={clearComposerNotice} />

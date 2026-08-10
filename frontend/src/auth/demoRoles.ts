@@ -97,6 +97,27 @@ export const DEMO_ROLE_CATALOG: readonly DemoRoleDefinition[] = [
 
 export const DEMO_ROLE_STORAGE_KEY = 'ai-hub-demo-role'
 
+/** Stable demo personas for shell FIO when a RolePicker role is active. */
+export const DEMO_ROLE_PERSONA: Record<string, { name: string; title: string }> = {
+  software_administrator: { name: 'Админов А.П.', title: 'Администратор ПО' },
+  contact_center_module_administrator: {
+    name: 'Смирнов А.Н.',
+    title: 'Администратор модуля КЦ',
+  },
+  contact_center_online_chat_operator: {
+    name: 'Иванов И.И.',
+    title: 'Оператор онлайн-чата',
+  },
+  contact_center_supervisor: {
+    name: 'Козлова Е.В.',
+    title: 'Супервизор КЦ',
+  },
+  contact_center_analyst: {
+    name: 'Орлова Н.Д.',
+    title: 'Аналитик КЦ',
+  },
+}
+
 export function findDemoRole(code: string | null | undefined): DemoRoleDefinition | undefined {
   if (!code) return undefined
   return DEMO_ROLE_CATALOG.find((role) => role.code === code)
@@ -104,7 +125,9 @@ export function findDemoRole(code: string | null | undefined): DemoRoleDefinitio
 
 export function readStoredDemoRole(): string | null {
   try {
-    const value = sessionStorage.getItem(DEMO_ROLE_STORAGE_KEY)
+    const value =
+      sessionStorage.getItem(DEMO_ROLE_STORAGE_KEY)
+      ?? localStorage.getItem(DEMO_ROLE_STORAGE_KEY)
     return findDemoRole(value)?.code ?? null
   } catch {
     return null
@@ -115,10 +138,24 @@ export function storeDemoRole(code: string | null): void {
   try {
     if (!code) {
       sessionStorage.removeItem(DEMO_ROLE_STORAGE_KEY)
+      localStorage.removeItem(DEMO_ROLE_STORAGE_KEY)
       return
     }
     sessionStorage.setItem(DEMO_ROLE_STORAGE_KEY, code)
+    localStorage.setItem(DEMO_ROLE_STORAGE_KEY, code)
   } catch {
     /* ignore quota / private mode */
   }
+}
+
+export function personaForDemoRole(code: string | null | undefined): {
+  name: string
+  title: string
+} | null {
+  if (!code) return null
+  const known = DEMO_ROLE_PERSONA[code]
+  if (known) return known
+  const role = findDemoRole(code)
+  if (!role) return null
+  return { name: 'Сотрудник КЦ', title: role.label }
 }

@@ -1,5 +1,10 @@
 import { useState } from 'react'
-import { readStoredDemoRole } from './auth/demoRoles'
+import {
+  findDemoRole,
+  personaForDemoRole,
+  readStoredDemoRole,
+  storeDemoRole,
+} from './auth/demoRoles'
 import { usePortalAuth } from './auth/usePortalAuth'
 import { AiHubAdminApp } from './ai-hub/admin/AiHubAdminApp'
 import { isAdminCenterRole } from './ai-hub/admin/adminNav'
@@ -38,39 +43,49 @@ import {
 import './App.css'
 
 function jobTitleFromRoles(roles: readonly string[]): string {
-  if (
-    roles.includes('contact_center_module_administrator')
-    || roles.includes('software_administrator')
-  ) {
-    return 'Администратор модуля КЦ'
-  }
-  if (roles.includes('contact_center_supervisor')) {
-    return 'Супервизор КЦ'
-  }
-  if (roles.includes('contact_center_analyst')) {
-    return 'Аналитик КЦ'
-  }
-  if (roles.includes('contact_center_online_chat_operator')) {
-    return 'Оператор онлайн-чата'
-  }
+  const persona = personaForDemoRole(roles[0])
+  if (persona) return persona.title
+  const role = findDemoRole(roles[0])
+  if (role) return role.label
+  if (roles.includes('contact_center_module_administrator')) return 'Администратор модуля КЦ'
+  if (roles.includes('contact_center_supervisor')) return 'Супервизор КЦ'
+  if (roles.includes('contact_center_online_chat_operator')) return 'Оператор онлайн-чата'
   return 'Сотрудник КЦ'
 }
 
-function employeeDisplayName(username: string | null | undefined) {
+function employeeDisplayName(
+  username: string | null | undefined,
+  roles: readonly string[],
+) {
+  const persona = personaForDemoRole(roles[0])
+  if (persona) return persona.name
   if (username && username !== 'Development user') return username
-  return 'Иванов И.И.'
+  return 'Сотрудник КЦ'
 }
 
-/** RolePicker selection narrows FE gates in DEV/demo without changing /api/auth/me. */
-function rolesForUi(authRoles: readonly string[]): string[] {
-  const demo = readStoredDemoRole()
-  if (
-    demo
-    && (import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1')
-  ) {
-    return [demo]
+const ONLINE_CHAT_UI_ROLES = new Set([
+  'contact_center_online_chat_operator',
+  'contact_center_supervisor',
+  'contact_center_module_administrator',
+  'contact_center_analyst',
+  'software_administrator',
+])
+
+/**
+ * RolePicker selection is the source of truth for online-chat tab isolation.
+ * Multi-role auth without a picked demo role does not unlock all tabs at once.
+ */
+function rolesForUi(authRoles: readonly string[], queryRole?: string | null): string[] {
+  if (queryRole && findDemoRole(queryRole)) {
+    storeDemoRole(queryRole)
+    return [queryRole]
   }
-  return [...authRoles]
+  const demo = readStoredDemoRole()
+  if (demo) return [demo]
+  const chatRoles = authRoles.filter((role) => ONLINE_CHAT_UI_ROLES.has(role))
+  if (chatRoles.length === 1) return chatRoles
+  if (chatRoles.length > 1) return []
+  return chatRoles
 }
 
 function StandaloneModule({
@@ -141,7 +156,8 @@ function App() {
   }
 
   if (route === '/online-chat' || route.startsWith('/online-chat/')) {
-    const roles = rolesForUi(auth.roles)
+    const params = new URLSearchParams(window.location.search)
+    const roles = rolesForUi(auth.roles, params.get('demo_role'))
     const isSupervisorRoute = route === '/online-chat/supervisor'
     const isAdminRoute = route === '/online-chat/admin'
     const isSimulatorRoute = route === '/online-chat/simulator'
@@ -149,12 +165,13 @@ function App() {
     const canViewArm = canViewOnlineChatArm(roles)
     const canSupervisor = canAccessOnlineChatSupervisor(roles)
     const canAdmin = canAccessOnlineChatAdmin(roles)
+    const showSimulator = import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'
     const allowed = isSupervisorRoute
       ? canSupervisor
       : isAdminRoute
         ? canAdmin
         : isSimulatorRoute
-          ? import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'
+          ? showSimulator
           : route === '/online-chat' && canViewArm
 
     if (!allowed) {
@@ -170,23 +187,29 @@ function App() {
       )
     }
 
-    const params = new URLSearchParams(window.location.search)
     const operatorFromQuery = params.get('operator')?.trim() || ''
     const forcedView = params.get('mode') === 'view' || (!canOperateArm && canViewArm)
     const allowTransferView = canTransferInOnlineChatView(roles)
-    const viewerName = employeeDisplayName(auth.username)
-    const armRole = canAdmin ? 'admin' as const : canSupervisor && !canOperateArm ? 'supervisor' as const : 'operator' as const
+    const viewerName = employeeDisplayName(auth.username, roles)
+    const viewerTitle = jobTitleFromRoles(roles)
+    const armRole = canAdmin
+      ? 'admin' as const
+      : canSupervisor
+        ? 'supervisor' as const
+        : 'operator' as const
 
     const shellProps = {
       currentPath: route,
       displayName: forcedView && operatorFromQuery
         ? `Просмотр · ${operatorFromQuery}`
         : viewerName,
-      jobTitle: jobTitleFromRoles(roles),
+      jobTitle: forcedView && operatorFromQuery
+        ? `${viewerTitle} · режим просмотра`
+        : viewerTitle,
       showArm: canViewArm,
       showSupervisor: canSupervisor,
       showAdmin: canAdmin,
-      showSimulator: import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1',
+      showSimulator,
       themeKind: chatThemeKind,
       onToggleTheme: () =>
         setChatThemeKind((kind) => (kind === 'light' ? 'dark' : 'light')),
