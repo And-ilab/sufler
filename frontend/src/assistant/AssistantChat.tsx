@@ -15,6 +15,10 @@ import {
   type AssistantKbOption,
 } from './api/knowledgeBases'
 import {
+  extractChatAttachment,
+  type ChatAttachmentPayload,
+} from './api/attachments'
+import {
   fetchLocalLlmModels,
   selectLocalLlmModel,
   type LocalLlmModel,
@@ -25,6 +29,9 @@ import {
 } from './chatPersistence'
 import { useAssistantChat } from './useAssistantChat'
 import './AssistantChat.css'
+
+const ATTACH_ACCEPT = '.pdf,.doc,.docx,.txt,.rtf'
+const ATTACH_MAX_FILES = 5
 
 function toolBadgeStatus(state: ToolRunState): StatusBadgeStatus {
   if (state === 'done') return 'success'
@@ -191,7 +198,16 @@ function MessageLenta({
             {message.role === 'user' ? 'Вы' : 'Ассистент'}
           </div>
           {message.role === 'user' ? (
-            <p className="asst-turn__user">{message.content}</p>
+            <div className="asst-turn__user-block">
+              {message.attachments?.length ? (
+                <ul className="asst-turn__files" aria-label="Вложения">
+                  {message.attachments.map((file) => (
+                    <li key={file.name}>{file.name}</li>
+                  ))}
+                </ul>
+              ) : null}
+              <p className="asst-turn__user">{message.content}</p>
+            </div>
           ) : (
             <Card className="asst-turn__card">
               {message.pending && !message.content ? (
@@ -432,7 +448,11 @@ export function AssistantChat({
   const [draft, setDraft] = useState(initialDraft)
   const [kbOpen, setKbOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([])
+  const [attachBusy, setAttachBusy] = useState(false)
+  const [attachError, setAttachError] = useState('')
   const kbRootRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [kbCatalog, setKbCatalog] = useState<AssistantKbOption[]>(
     () => (knowledgeBasesProp ? [...knowledgeBasesProp] : []),
   )
@@ -608,12 +628,43 @@ export function AssistantChat({
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [kbOpen])
 
+  const onPickFiles = async (fileList: FileList | null) => {
+    if (!fileList?.length || readOnly) return
+    const remaining = Math.max(0, ATTACH_MAX_FILES - attachments.length)
+    if (!remaining) {
+      setAttachError(`Можно прикрепить не больше ${ATTACH_MAX_FILES} файлов`)
+      return
+    }
+    const files = Array.from(fileList).slice(0, remaining)
+    setAttachBusy(true)
+    setAttachError('')
+    try {
+      await ensureDevSession()
+      const extracted: ChatAttachmentPayload[] = []
+      for (const file of files) {
+        extracted.push(await extractChatAttachment(file))
+      }
+      setAttachments((current) => [...current, ...extracted].slice(0, ATTACH_MAX_FILES))
+    } catch (error) {
+      setAttachError(
+        error instanceof Error ? error.message : 'Не удалось прочитать файл',
+      )
+    } finally {
+      setAttachBusy(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
-    if (readOnly || !draft.trim() || streaming) return
+    if (readOnly || streaming || attachBusy) return
+    if (!draft.trim() && !attachments.length) return
     const text = draft
+    const files = attachments
     setDraft('')
-    void sendMessage(text)
+    setAttachments([])
+    setAttachError('')
+    void sendMessage(text, files)
   }
 
   return (
@@ -746,6 +797,8 @@ export function AssistantChat({
           onClick={() => {
             newDialog()
             setHistoryOpen(false)
+            setAttachments([])
+            setAttachError('')
           }}
           disabled={readOnly}
           data-testid="asst-new"
@@ -781,6 +834,8 @@ export function AssistantChat({
         onNew={() => {
           newDialog()
           setHistoryOpen(false)
+          setAttachments([])
+          setAttachError('')
         }}
         onDelete={deleteDialog}
       />
@@ -806,7 +861,13 @@ export function AssistantChat({
         <Card className="asst-error" role="alert">
           <StatusBadge status="danger">Ошибка</StatusBadge>
           <p>{error}</p>
-          <Button type="button" onClick={() => draft.trim() && void sendMessage(draft)}>
+          <Button
+            type="button"
+            onClick={() =>
+              (draft.trim() || attachments.length)
+              && void sendMessage(draft, attachments)
+            }
+          >
             Повторить
           </Button>
         </Card>
@@ -814,8 +875,26 @@ export function AssistantChat({
 
       <form className="asst-composer" onSubmit={onSubmit} data-testid="asst-composer">
         <div className="asst-composer__extras">
-          <Button type="button" variant="ghost" disabled={readOnly}>
-            Прикрепить
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="asst-composer__file"
+            accept={ATTACH_ACCEPT}
+            multiple
+            hidden
+            disabled={readOnly || attachBusy || streaming}
+            onChange={(event) => void onPickFiles(event.target.files)}
+            data-testid="asst-attach-input"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={readOnly || attachBusy || streaming || attachments.length >= ATTACH_MAX_FILES}
+            onClick={() => fileInputRef.current?.click()}
+            data-testid="asst-attach"
+            title="PDF, DOC, DOCX, TXT, RTF · до 10 МБ"
+          >
+            {attachBusy ? 'Читаю файл…' : 'Прикрепить'}
           </Button>
           <Button
             type="button"
@@ -832,12 +911,43 @@ export function AssistantChat({
             Инструменты
           </Button>
         </div>
+        {attachments.length > 0 ? (
+          <ul className="asst-composer__attachments" data-testid="asst-attach-list">
+            {attachments.map((file) => (
+              <li key={`${file.name}-${file.size_bytes ?? 0}`}>
+                <span>{file.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Убрать ${file.name}`}
+                  onClick={() =>
+                    setAttachments((current) =>
+                      current.filter((item) => item.name !== file.name),
+                    )
+                  }
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {attachError ? (
+          <p className="asst-composer__attach-error" role="alert" data-testid="asst-attach-error">
+            {attachError}
+          </p>
+        ) : null}
         <label htmlFor="asst-draft">Сообщение ассистенту</label>
         <textarea
           id="asst-draft"
           value={draft}
           maxLength={maxChars}
-          placeholder={readOnly ? 'Отправка сообщений недоступна для аналитика' : 'Задайте вопрос…'}
+          placeholder={
+            readOnly
+              ? 'Отправка сообщений недоступна для аналитика'
+              : attachments.length
+                ? 'Добавьте вопрос к файлу или отправьте для саммари…'
+                : 'Задайте вопрос…'
+          }
           data-testid="asst-draft"
           disabled={readOnly}
           readOnly={readOnly}
@@ -849,7 +959,12 @@ export function AssistantChat({
           </span>
           <Button
             type="submit"
-            disabled={readOnly || !draft.trim() || streaming}
+            disabled={
+              readOnly
+              || streaming
+              || attachBusy
+              || (!draft.trim() && !attachments.length)
+            }
             data-testid="asst-send"
           >
             {streaming ? 'Стриминг…' : 'Отправить'}

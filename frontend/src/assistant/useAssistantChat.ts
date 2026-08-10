@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ChatAttachmentPayload } from './api/attachments'
 import { streamAssistantChat, streamDemoChat } from './api/chatStream'
 import {
   createDialogInHistory,
@@ -128,16 +129,30 @@ export function useAssistantChat({
   }, [])
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, attachments: ChatAttachmentPayload[] = []) => {
       const trimmed = text.trim()
-      if (!trimmed || streaming) return
+      const readyAttachments = attachments.filter((item) => item.text?.trim())
+      if ((!trimmed && !readyAttachments.length) || streaming) return
 
+      const displayText =
+        trimmed
+        || (readyAttachments.length === 1
+          ? `Суммаризируй вложение «${readyAttachments[0].name}».`
+          : 'Суммаризируй вложения.')
       const userId = uid('user')
       const assistantId = uid('asst')
       setError('')
       setMessages((current) => [
         ...current,
-        { id: userId, role: 'user', content: trimmed },
+        {
+          id: userId,
+          role: 'user',
+          content: displayText,
+          attachments: readyAttachments.map((item) => ({
+            name: item.name,
+            type: item.type,
+          })),
+        },
         {
           id: assistantId,
           role: 'assistant',
@@ -165,11 +180,12 @@ export function useAssistantChat({
 
       try {
         const stream = demoMode
-          ? streamDemoChat(trimmed, controller.signal)
+          ? streamDemoChat(displayText, controller.signal)
           : streamAssistantChat({
               message: trimmed,
               sessionId,
               kbSlugs: getKbSlugs?.() ?? [],
+              attachments: readyAttachments,
               signal: controller.signal,
             })
 
