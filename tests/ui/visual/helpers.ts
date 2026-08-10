@@ -12,8 +12,14 @@ export const MAX_DIFF_PIXEL_RATIO = 0.001
 
 export async function openStory(page: Page, storyId: string): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 800 })
+  // Storybook keeps long-lived connections; networkidle often times out in CI.
   await page.goto(`/iframe.html?id=${storyId}&viewMode=story`, {
-    waitUntil: 'networkidle',
+    waitUntil: 'domcontentloaded',
+    timeout: 120_000,
+  })
+  await page.waitForSelector('#storybook-root', {
+    state: 'attached',
+    timeout: 120_000,
   })
   await page.evaluate(() => document.fonts.ready)
   await page.addStyleTag({
@@ -33,10 +39,12 @@ export async function openStory(page: Page, storyId: string): Promise<void> {
     `,
   })
   const story = page.locator('#storybook-root')
-  await expect(story).toBeVisible()
-  await expect(story.locator(':scope > *').first()).toBeVisible()
+  await expect(story).toBeVisible({ timeout: 60_000 })
+  await expect(story.locator(':scope > *').first()).toBeVisible({
+    timeout: 60_000,
+  })
   // Settle layout after fonts/styles (Storybook iframe).
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(800)
 }
 
 export async function assertCanvasScreenshot(
