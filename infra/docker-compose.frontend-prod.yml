@@ -16,6 +16,8 @@ services:
         # Must match backend AUTH_MOCK_LDAP_DEFAULT_PASSWORD (infra/.env).
         VITE_DEV_AUTH_PASSWORD: ${AUTH_MOCK_LDAP_DEFAULT_PASSWORD:-replace-with-dev-only-password}
         VITE_DEV_RBAC_ROLES: ${VITE_DEV_RBAC_ROLES:-}
+        # TEST/demo: simulator, supervisor demo queue, multi-window links (baked at build).
+        VITE_SUFLER_DEMO: ${VITE_SUFLER_DEMO:-1}
     image: ${FRONTEND_IMAGE:-sufler-frontend:local}
     restart: unless-stopped
     # Clear Vite-only settings from docker-compose.yml (Compose merge reset).
