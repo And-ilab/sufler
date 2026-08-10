@@ -171,7 +171,7 @@ def run(
     samples = load_dataset(dataset_path)
     gateway = gateway or ModelGateway.from_registry()
     configured = gateway.get_profile(PROFILE)
-    is_stub = configured.model.startswith("stub:")
+    is_stub = gateway._mode_for(configured) == "stub"
     latency_limit_ms = int(configured.kpi["latency_p95_ms_max"])
 
     results: list[dict[str, Any]] = []

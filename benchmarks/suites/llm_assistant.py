@@ -219,7 +219,7 @@ def run(gateway: ModelGateway | None = None) -> dict[str, Any]:
     context = build_context(context_tokens)
     stream = _stream_metrics(gateway, context)
     tool_call = _tool_call_metrics(gateway)
-    is_stub = configured.model.startswith("stub:")
+    is_stub = gateway._mode_for(configured) == "stub"
     context_contract_passed = (
         len(context.split()) == context_tokens and stream["done_received"]
     )
