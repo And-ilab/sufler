@@ -24,20 +24,17 @@ class ModelGatewayTest(unittest.TestCase):
 
     def test_registry_maps_all_profiles_to_expected_slots(self):
         expected = {
-            "sufler_cc": "llm_sufler_cc",
-            "assistant_bank": "llm_assistant_bank",
-            "docs_ocr": "llm_docs_ocr",
+            "sufler_cc": ("llm_sufler_cc", "qwen2.5-1.5b-instruct"),
+            "assistant_bank": ("llm_assistant_bank", "qwen2.5-1.5b-instruct"),
+            "docs_ocr": ("llm_docs_ocr", "stub:docs_ocr"),
         }
 
-        for profile, slot_name in expected.items():
+        for profile, (slot_name, model) in expected.items():
             with self.subTest(profile=profile):
                 configured = self.gateway.get_profile(profile)
                 self.assertEqual(configured.slot_name, slot_name)
                 self.assertEqual(configured.gateway_mode, "stub")
-                self.assertEqual(
-                    configured.model,
-                    f"stub:{profile}",
-                )
+                self.assertEqual(configured.model, model)
 
     def test_dev_stub_returns_profile_specific_openai_response(self):
         responses = {
@@ -48,7 +45,10 @@ class ModelGatewayTest(unittest.TestCase):
         for profile, response in responses.items():
             with self.subTest(profile=profile):
                 self.assertEqual(response["object"], "chat.completion")
-                self.assertEqual(response["model"], f"stub:{profile}")
+                self.assertEqual(
+                    response["model"],
+                    self.gateway.get_profile(profile).model,
+                )
                 self.assertEqual(
                     response["choices"][0]["message"]["content"],
                     STUB_RESPONSES[profile],

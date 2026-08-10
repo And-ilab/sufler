@@ -3,7 +3,7 @@
  * Source of truth for portal launcher, ≡ menu, chat write, and admin shell entry.
  */
 
-export type LauncherModule = 'sufler' | 'assistant'
+export type LauncherModule = 'sufler' | 'assistant' | 'online_chat'
 
 export interface SettingsMenuEntry {
   href: string
@@ -35,6 +35,14 @@ const SUFLER_ROLES = new Set([
   'contact_center_online_chat_operator',
   // DEV preview while configuring CC KB / scenarios
   'llm_knowledge_base_administrator',
+])
+
+/** Online-chat ops UI — not analyst (reports only per §2.4 п.7 / II.6). */
+const ONLINE_CHAT_ROLES = new Set([
+  'software_administrator',
+  'contact_center_module_administrator',
+  'contact_center_online_chat_operator',
+  'contact_center_supervisor',
 ])
 
 /** Open Ассистент window (write or read-only per canWriteAssistantChat). */
@@ -115,6 +123,9 @@ export function getAllowedLauncherModules(
   }
   if ([...ASSISTANT_ROLES].some((role) => roleSet.has(role))) {
     modules.push('assistant')
+  }
+  if ([...ONLINE_CHAT_ROLES].some((role) => roleSet.has(role))) {
+    modules.push('online_chat')
   }
   return modules
 }

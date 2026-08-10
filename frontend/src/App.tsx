@@ -1,3 +1,10 @@
+import { useState } from 'react'
+import {
+  findDemoRole,
+  personaForDemoRole,
+  readStoredDemoRole,
+  storeDemoRole,
+} from './auth/demoRoles'
 import { usePortalAuth } from './auth/usePortalAuth'
 import { AiHubAdminApp } from './ai-hub/admin/AiHubAdminApp'
 import { isAdminCenterRole } from './ai-hub/admin/adminNav'
@@ -9,7 +16,22 @@ import { canAccessInternalKc } from './internal-kc/internalKcAccess'
 import { AssistantWindowApp } from './assistant/AssistantWindowApp'
 import { SuflerPhoneApp } from './sufler/SuflerPhoneApp'
 import { ChatArmApp } from './online-chat/ChatArmApp'
-import { canAccessOnlineChatArm } from './online-chat/chatArmAccess'
+import {
+  canOperateOnlineChatArm,
+  canViewOnlineChatArm,
+} from './online-chat/chatArmAccess'
+import { ChatAdminApp } from './online-chat/admin/ChatAdminApp'
+import {
+  canAccessOnlineChatAdmin,
+  canAccessOnlineChatSupervisor,
+  canTransferInOnlineChatView,
+} from './online-chat/managementAccess'
+import { OperatorPicker } from './online-chat/OperatorPicker'
+import { ChatSimulatorApp } from './online-chat/simulator/ChatSimulatorApp'
+import { ChatPlatformShell } from './online-chat/shell/ChatPlatformShell'
+import { SupervisorApp } from './online-chat/supervisor/SupervisorApp'
+import { ArmMenuHost } from './online-chat/arm/ArmMenuHost'
+import type { ThemeKind } from './online-chat/arm/theme'
 import {
   Button,
   Card,
@@ -20,6 +42,51 @@ import {
   type LauncherModule,
 } from './components'
 import './App.css'
+
+function jobTitleFromRoles(roles: readonly string[]): string {
+  const persona = personaForDemoRole(roles[0])
+  if (persona) return persona.title
+  const role = findDemoRole(roles[0])
+  if (role) return role.label
+  if (roles.includes('contact_center_module_administrator')) return 'Администратор модуля КЦ'
+  if (roles.includes('contact_center_supervisor')) return 'Супервизор КЦ'
+  if (roles.includes('contact_center_online_chat_operator')) return 'Оператор онлайн-чата'
+  return 'Сотрудник КЦ'
+}
+
+function employeeDisplayName(
+  username: string | null | undefined,
+  roles: readonly string[],
+) {
+  const persona = personaForDemoRole(roles[0])
+  if (persona) return persona.name
+  if (username && username !== 'Development user') return username
+  return 'Сотрудник КЦ'
+}
+
+const ONLINE_CHAT_UI_ROLES = new Set([
+  'contact_center_online_chat_operator',
+  'contact_center_supervisor',
+  'contact_center_module_administrator',
+  'software_administrator',
+])
+
+/**
+ * RolePicker selection is the source of truth for online-chat tab isolation.
+ * Multi-role auth without a picked demo role does not unlock all tabs at once.
+ */
+function rolesForUi(authRoles: readonly string[], queryRole?: string | null): string[] {
+  if (queryRole && findDemoRole(queryRole)) {
+    storeDemoRole(queryRole)
+    return [queryRole]
+  }
+  const demo = readStoredDemoRole()
+  if (demo) return [demo]
+  const chatRoles = authRoles.filter((role) => ONLINE_CHAT_UI_ROLES.has(role))
+  if (chatRoles.length === 1) return chatRoles
+  if (chatRoles.length > 1) return []
+  return chatRoles
+}
 
 function StandaloneModule({
   module,
@@ -67,6 +134,8 @@ function StandaloneModule({
 function App() {
   const auth = usePortalAuth()
   const route = window.location.pathname.replace(/\/+$/, '') || '/'
+  const [chatThemeKind, setChatThemeKind] = useState<ThemeKind>('light')
+  const [armMenuOpen, setArmMenuOpen] = useState(false)
 
   if (auth.status === 'loading') {
     return (
@@ -87,23 +156,141 @@ function App() {
   }
 
   if (route === '/online-chat' || route.startsWith('/online-chat/')) {
-    if (!canAccessOnlineChatArm(auth.roles)) {
+    const params = new URLSearchParams(window.location.search)
+    const roles = rolesForUi(auth.roles, params.get('demo_role'))
+    const isSupervisorRoute = route === '/online-chat/supervisor'
+    const isAdminRoute = route === '/online-chat/admin'
+    const isSimulatorRoute = route === '/online-chat/simulator'
+    const canOperateArm = canOperateOnlineChatArm(roles)
+    const canViewArm = canViewOnlineChatArm(roles)
+    const canSupervisor = canAccessOnlineChatSupervisor(roles)
+    const canAdmin = canAccessOnlineChatAdmin(roles)
+    const showSimulator = import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'
+    const simOperatePreview = params.get('mode') === 'operate' && Boolean(params.get('operator')?.trim())
+    const allowed = isSupervisorRoute
+      ? canSupervisor
+      : isAdminRoute
+        ? canAdmin
+        : isSimulatorRoute
+          ? showSimulator
+          : route === '/online-chat' && (canViewArm || simOperatePreview || showSimulator)
+
+    if (!allowed) {
       return (
         <main className="standalone-module standalone-module--denied">
           <Card>
             <StatusBadge status="danger">403</StatusBadge>
-            <h1>Нет доступа к АРМ онлайн-чата</h1>
-            <p>Требуется роль оператора онлайн-чата Контакт-центра.</p>
-            <Button onClick={() => window.location.assign('/')}>Вернуться на портал</Button>
+            <h1>Нет доступа к разделу онлайн-чата</h1>
+            <p>Для выбранного маршрута требуется соответствующая роль Контакт-центра.</p>
+            <Button onClick={() => window.location.assign('/ai-hub')}>Выбрать роль</Button>
           </Card>
         </main>
       )
     }
+
+    const operatorFromQuery = params.get('operator')?.trim() || ''
+    /** Simulator / multi-window: work as this operator (writable), not observation. */
+    const simOperate = params.get('mode') === 'operate' && Boolean(operatorFromQuery)
+    const forcedView = !simOperate && (
+      params.get('mode') === 'view' || (!canOperateArm && canViewArm)
+    )
+    const allowTransferView = canTransferInOnlineChatView(roles)
+    const viewerName = employeeDisplayName(auth.username, roles)
+    const viewerTitle = jobTitleFromRoles(roles)
+    const armRole = simOperate
+      ? 'operator' as const
+      : canAdmin
+        ? 'admin' as const
+        : canSupervisor
+          ? 'supervisor' as const
+          : 'operator' as const
+    const armNavLabel = canOperateArm || simOperate ? 'Чаты' : 'Операторы'
+
+    const operateHref = simOperate
+      ? `/online-chat?mode=operate&operator=${encodeURIComponent(operatorFromQuery)}`
+      : forcedView && operatorFromQuery
+        ? `/online-chat?mode=view&operator=${encodeURIComponent(operatorFromQuery)}`
+        : '/online-chat'
+
+    const shellProps = {
+      currentPath: route,
+      displayName: simOperate
+        ? operatorFromQuery
+        : forcedView && operatorFromQuery
+          ? `Просмотр · ${operatorFromQuery}`
+          : viewerName,
+      jobTitle: simOperate
+        ? 'Оператор онлайн-чата · симулятор'
+        : forcedView && operatorFromQuery
+          ? `${viewerTitle} · режим просмотра`
+          : viewerTitle,
+      // In simulator operate mode the shell must look like a pure operator session.
+      showArm: true,
+      showSupervisor: simOperate ? false : canSupervisor,
+      showAdmin: simOperate ? false : canAdmin,
+      showSimulator: simOperate ? false : showSimulator,
+      armNavLabel: simOperate ? 'Чаты' : armNavLabel,
+      armHref: operateHref,
+      themeKind: chatThemeKind,
+      onToggleTheme: () =>
+        setChatThemeKind((kind) => (kind === 'light' ? 'dark' : 'light')),
+      // Hamburger is part of АРМ for every role on /online-chat (picker + operate + view).
+      showMenuButton: route === '/online-chat',
+      menuOpen: armMenuOpen,
+      onMenuToggle: () => setArmMenuOpen((open) => !open),
+    }
+    if (isSupervisorRoute) {
+      return (
+        <ChatPlatformShell {...shellProps} showMenuButton={false}>
+          <SupervisorApp demoMode={import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'} />
+        </ChatPlatformShell>
+      )
+    }
+    if (isAdminRoute) {
+      return (
+        <ChatPlatformShell {...shellProps} showMenuButton={false}>
+          <ChatAdminApp />
+        </ChatPlatformShell>
+      )
+    }
+    if (isSimulatorRoute) {
+      return (
+        <ChatPlatformShell {...shellProps} showMenuButton={false}>
+          <ChatSimulatorApp />
+        </ChatPlatformShell>
+      )
+    }
+
+    if (forcedView && !operatorFromQuery) {
+      return (
+        <ChatPlatformShell {...shellProps}>
+          <ArmMenuHost
+            open={armMenuOpen}
+            onOpenChange={setArmMenuOpen}
+            armRole={armRole}
+            menuContext="picker"
+            themeKind={chatThemeKind}
+            operatorName={viewerName}
+          >
+            <OperatorPicker allowTransfer={allowTransferView} />
+          </ArmMenuHost>
+        </ChatPlatformShell>
+      )
+    }
+
     return (
-      <ChatArmApp
-        demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
-        operatorName={auth.username ?? 'Оператор КЦ'}
-      />
+      <ChatPlatformShell {...shellProps}>
+        <ChatArmApp
+          demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
+          operatorName={simOperate || forcedView ? operatorFromQuery : viewerName}
+          themeKind={chatThemeKind}
+          statsDrawerOpen={armMenuOpen}
+          onStatsDrawerOpenChange={setArmMenuOpen}
+          armRole={armRole}
+          viewOnly={forcedView}
+          allowTransferInView={forcedView && allowTransferView}
+        />
+      </ChatPlatformShell>
     )
   }
 
@@ -179,8 +366,13 @@ function App() {
         </main>
       )
     }
-    const section =
-      route.includes('/asr') ? 'asr-qa' as const : 'overview' as const
+    const section = route.includes('/asr')
+      ? 'asr-qa' as const
+      : route.includes('/live')
+        ? 'live' as const
+        : route.includes('/builder')
+          ? 'builder' as const
+          : 'overview' as const
     return (
       <AiHubReportsApp
         username={auth.username ?? undefined}
@@ -199,19 +391,30 @@ function App() {
       {canAccessCcReports(auth.roles) && (
         <div className="portal-route__reports-entry">
           <Card>
-            <StatusBadge status="info">Отчётность · II.6</StatusBadge>
-            <h2>Отчёты Контакт-центра</h2>
+            <h2>Отчётность</h2>
             <p className="app-muted">
-              Таблицы FR-RPT-CC, фильтры периода, экспорт CSV/XLSX и графики качества ASR.
+              Аналитика, оперативная панель, конструктор отчётов и записи разговоров.
             </p>
             <Button onClick={() => window.location.assign('/ai-hub/reports')}>
               Открыть отчёты
             </Button>
             <Button
               variant="ghost"
+              onClick={() => window.location.assign('/ai-hub/reports/live')}
+            >
+              Оперативная панель
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => window.location.assign('/ai-hub/reports/builder')}
+            >
+              Конструктор
+            </Button>
+            <Button
+              variant="ghost"
               onClick={() => window.location.assign('/ai-hub/reports/asr')}
             >
-              QA ASR
+              Записи разговоров
             </Button>
           </Card>
         </div>

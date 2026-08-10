@@ -12,7 +12,11 @@ from reports.views import (
     asr_sessions,
     asr_utterance_annotation,
     cc_analytics,
+    cc_builder_preview,
+    cc_builder_templates,
     cc_export,
+    cc_live,
+    cc_report_catalog,
 )
 
 urlpatterns = [
@@ -35,6 +39,10 @@ urlpatterns = [
     path("asr/seed-demo/", asr_seed_demo, name="asr_seed_demo"),
     path("cc/analytics/", cc_analytics, name="cc_analytics"),
     path("cc/export/", cc_export, name="cc_export"),
+    path("cc/live/", cc_live, name="cc_live"),
+    path("cc/catalog/", cc_report_catalog, name="cc_report_catalog"),
+    path("cc/builder/", cc_builder_templates, name="cc_builder_templates"),
+    path("cc/builder/preview/", cc_builder_preview, name="cc_builder_preview"),
     # FR-RPT-ASS / III.10.2 — same handlers as /api/v1/assistant/reports/
     path("ass/", assistant_reports_catalog, name="ass_reports_catalog"),
     path(
@@ -44,5 +52,3 @@ urlpatterns = [
     ),
     path("ass/export/", assistant_reports_export, name="ass_reports_export"),
 ]
-
-

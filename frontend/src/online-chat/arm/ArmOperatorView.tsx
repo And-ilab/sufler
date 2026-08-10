@@ -1,18 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react'
 import type { ArmTheme } from './theme'
 import {
-  acceptDialog,
   blockDialogRemote,
+  canDownloadAttachment,
   closeDialogRemote,
+  deleteMessageRemote,
+  dialogRefCode,
+  downloadAttachment,
+  editMessageRemote,
+  fetchClientHistory,
   formatWaitMmSs,
   getDialog,
+  liftClientBlock,
+  listClientBlocks,
   listDialogs,
+  markDialogRead,
   maskPhone,
   onlineChatArmWsUrl,
   sendOperatorMessage,
+  slaToneFromSeconds,
+  transferDialogRemote,
+  uploadOperatorAttachment,
+  type ClientHistoryItem,
   type OnlineChatDialog,
   type OnlineChatMessage,
+  type ReceiptStatus,
+  type SlaTone,
 } from '../api/onlineChatApi'
+import {
+  getInternalUnreadCount,
+  operatorsApi,
+  type ChatOperator,
+} from '../api/managementApi'
 import {
   Button,
   Callout,
@@ -32,6 +51,8 @@ import {
   Text,
   TextArea,
 } from './primitives'
+import { ArmModulesHost, isArmWorkspaceModule, loadReplyTemplates } from './modules'
+import type { ArmModuleId } from './modules'
 
 const CANVAS_MOCKUP_VERSION = 'v1.4.74'
 
@@ -86,81 +107,82 @@ function operatorStatusShade(
   key: OperatorStatusShadeKey,
 ): { inactive: StatusShadeStyle; active: StatusShadeStyle } {
   const light = t.kind === "light";
+  // Muted chips: low-saturation fills, soft active state (no neon solids).
   const map: Record<OperatorStatusShadeKey, { inactive: StatusShadeStyle; active: StatusShadeStyle }> = light
     ? {
         available: {
-          inactive: { background: "#e8f5e9", color: "#2e7d32", border: "#2e7d3240", borderLeft: "#2e7d32" },
+          inactive: { background: "#eef3f0", color: "#4a6354", border: "#c5d4cb", borderLeft: "#7a9a86" },
           active: { background: "#1B8F4A", color: "#FFFFFF", border: "#146C38", borderLeft: "#0F5A2E" },
         },
         invisible: {
-          inactive: { background: "#f3e5f5", color: "#6a1b9a", border: "#6a1b9a40", borderLeft: "#6a1b9a" },
-          active: { background: "#7B1FA2", color: "#FFFFFF", border: "#6A1B9A", borderLeft: "#4A148C" },
+          inactive: { background: "#f1f0f3", color: "#5c5666", border: "#d0ccd6", borderLeft: "#8a8396" },
+          active: { background: "#6B7280", color: "#FFFFFF", border: "#4B5563", borderLeft: "#374151" },
         },
         break: {
-          inactive: { background: "#fff8e1", color: "#f57f17", border: "#f57f1740", borderLeft: "#f57f17" },
-          active: { background: "#F57C00", color: "#FFFFFF", border: "#E65100", borderLeft: "#BF360C" },
+          inactive: { background: "#f5f2eb", color: "#6b5f45", border: "#ddd4c2", borderLeft: "#a8946e" },
+          active: { background: "#D97706", color: "#FFFFFF", border: "#B45309", borderLeft: "#92400E" },
         },
         tech_break: {
-          inactive: { background: "#fff3e0", color: "#e65100", border: "#e6510040", borderLeft: "#e65100" },
-          active: { background: "#E64A19", color: "#FFFFFF", border: "#BF360C", borderLeft: "#8D2B0A" },
+          inactive: { background: "#f4efec", color: "#6b564c", border: "#dccfc7", borderLeft: "#a88878" },
+          active: { background: "#C2410C", color: "#FFFFFF", border: "#9A3412", borderLeft: "#7C2D12" },
         },
         lunch: {
-          inactive: { background: "#fffde7", color: "#f9a825", border: "#f9a82540", borderLeft: "#f9a825" },
-          active: { background: "#F9A825", color: "#FFFFFF", border: "#F57F17", borderLeft: "#E65100" },
+          inactive: { background: "#f5f3e9", color: "#6a6348", border: "#ddd7c0", borderLeft: "#a89c6e" },
+          active: { background: "#CA8A04", color: "#FFFFFF", border: "#A16207", borderLeft: "#854D0E" },
         },
         training: {
-          inactive: { background: "#e0f2f1", color: "#00695c", border: "#00695c40", borderLeft: "#00695c" },
-          active: { background: "#00897B", color: "#FFFFFF", border: "#00695C", borderLeft: "#004D40" },
+          inactive: { background: "#eef2f2", color: "#4d5f5e", border: "#c8d2d1", borderLeft: "#7a9290" },
+          active: { background: "#0F766E", color: "#FFFFFF", border: "#0D5C56", borderLeft: "#115E59" },
         },
         meeting: {
-          inactive: { background: "#e8eaf6", color: "#3949ab", border: "#3949ab40", borderLeft: "#3949ab" },
-          active: { background: "#3949AB", color: "#FFFFFF", border: "#283593", borderLeft: "#1A237E" },
+          inactive: { background: "#eef0f4", color: "#4f5666", border: "#c9ced8", borderLeft: "#7d8699" },
+          active: { background: "#4F46E5", color: "#FFFFFF", border: "#4338CA", borderLeft: "#3730A3" },
         },
         offline_queue: {
-          inactive: { background: "#e3f2fd", color: "#1565c0", border: "#1565c040", borderLeft: "#1565c0" },
-          active: { background: "#1565C0", color: "#FFFFFF", border: "#0D47A1", borderLeft: "#0A3A84" },
+          inactive: { background: "#eef2f5", color: "#4d5a66", border: "#c8d2da", borderLeft: "#7a8c9a" },
+          active: { background: "#2563EB", color: "#FFFFFF", border: "#1D4ED8", borderLeft: "#1E40AF" },
         },
         offline: {
-          inactive: { background: "#eceff1", color: "#546e7a", border: "#546e7a40", borderLeft: "#546e7a" },
-          active: { background: "#546E7A", color: "#FFFFFF", border: "#37474F", borderLeft: "#263238" },
+          inactive: { background: "#f1f2f3", color: "#5a6066", border: "#d0d3d6", borderLeft: "#8a9096" },
+          active: { background: "#4B5563", color: "#FFFFFF", border: "#374151", borderLeft: "#1F2937" },
         },
       }
     : {
         available: {
-          inactive: { background: "#1F8A6524", color: "#6FD4A0", border: "#3FA26655", borderLeft: "#3FA266" },
+          inactive: { background: "#2a3530", color: "#9aafa3", border: "#3d4a43", borderLeft: "#6a8074" },
           active: { background: "#2E9E68", color: "#FFFFFF", border: "#52B896", borderLeft: "#6FD4A0" },
         },
         invisible: {
-          inactive: { background: "#6A1B9A24", color: "#CE93D8", border: "#6A1B9A55", borderLeft: "#AB47BC" },
-          active: { background: "#9C27B0", color: "#FFFFFF", border: "#CE93D8", borderLeft: "#E1BEE7" },
+          inactive: { background: "#302e34", color: "#a39eab", border: "#45424c", borderLeft: "#7a7484" },
+          active: { background: "#6B7280", color: "#FFFFFF", border: "#9CA3AF", borderLeft: "#D1D5DB" },
         },
         break: {
-          inactive: { background: "#F57F1724", color: "#FFB74D", border: "#F57F1755", borderLeft: "#FFB74D" },
-          active: { background: "#FB8C00", color: "#FFFFFF", border: "#FFB74D", borderLeft: "#FFCC80" },
+          inactive: { background: "#342f28", color: "#b0a48e", border: "#4a4338", borderLeft: "#85765c" },
+          active: { background: "#D97706", color: "#FFFFFF", border: "#FBBF24", borderLeft: "#FCD34D" },
         },
         tech_break: {
-          inactive: { background: "#E6510024", color: "#FFAB91", border: "#E6510055", borderLeft: "#FF7043" },
-          active: { background: "#F4511E", color: "#FFFFFF", border: "#FF8A65", borderLeft: "#FFAB91" },
+          inactive: { background: "#342c28", color: "#b09a8e", border: "#4a3e38", borderLeft: "#85705c" },
+          active: { background: "#EA580C", color: "#FFFFFF", border: "#FB923C", borderLeft: "#FDBA74" },
         },
         lunch: {
-          inactive: { background: "#F9A82524", color: "#FFD54F", border: "#F9A82555", borderLeft: "#FFCA28" },
-          active: { background: "#FBC02D", color: "#1A1A1A", border: "#FFD54F", borderLeft: "#FFECB3" },
+          inactive: { background: "#343228", color: "#b0aa8e", border: "#4a4738", borderLeft: "#857f5c" },
+          active: { background: "#CA8A04", color: "#1A1A1A", border: "#FBBF24", borderLeft: "#FDE68A" },
         },
         training: {
-          inactive: { background: "#00695C24", color: "#4DB6AC", border: "#00695C55", borderLeft: "#26A69A" },
-          active: { background: "#00897B", color: "#FFFFFF", border: "#4DB6AC", borderLeft: "#80CBC4" },
+          inactive: { background: "#2a3232", color: "#9aabaa", border: "#3d4848", borderLeft: "#6a807e" },
+          active: { background: "#0D9488", color: "#FFFFFF", border: "#2DD4BF", borderLeft: "#5EEAD4" },
         },
         meeting: {
-          inactive: { background: "#3949AB24", color: "#7986CB", border: "#3949AB55", borderLeft: "#5C6BC0" },
-          active: { background: "#5C6BC0", color: "#FFFFFF", border: "#7986CB", borderLeft: "#9FA8DA" },
+          inactive: { background: "#2c2f36", color: "#9aa0ab", border: "#40444c", borderLeft: "#6e7484" },
+          active: { background: "#6366F1", color: "#FFFFFF", border: "#818CF8", borderLeft: "#A5B4FC" },
         },
         offline_queue: {
-          inactive: { background: "#1565C024", color: "#64B5F6", border: "#1565C055", borderLeft: "#42A5F5" },
-          active: { background: "#1E88E5", color: "#FFFFFF", border: "#64B5F6", borderLeft: "#90CAF9" },
+          inactive: { background: "#2a3036", color: "#9aa4ab", border: "#3d464c", borderLeft: "#6a7884" },
+          active: { background: "#3B82F6", color: "#FFFFFF", border: "#60A5FA", borderLeft: "#93C5FD" },
         },
         offline: {
-          inactive: { background: "#546E7A24", color: "#90A4AE", border: "#546E7A55", borderLeft: "#78909C" },
-          active: { background: "#607D8B", color: "#FFFFFF", border: "#90A4AE", borderLeft: "#B0BEC5" },
+          inactive: { background: "#2e3032", color: "#9aa0a3", border: "#434648", borderLeft: "#72787a" },
+          active: { background: "#6B7280", color: "#FFFFFF", border: "#9CA3AF", borderLeft: "#D1D5DB" },
         },
       };
   return map[key];
@@ -211,11 +233,19 @@ function OperatorStatusPill({
   );
 }
 type ArmView = "active" | "colleague";
-type ArmStatsTab = "dialogs" | "history" | "stats" | "employees" | "settings";
+export type ArmStatsTab =
+  | "dialogs"
+  | "history"
+  | "stats"
+  | "colleagues"
+  | "internal"
+  | "templates"
+  | "employees"
+  | "settings"
+  | "help";
 type ArmRole = "operator" | "supervisor" | "admin";
-
-const ARM_STATS_RAIL_WIDTH = 52;
-const ARM_STATS_DRAWER_WIDTH = ARM_STATS_RAIL_WIDTH;
+/** Context for ARM side-menu RBAC: picker vs observation vs live operate. */
+export type ArmMenuContext = "picker" | "view" | "operate";
 
 const ARM_ROLE_LABELS: Record<ArmRole, string> = {
   operator: "Оператор КЦ",
@@ -223,28 +253,90 @@ const ARM_ROLE_LABELS: Record<ArmRole, string> = {
   admin: "Администратор",
 };
 
-const ARM_STATS_TABS: { id: ArmStatsTab; label: string }[] = [
-  { id: "dialogs", label: "Диалоги" },
-  { id: "history", label: "История" },
-  { id: "stats", label: "Статистика" },
-  { id: "employees", label: "Сотрудники" },
-  { id: "settings", label: "Настройки" },
+/**
+ * Side-menu modules by role + context.
+ * Admin gets dialogs/history only while observing an operator ARM (view).
+ */
+const ARM_MENU_ITEMS: {
+  id: ArmStatsTab;
+  label: string;
+  hint: string;
+  roles: ArmRole[];
+  contexts: ArmMenuContext[];
+}[] = [
+  {
+    id: "dialogs",
+    label: "Диалоги",
+    hint: "Очереди и активная переписка",
+    roles: ["operator", "supervisor", "admin"],
+    contexts: ["operate", "view"],
+  },
+  {
+    id: "history",
+    label: "История обращений",
+    hint: "Единая история клиента",
+    roles: ["operator", "supervisor", "admin"],
+    contexts: ["operate", "view"],
+  },
+  {
+    id: "stats",
+    label: "Статистика смены",
+    hint: "Показатели оператора / смены",
+    roles: ["operator", "supervisor"],
+    contexts: ["operate", "view"],
+  },
+  {
+    id: "colleagues",
+    label: "Диалоги коллег",
+    hint: "Просмотр без ответа",
+    roles: ["operator", "supervisor"],
+    contexts: ["operate", "view"],
+  },
+  {
+    id: "internal",
+    label: "Внутренний чат",
+    hint: "Переписка между операторами",
+    roles: ["operator", "supervisor"],
+    contexts: ["operate", "view"],
+  },
+  {
+    id: "templates",
+    label: "Шаблоны ответов",
+    hint: "Быстрые заготовки",
+    roles: ["operator", "supervisor"],
+    contexts: ["operate"],
+  },
+  {
+    id: "employees",
+    label: "Сотрудники",
+    hint: "Список операторов для просмотра",
+    roles: ["supervisor", "admin"],
+    contexts: ["picker", "view"],
+  },
+  {
+    id: "settings",
+    label: "Настройки АРМ",
+    hint: "Тема, уведомления, звук",
+    roles: ["operator", "supervisor", "admin"],
+    contexts: ["picker", "operate", "view"],
+  },
+  {
+    id: "help",
+    label: "Справка",
+    hint: "Краткая инструкция по АРМ",
+    roles: ["operator", "supervisor", "admin"],
+    contexts: ["picker", "operate", "view"],
+  },
 ];
 
-const ARM_STATS_TAB_ROLES: Record<ArmStatsTab, ArmRole[]> = {
-  dialogs: ["operator", "supervisor", "admin"],
-  history: ["operator", "supervisor", "admin"],
-  stats: ["operator", "supervisor", "admin"],
-  employees: ["supervisor", "admin"],
-  settings: ["operator", "supervisor", "admin"],
-};
-
-function armStatsTabsForRole(role: ArmRole): typeof ARM_STATS_TABS {
-  return ARM_STATS_TABS.filter((tab) => ARM_STATS_TAB_ROLES[tab.id].includes(role));
+function armMenuItemsForRole(role: ArmRole, context: ArmMenuContext = "operate") {
+  return ARM_MENU_ITEMS.filter(
+    (item) => item.roles.includes(role) && item.contexts.includes(context),
+  );
 }
 
-function firstArmStatsTabForRole(role: ArmRole): ArmStatsTab {
-  return armStatsTabsForRole(role)[0]?.id ?? "dialogs";
+function firstArmStatsTabForRole(role: ArmRole, context: ArmMenuContext = "operate"): ArmStatsTab {
+  return armMenuItemsForRole(role, context)[0]?.id ?? "dialogs";
 }
 
 export type ColorScheme =
@@ -277,6 +369,15 @@ export const CLOSE_TOPICS = [
   "Блокировка / безопасность",
   "Техническая поддержка",
   "Прочее",
+];
+
+/** Fallback roster if operators API is unavailable. */
+export const TRANSFER_OPERATORS = [
+  "Петрова А.С.",
+  "Сидоров М.В.",
+  "Козлов Д.А.",
+  "Морозова Е.И.",
+  "Васильев Н.П.",
 ];
 
 export type SchemePalette = {
@@ -395,9 +496,12 @@ type QueueItem = {
   dept: string;
   preview: string;
   wait: string;
+  /** Seconds at fetch time; used with waitFetchedAt for 1s SLA ticks. */
+  waitBaseSeconds?: number;
+  waitFetchedAt?: number;
   urgent: boolean;
   active?: boolean;
-  result?: "offline" | "lost" | "declined";
+  result?: "offline" | "closed" | "declined";
   operatorName?: string;
   readOnly?: boolean;
   /** True when item comes from Django online_chat API (not canvas mock). */
@@ -405,26 +509,90 @@ type QueueItem = {
   phone?: string;
   firstName?: string;
   lastName?: string;
+  slaTone?: SlaTone;
+  clientOnline?: boolean;
+  initiatedBy?: string;
+  refCode?: string;
+  needsReply?: boolean;
 };
+
+function liveWaitSeconds(item: QueueItem, nowMs: number): number | null {
+  if (item.waitBaseSeconds == null || item.waitFetchedAt == null) return null;
+  const elapsed = Math.max(0, Math.floor((nowMs - item.waitFetchedAt) / 1000));
+  return item.waitBaseSeconds + elapsed;
+}
+
+function resolveQueueWait(item: QueueItem, nowMs: number): { wait: string; slaTone?: SlaTone; urgent: boolean } {
+  const seconds = liveWaitSeconds(item, nowMs);
+  if (seconds == null) {
+    return { wait: item.wait, slaTone: item.slaTone, urgent: item.urgent };
+  }
+  const slaTone = slaToneFromSeconds(seconds);
+  return {
+    wait: formatWaitMmSs(seconds),
+    slaTone,
+    urgent: slaTone === "critical",
+  };
+}
+
+function slaToneColor(tone?: SlaTone): string {
+  if (tone === "critical") return "#E53935";
+  if (tone === "warn") return "#F9A825";
+  return "#2E7D32";
+}
+
+function SlaWaitPill({ wait, slaTone }: { wait: string; slaTone?: SlaTone }): JSX.Element {
+  const color = slaToneColor(slaTone);
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        padding: "2px 6px",
+        borderRadius: 4,
+        background: `${color}18`,
+        color,
+        border: `1px solid ${color}40`,
+        fontWeight: 600,
+        lineHeight: 1.3,
+        flexShrink: 0,
+      }}
+    >
+      {wait}
+    </span>
+  );
+}
 
 function dialogToQueueItem(
   dialog: OnlineChatDialog,
   options?: { active?: boolean },
 ): QueueItem {
+  const needsReply = dialog.needs_reply ?? false;
+  const inSharedQueue = dialog.status === "waiting";
+  const trackWait = needsReply || inSharedQueue;
+  const waitSeconds = trackWait ? dialog.wait_seconds : 0;
+  const slaTone = trackWait ? slaToneFromSeconds(waitSeconds) : "ok";
+  const fetchedAt = Date.now();
   return {
     id: dialog.id,
     name: dialog.client_name || "Клиент",
     channel: dialog.channel === "widget" ? "Сайт" : dialog.channel,
     dept: "Розничные продукты",
     preview: dialog.preview || "—",
-    wait: formatWaitMmSs(dialog.wait_seconds),
-    urgent: dialog.wait_seconds >= 120,
+    wait: trackWait ? formatWaitMmSs(waitSeconds) : "—",
+    waitBaseSeconds: trackWait ? waitSeconds : undefined,
+    waitFetchedAt: trackWait ? fetchedAt : undefined,
+    urgent: trackWait && slaTone === "critical",
+    slaTone: trackWait ? slaTone : undefined,
     active: options?.active,
     live: true,
     phone: dialog.client_phone,
     firstName: dialog.client_first_name,
     lastName: dialog.client_last_name,
     operatorName: dialog.operator_name || undefined,
+    clientOnline: dialog.client_online,
+    initiatedBy: dialog.initiated_by,
+    refCode: dialogRefCode(dialog),
+    needsReply,
   };
 }
 
@@ -514,7 +682,7 @@ const OFFLINE_QUEUE: QueueItem[] = [
   },
 ];
 
-const LOST_QUEUE: QueueItem[] = [
+const CLOSED_QUEUE: QueueItem[] = [
   {
     id: "l1",
     name: "ООО «Вектор»",
@@ -523,7 +691,19 @@ const LOST_QUEUE: QueueItem[] = [
     preview: "Тарифы на РКО для ИП",
     wait: "—",
     urgent: false,
-    result: "lost",
+    result: "closed",
+  },
+];
+
+const INITIATED_QUEUE: QueueItem[] = [
+  {
+    id: "i1",
+    name: "Елена С.",
+    channel: "Сайт",
+    dept: "Розничные продукты",
+    preview: "Исходящее: напоминание о платеже",
+    wait: "00:05",
+    urgent: false,
   },
 ];
 
@@ -584,7 +764,14 @@ const COLLEAGUE_DIALOGUES: QueueItem[] = [
   },
 ];
 
-type QueueSectionId = "waiting" | "mine" | "colleagues" | "offline" | "lost" | "shared";
+type QueueSectionId =
+  | "waiting"
+  | "mine"
+  | "colleagues"
+  | "offline"
+  | "closed"
+  | "shared"
+  | "initiated";
 
 type QueueSectionDef = {
   id: QueueSectionId;
@@ -597,8 +784,9 @@ type QueueSectionDef = {
 const QUEUE_SECTIONS: QueueSectionDef[] = [
   { id: "waiting", title: "Ожидают ответа", count: 3, items: QUEUE, defaultExpanded: true },
   { id: "mine", title: "В диалоге со мной", count: 2, items: MY_DIALOGUES, defaultExpanded: true },
+  { id: "initiated", title: "Инициированные мной", count: 1, items: INITIATED_QUEUE, defaultExpanded: false },
   { id: "offline", title: "Офлайн", count: 1, items: OFFLINE_QUEUE, defaultExpanded: false },
-  { id: "lost", title: "Потерянные", count: 1, items: LOST_QUEUE, defaultExpanded: false },
+  { id: "closed", title: "Недавно закрытые", count: 1, items: CLOSED_QUEUE, defaultExpanded: false },
   { id: "shared", title: "Общая очередь", count: 5, items: SHARED_QUEUE, defaultExpanded: false },
 ];
 
@@ -611,10 +799,19 @@ const COLLEAGUES_SECTION: QueueSectionDef = {
 };
 
 function queueSectionsForRole(role: ArmRole): QueueSectionDef[] {
+  // «Общая очередь» всегда последняя; «Диалоги коллег» — после «В диалоге со мной».
+  const withoutShared = QUEUE_SECTIONS.filter((section) => section.id !== "shared");
+  const shared = QUEUE_SECTIONS.find((section) => section.id === "shared")!;
   if (role === "operator" || role === "supervisor") {
-    return [QUEUE_SECTIONS[0], QUEUE_SECTIONS[1], COLLEAGUES_SECTION, ...QUEUE_SECTIONS.slice(2)];
+    return [
+      withoutShared[0],
+      withoutShared[1],
+      COLLEAGUES_SECTION,
+      ...withoutShared.slice(2),
+      shared,
+    ];
   }
-  return QUEUE_SECTIONS;
+  return [...withoutShared, shared];
 }
 
 function findSectionForQueueItem(queueId: string, sections: QueueSectionDef[]): QueueSectionDef | undefined {
@@ -1229,13 +1426,38 @@ type SummaryHistoryData = {
   preview: string;
 };
 
-const ACTIVE_SUMMARY_HISTORY: SummaryHistoryData = {
-  summary:
-    "Клиент обращался 12.05 (чат, лимит ATM) и 03.04 (Telegram). Текущая тема повторяется — лимиты.",
-  detailedSummary:
-    "За 90 дней — 3 обращения по теме лимитов и переводов.\n\n12.05.2026 · онлайн-чат · лимит ATM — оператор Сидорова М.В. Разъяснены суточные лимиты карты Visa, клиент подтвердил понимание.\n\n03.04.2026 · Telegram · лимиты переводов — оператор Козлов Д.А. Проверены настройки лимита в мобильном банке.\n\n15.03.2026 · телефония (Oktell) · перевод в РФ — оператор Петрова А.С., длит. 4:12. Рекомендован раздел «Платежи → За рубеж».\n\nПовторная тема: лимиты. Рекомендация: проверить актуальный лимит в мобильном банке перед ответом.",
-  preview: "Последнее: лимит ATM · 12.05",
+const EMPTY_SUMMARY_HISTORY: SummaryHistoryData = {
+  summary: "История обращений пока не загружена.",
+  detailedSummary: "Откройте диалог клиента, чтобы загрузить единую историю и summary.",
+  preview: "Нет данных",
 };
+
+function historyToSummary(items: ClientHistoryItem[], apiSummary: string): SummaryHistoryData {
+  if (!items.length) {
+    return {
+      summary: "Обращений по этому клиенту не найдено.",
+      detailedSummary: "Нет предыдущих диалогов по телефону / внешнему ID.",
+      preview: "Пусто",
+    };
+  }
+  const latest = items[0];
+  const detailed = items
+    .slice(0, 8)
+    .map((item) => {
+      const date = item.created_at
+        ? new Date(item.created_at).toLocaleString("ru-RU")
+        : "—";
+      const topic = item.topic || "без темы";
+      const operator = item.operator_name || "не назначен";
+      return `${date} · ${item.channel} · ${item.status} · ${topic} — ${operator}`;
+    })
+    .join("\n\n");
+  return {
+    summary: apiSummary || `Обращений: ${items.length}. Последнее: ${latest.channel} · ${latest.status}.`,
+    detailedSummary: detailed,
+    preview: latest.preview || latest.topic || latest.channel,
+  };
+}
 
 function ClientInfoField({
   t,
@@ -1607,6 +1829,130 @@ function ConfirmDialog({
     </div>
   );
 }
+
+function PromptDialog({
+  t,
+  scheme,
+  titleId,
+  title,
+  description,
+  label,
+  value,
+  placeholder,
+  confirmLabel,
+  multiline = false,
+  onChange,
+  onCancel,
+  onConfirm,
+}: {
+  t: ArmTheme;
+  scheme: SchemePalette;
+  titleId: string;
+  title: string;
+  description?: string;
+  label: string;
+  value: string;
+  placeholder?: string;
+  confirmLabel: string;
+  multiline?: boolean;
+  onChange: (next: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}): JSX.Element {
+  const canSubmit = value.trim().length > 0;
+  return (
+    <div
+      role="presentation"
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: "rgba(15, 28, 22, 0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 40,
+        padding: 24,
+      }}
+      onClick={onCancel}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        style={{
+          width: "100%",
+          maxWidth: 460,
+          background: t.bg.elevated,
+          border: `1px solid ${t.stroke.secondary}`,
+          borderRadius: 12,
+          padding: "20px 22px",
+          boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Text
+          id={titleId}
+          weight="semibold"
+          style={{ fontSize: 16, marginBottom: 8, color: t.text.primary }}
+        >
+          {title}
+        </Text>
+        {description ? (
+          <Text style={{ fontSize: 13, color: t.text.secondary, lineHeight: 1.45, marginBottom: 14 }}>
+            {description}
+          </Text>
+        ) : null}
+        <Text style={{ fontSize: 12, color: t.text.secondary, marginBottom: 6 }}>{label}</Text>
+        {multiline ? (
+          <TextArea
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            style={{
+              minHeight: 110,
+              marginBottom: 16,
+              borderColor: scheme.accentWeak,
+            }}
+          />
+        ) : (
+          <input
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder={placeholder}
+            autoFocus
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && canSubmit) {
+                event.preventDefault();
+                onConfirm();
+              }
+            }}
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              marginBottom: 16,
+              padding: "10px 12px",
+              borderRadius: 8,
+              border: `1px solid ${t.stroke.secondary}`,
+              background: t.bg.editor,
+              color: t.text.primary,
+              fontFamily: "inherit",
+              fontSize: 13,
+              outline: "none",
+            }}
+          />
+        )}
+        <Row style={{ gap: 8, justifyContent: "flex-end" }}>
+          <Button variant="secondary" onClick={onCancel}>
+            Отмена
+          </Button>
+          <Button variant="primary" disabled={!canSubmit} onClick={onConfirm}>
+            {confirmLabel}
+          </Button>
+        </Row>
+      </div>
+    </div>
+  );
+}
 function clampWidth(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
 }
@@ -1793,13 +2139,16 @@ function QueueListRow({
   t,
   selected,
   onClick,
+  nowMs = Date.now(),
 }: {
   item: QueueItem;
   t: ArmTheme;
   selected: boolean;
   onClick: () => void;
+  nowMs?: number;
 }): JSX.Element {
-  const showTimer = item.wait && item.wait !== "—";
+  const resolved = resolveQueueWait(item, nowMs);
+  const showTimer = resolved.wait && resolved.wait !== "—";
 
   return (
     <div
@@ -1826,13 +2175,13 @@ function QueueListRow({
       }}
     >
       <Row style={{ gap: 6, alignItems: "flex-start", minWidth: 0, flex: 1 }}>
-        {item.urgent && (
+            {resolved.urgent && (
           <span
             style={{
               width: 6,
               height: 6,
               borderRadius: "50%",
-              background: t.palette.diffStripRemoved,
+              background: slaToneColor(resolved.slaTone),
               display: "inline-block",
               flexShrink: 0,
               marginTop: 5,
@@ -1875,9 +2224,13 @@ function QueueListRow({
         </div>
       </Row>
       {showTimer ? (
-        <Pill tone={item.urgent ? "warning" : "neutral"} size="sm">
-          {item.wait}
-        </Pill>
+        resolved.slaTone ? (
+          <SlaWaitPill wait={resolved.wait} slaTone={resolved.slaTone} />
+        ) : (
+          <Pill tone={resolved.urgent ? "warning" : "neutral"} size="sm">
+            {resolved.wait}
+          </Pill>
+        )
       ) : null}
     </div>
   );
@@ -1890,6 +2243,7 @@ function QueueCard({
   selected,
   onSelect,
   onCollapse,
+  nowMs = Date.now(),
 }: {
   item: QueueItem;
   t: ArmTheme;
@@ -1897,8 +2251,10 @@ function QueueCard({
   selected: boolean;
   onSelect: () => void;
   onCollapse: () => void;
+  nowMs?: number;
 }): JSX.Element {
-  const showTimer = item.wait && item.wait !== "—";
+  const resolved = resolveQueueWait(item, nowMs);
+  const showTimer = resolved.wait && resolved.wait !== "—";
   const hasMetaRow = showTimer || item.readOnly;
 
   return (
@@ -1935,9 +2291,13 @@ function QueueCard({
           }}
         >
           {showTimer ? (
-            <Pill tone={item.urgent ? "warning" : "neutral"} size="sm">
-              {item.wait}
-            </Pill>
+            resolved.slaTone ? (
+              <SlaWaitPill wait={resolved.wait} slaTone={resolved.slaTone} />
+            ) : (
+              <Pill tone={resolved.urgent ? "warning" : "neutral"} size="sm">
+                {resolved.wait}
+              </Pill>
+            )
           ) : null}
           {item.readOnly ? (
             <Pill tone="info" size="sm">
@@ -1947,13 +2307,13 @@ function QueueCard({
         </Row>
       ) : null}
       <Row style={{ gap: 8, alignItems: "flex-start", minWidth: 0 }}>
-        {item.urgent && (
+        {resolved.urgent && (
           <span
             style={{
               width: 8,
               height: 8,
               borderRadius: "50%",
-              background: t.palette.diffStripRemoved,
+              background: slaToneColor(resolved.slaTone),
               display: "inline-block",
               flexShrink: 0,
               marginTop: 4,
@@ -1985,9 +2345,15 @@ function QueueCard({
           {item.result && (
             <Pill
               size="sm"
-              tone={item.result === "offline" ? "warning" : item.result === "lost" ? "warning" : "neutral"}
+              tone={
+                item.result === "offline" || item.result === "closed" ? "warning" : "neutral"
+              }
             >
-              {item.result === "offline" ? "offline" : item.result === "lost" ? "потерянный" : "отказ"}
+              {item.result === "offline"
+                ? "offline"
+                : item.result === "closed"
+                  ? "закрыт"
+                  : "отказ"}
             </Pill>
           )}
           <Text style={{ fontSize: 11, color: t.text.secondary }}>{item.dept}</Text>
@@ -2040,24 +2406,41 @@ function AvatarCircle({
   );
 }
 
-function ReadReceiptMarks({ color }: { color: string }): JSX.Element {
+function ReadReceiptMarks({
+  color,
+  status,
+}: {
+  color: string;
+  status: ReceiptStatus;
+}): JSX.Element {
   return (
     <span
-      aria-hidden
+      aria-label={status === "read" ? "Прочитано" : "Доставлено"}
+      title={status === "read" ? "Прочитано" : "Доставлено"}
       style={{
         display: "inline-flex",
         alignItems: "center",
-        marginLeft: 4,
+        marginLeft: 3,
         color,
         fontSize: 11,
         lineHeight: 1,
-        letterSpacing: "-0.22em",
         fontWeight: 700,
+        gap: 0,
       }}
     >
-      ✓✓
+      <span aria-hidden style={{ marginRight: status === "read" ? -6 : 0 }}>
+        ✓
+      </span>
+      {status === "read" ? <span aria-hidden>✓</span> : null}
     </span>
   );
+}
+
+function messageCaption(text: string, attachmentName?: string): string {
+  if (!attachmentName) return text;
+  const fileLabel = `Файл: ${attachmentName}`;
+  if (!text || text === fileLabel || text === `Файл: ${attachmentName}`) return "";
+  return text;
 }
 
 function MessageBubble({
@@ -2069,6 +2452,16 @@ function MessageBubble({
   label,
   avatarInitials,
   avatarColor,
+  receiptStatus,
+  quotedText,
+  attachmentName,
+  attachmentDownloadable,
+  onDownloadAttachment,
+  isDeleted,
+  editedAt,
+  onQuote,
+  onEdit,
+  onDelete,
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
@@ -2078,6 +2471,16 @@ function MessageBubble({
   label?: string;
   avatarInitials?: string;
   avatarColor?: string;
+  receiptStatus?: ReceiptStatus;
+  quotedText?: string;
+  attachmentName?: string;
+  attachmentDownloadable?: boolean;
+  onDownloadAttachment?: () => void;
+  isDeleted?: boolean;
+  editedAt?: string | null;
+  onQuote?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }): JSX.Element {
   if (side === "system") {
     return (
@@ -2096,6 +2499,9 @@ function MessageBubble({
   const isOp = side === "operator";
   const avatarBg = avatarColor ?? (isOp ? scheme.accentControl : scheme.accentWeak);
   const avatarFg = isOp ? "#fff" : scheme.accentControl;
+  const caption = isDeleted ? "Сообщение удалено" : messageCaption(text, attachmentName);
+  const displayText = caption || (attachmentName && !isDeleted ? "" : text);
+  const hasActions = !!(onQuote || onEdit || onDelete);
   return (
     <div
       style={{
@@ -2120,6 +2526,7 @@ function MessageBubble({
           display: "flex",
           flexDirection: "column",
           gap: 0,
+          opacity: isDeleted ? 0.65 : 1,
         }}
       >
         {label ? (
@@ -2134,17 +2541,64 @@ function MessageBubble({
             {label}
           </Text>
         ) : null}
-        <Text
-          style={{
-            fontSize: 13,
-            lineHeight: 1.45,
-            color: t.text.primary,
-            fontWeight: 600,
-          }}
-        >
-          {text}
-        </Text>
-        {time ? (
+        {quotedText ? (
+          <div
+            style={{
+              fontSize: 11,
+              lineHeight: 1.35,
+              color: t.text.secondary,
+              borderLeft: `3px solid ${scheme.accentWeak}`,
+              paddingLeft: 8,
+              marginBottom: 8,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {quotedText}
+          </div>
+        ) : null}
+        {displayText ? (
+          <Text
+            style={{
+              fontSize: 13,
+              lineHeight: 1.45,
+              color: t.text.primary,
+              fontWeight: 600,
+              fontStyle: isDeleted ? "italic" : "normal",
+            }}
+          >
+            {displayText}
+          </Text>
+        ) : null}
+        {attachmentName && !isDeleted ? (
+          attachmentDownloadable && onDownloadAttachment ? (
+            <button
+              type="button"
+              onClick={onDownloadAttachment}
+              style={{
+                alignSelf: "flex-start",
+                marginTop: 6,
+                padding: "4px 8px",
+                borderRadius: 6,
+                border: `1px solid ${scheme.accentWeak}`,
+                background: t.fill.secondary,
+                color: scheme.accentControl,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              📎 Скачать: {attachmentName}
+            </button>
+          ) : (
+            <Text style={{ fontSize: 11, color: t.text.secondary, marginTop: 6 }}>
+              📎 {attachmentName} (недоступно для скачивания)
+            </Text>
+          )
+        ) : null}
+        {time || hasActions ? (
           <div
             style={{
               display: "flex",
@@ -2154,10 +2608,36 @@ function MessageBubble({
               fontSize: 10,
               lineHeight: 1,
               color: t.text.tertiary,
+              gap: 6,
+              flexWrap: "wrap",
             }}
           >
-            <span>{time}</span>
-            {isOp ? <ReadReceiptMarks color={scheme.accentControl} /> : null}
+            {hasActions ? (
+              <Row style={{ gap: 4, marginRight: "auto" }}>
+                {onQuote && !isDeleted ? (
+                  <Button variant="ghost" size="sm" style={{ fontSize: 10, padding: "0 4px" }} onClick={onQuote}>
+                    Ответить
+                  </Button>
+                ) : null}
+                {onEdit && !isDeleted ? (
+                  <Button variant="ghost" size="sm" style={{ fontSize: 10, padding: "0 4px" }} onClick={onEdit}>
+                    ✎
+                  </Button>
+                ) : null}
+                {onDelete && !isDeleted ? (
+                  <Button variant="ghost" size="sm" style={{ fontSize: 10, padding: "0 4px" }} onClick={onDelete}>
+                    ✕
+                  </Button>
+                ) : null}
+              </Row>
+            ) : null}
+            {editedAt && !isDeleted ? (
+              <span style={{ fontStyle: "italic", marginRight: 2 }}>изм.</span>
+            ) : null}
+            {time ? <span>{time}</span> : null}
+            {receiptStatus && isOp && !isDeleted ? (
+              <ReadReceiptMarks color={scheme.accentControl} status={receiptStatus} />
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -2168,152 +2648,187 @@ function MessageBubble({
   );
 }
 
-function ArmStatsRailTab({
+export function ArmOverlayMenu({
   t,
   scheme,
-  label,
-  active,
-  onClick,
-}: {
-  t: ArmTheme;
-  scheme: SchemePalette;
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      title={label}
-      onClick={onClick}
-      style={{
-        border: "none",
-        borderLeft: `3px solid ${active ? scheme.accent : "transparent"}`,
-        background: active ? t.fill.tertiary : "transparent",
-        color: active ? scheme.accentControl : t.text.secondary,
-        borderRadius: 0,
-        padding: "8px 2px",
-        fontSize: 9,
-        fontFamily: "inherit",
-        cursor: "pointer",
-        pointerEvents: "auto",
-        lineHeight: 1.1,
-        width: "100%",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        textAlign: "center",
-        minHeight: 52,
-        flexShrink: 0,
-      }}
-    >
-      <span
-        style={{
-          writingMode: "vertical-rl",
-          textOrientation: "mixed",
-          transform: "rotate(180deg)",
-          maxHeight: 72,
-          overflow: "hidden",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {label}
-      </span>
-    </button>
-  );
-}
-
-function ArmStatsDrawer({
-  t,
-  scheme,
+  open,
   armRole,
-  statsTab,
-  onTabChange,
+  menuContext = "operate",
+  activeId,
+  onSelect,
   onClose,
+  badges,
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
+  open: boolean;
   armRole: ArmRole;
-  statsTab: ArmStatsTab;
-  onTabChange: (tab: ArmStatsTab) => void;
+  menuContext?: ArmMenuContext;
+  activeId: ArmStatsTab;
+  onSelect: (id: ArmStatsTab) => void;
   onClose: () => void;
+  badges?: Partial<Record<ArmStatsTab, number>>;
 }): JSX.Element {
-  const visibleTabs = armStatsTabsForRole(armRole);
-  const railButtonStyle: CSSProperties = {
-    border: "none",
-    background: "transparent",
-    color: t.text.secondary,
-    lineHeight: 1,
-    cursor: "pointer",
-    padding: "6px 2px",
-    fontFamily: "inherit",
-    flex: 1,
-    minWidth: 0,
-  };
-
+  const items = armMenuItemsForRole(armRole, menuContext);
   return (
     <div
-      id="arm-stats-drawer"
-      role="navigation"
-      aria-label="Меню разделов"
+      aria-hidden={!open}
       style={{
-        width: ARM_STATS_DRAWER_WIDTH,
-        height: "100%",
-        flexShrink: 0,
-        display: "flex",
-        flexDirection: "column",
-        background: scheme.headerBg,
-        ...panelStyle(t, { borderRadius: 0, borderTop: "none", borderBottom: "none", borderLeft: "none" }),
+        position: "absolute",
+        inset: 0,
+        zIndex: 80,
+        pointerEvents: open ? "auto" : "none",
       }}
     >
-      <Row
+      <button
+        type="button"
+        aria-label="Закрыть меню"
+        onClick={onClose}
         style={{
-          flexShrink: 0,
-          borderBottom: `1px solid ${t.stroke.secondary}`,
-          alignItems: "stretch",
+          position: "absolute",
+          inset: 0,
+          border: "none",
+          margin: 0,
+          padding: 0,
+          background: open ? "rgba(20, 40, 30, 0.28)" : "transparent",
+          opacity: open ? 1 : 0,
+          transition: "opacity 0.22s ease",
+          cursor: "pointer",
+        }}
+      />
+      <aside
+        id="arm-stats-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Меню АРМ"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: "min(300px, 86vw)",
+          display: "flex",
+          flexDirection: "column",
+          background: t.bg.elevated,
+          borderRight: `1px solid ${scheme.accentWeak}`,
+          boxShadow: open ? "8px 0 28px rgba(0,0,0,0.16)" : "none",
+          transform: open ? "translateX(0)" : "translateX(-105%)",
+          transition: "transform 0.26s cubic-bezier(0.22, 1, 0.36, 1)",
+          overflow: "hidden",
+          zIndex: 1,
         }}
       >
-        <button
-          type="button"
-          title="Скрыть меню"
-          aria-label="Скрыть меню"
-          onClick={onClose}
+        <div
           style={{
-            ...railButtonStyle,
-            fontSize: 14,
-            color: scheme.accentControl,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+            padding: "14px 16px",
+            background: scheme.headerBg,
+            borderBottom: `1px solid ${scheme.accent}`,
           }}
         >
-          ☰
-        </button>
-        <button
-          type="button"
-          title="Закрыть меню"
-          aria-label="Закрыть меню"
-          onClick={onClose}
+          <div>
+            <Text weight="semibold" style={{ fontSize: 20, letterSpacing: "-0.02em" }}>Меню АРМ</Text>
+          </div>
+          <button
+            type="button"
+            aria-label="Закрыть"
+            onClick={onClose}
+            style={{
+              width: 32,
+              height: 32,
+              border: `1px solid ${t.stroke.secondary}`,
+              borderRadius: RADIUS_SM,
+              background: t.fill.secondary,
+              color: t.text.secondary,
+              cursor: "pointer",
+              fontSize: 18,
+              lineHeight: 1,
+              fontFamily: "inherit",
+            }}
+          >
+            ×
+          </button>
+        </div>
+        <nav
+          aria-label="Разделы меню"
           style={{
-            ...railButtonStyle,
-            fontSize: 16,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            padding: 12,
+            overflowY: "auto",
+            flex: 1,
+            minHeight: 0,
           }}
         >
-          ×
-        </button>
-      </Row>
-      <div role="tablist" aria-label="Разделы меню" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-        {visibleTabs.map((tab) => (
-          <ArmStatsRailTab
-            key={tab.id}
-            t={t}
-            scheme={scheme}
-            label={tab.label}
-            active={statsTab === tab.id}
-            onClick={() => onTabChange(tab.id)}
-          />
-        ))}
-      </div>
+          {items.map((item) => {
+            const active = activeId === item.id;
+            const badge = badges?.[item.id] ?? 0;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onSelect(item.id)}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: 3,
+                  width: "100%",
+                  padding: "12px 14px",
+                  border: `1px solid ${active ? scheme.accent : t.stroke.secondary}`,
+                  borderRadius: 10,
+                  background: active ? t.fill.tertiary : t.bg.editor,
+                  color: t.text.primary,
+                  textAlign: "left",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  boxShadow: active ? `inset 3px 0 0 ${scheme.accentControl}` : undefined,
+                  transition: "background 0.15s ease, border-color 0.15s ease",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    width: "100%",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span>{item.label}</span>
+                  {badge > 0 ? (
+                    <span
+                      aria-label={`Непрочитано: ${badge}`}
+                      style={{
+                        minWidth: 20,
+                        height: 20,
+                        padding: "0 6px",
+                        borderRadius: 999,
+                        background: scheme.badge,
+                        color: "#fff",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        display: "inline-grid",
+                        placeItems: "center",
+                        lineHeight: 1,
+                      }}
+                    >
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  ) : null}
+                </span>
+                <span style={{ fontSize: 11, color: t.text.secondary, lineHeight: 1.35 }}>{item.hint}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
     </div>
   );
 }
@@ -2324,6 +2839,7 @@ export function ArmOperatorView({
   selectedQueue,
   onSelectQueue,
   reply,
+  suflerSuggestionText,
   onReplyChange,
   onInsertSufler,
   toast,
@@ -2334,13 +2850,19 @@ export function ArmOperatorView({
   onViewModeChange,
   closeTopic,
   onCloseTopicChange,
-  onToggleTheme,
+  operatorName = "Иванов И.И.",
+  statsDrawerOpen: statsDrawerOpenProp,
+  onStatsDrawerOpenChange,
+  armRole: armRoleProp = "operator",
+  viewOnly = false,
+  allowTransferInView = false,
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
   selectedQueue: string;
   onSelectQueue: (id: string) => void;
   reply: string;
+  suflerSuggestionText: string;
   onReplyChange: (v: string) => void;
   onInsertSufler: (answerText: string) => void;
   toast: string | null;
@@ -2351,41 +2873,170 @@ export function ArmOperatorView({
   onViewModeChange: (next: ArmView) => void;
   closeTopic: string;
   onCloseTopicChange: (next: string) => void;
-  onToggleTheme: () => void;
+  /** Current ARM operator display name (accept + message labels). */
+  operatorName?: string;
+  statsDrawerOpen?: boolean;
+  onStatsDrawerOpenChange?: (open: boolean) => void;
+  armRole?: ArmRole;
+  viewOnly?: boolean;
+  allowTransferInView?: boolean;
 }): JSX.Element {
-  const [armRole, setArmRole] = useState<ArmRole>("operator");
+  const operatorInitials = initialsFromDisplayName(operatorName);
+  const armRole: ArmRole = armRoleProp;
+  const menuContext: ArmMenuContext = viewOnly ? "view" : "operate";
   const [closedDialogIds, setClosedDialogIds] = useState<Record<string, boolean>>({});
   const [blockedDialogIds, setBlockedDialogIds] = useState<Record<string, boolean>>({});
-  /** Live widget dialogs land in «Общая очередь» until an operator takes them. */
+  const [summaryHistory, setSummaryHistory] = useState<SummaryHistoryData>(EMPTY_SUMMARY_HISTORY);
+  const [transferOperators, setTransferOperators] = useState<ChatOperator[]>([]);
+  const [transferDepartment, setTransferDepartment] = useState("");
+  const [pendingAttachment, setPendingAttachment] = useState<File | null>(null);
+  const [queuesReady, setQueuesReady] = useState(false);
+  const [liveWaiting, setLiveWaiting] = useState<QueueItem[]>([]);
   const [liveShared, setLiveShared] = useState<QueueItem[]>([]);
   const [liveMine, setLiveMine] = useState<QueueItem[]>([]);
+  const [liveColleagues, setLiveColleagues] = useState<QueueItem[]>([]);
+  const [liveOffline, setLiveOffline] = useState<QueueItem[]>([]);
+  const [liveClosed, setLiveClosed] = useState<QueueItem[]>([]);
+  const [liveInitiated, setLiveInitiated] = useState<QueueItem[]>([]);
   const [liveMessages, setLiveMessages] = useState<OnlineChatMessage[]>([]);
-  const acceptedLiveRef = useRef<Record<string, boolean>>({});
+  const [clientDraft, setClientDraft] = useState("");
+  const [quoteMessage, setQuoteMessage] = useState<OnlineChatMessage | null>(null);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [composerTemplates, setComposerTemplates] = useState(() => loadReplyTemplates());
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [transferOperatorName, setTransferOperatorName] = useState("");
+  const [editMessageTarget, setEditMessageTarget] = useState<OnlineChatMessage | null>(null);
+  const [editMessageText, setEditMessageText] = useState("");
+  const [deleteMessageTarget, setDeleteMessageTarget] = useState<OnlineChatMessage | null>(null);
+  const [clientBlocks, setClientBlocks] = useState<{ id: string; phone_normalized: string }[]>([]);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const readMessageIdsRef = useRef<Set<string>>(new Set());
   const selectedQueueRef = useRef(selectedQueue);
+  const sharedPeekRef = useRef(false);
   selectedQueueRef.current = selectedQueue;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const scrollMessagesToEnd = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const scroller = messagesScrollRef.current;
+    if (scroller) {
+      scroller.scrollTo({ top: scroller.scrollHeight, behavior });
+      return;
+    }
+    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+  }, []);
 
   const refreshLiveQueues = useCallback(async () => {
     try {
-      const [waiting, activeDialogs] = await Promise.all([
+      const [
+        waiting,
+        activeDialogs,
+        closedDialogs,
+        initiatedDialogs,
+        offlineWaiting,
+        offlineActive,
+      ] = await Promise.all([
         listDialogs("waiting"),
         listDialogs("active"),
+        listDialogs("closed"),
+        listDialogs(undefined, { initiated_by: "operator" }),
+        listDialogs("waiting", { client_online: false }),
+        listDialogs("active", { client_online: false }),
       ]);
+
+      // Общая очередь — все неназначенные (waiting), и для оператора, и в режиме просмотра.
       setLiveShared(
         waiting.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
       );
-      setLiveMine(
-        activeDialogs.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
+
+      if (viewOnly) {
+        // Observation: shared queue stays visible; selected operator's dialogs in colleagues.
+        const observed = activeDialogs.filter(
+          (dialog) => dialog.operator_name === operatorName,
+        );
+        setLiveWaiting([]);
+        setLiveMine([]);
+        setLiveColleagues(
+          observed.map((dialog, index) => ({
+            ...dialogToQueueItem(dialog, { active: index === 0 }),
+            readOnly: true,
+            operatorName: dialog.operator_name ?? operatorName,
+          })),
+        );
+      } else {
+        const mineActive = activeDialogs.filter(
+          (dialog) => !dialog.operator_name || dialog.operator_name === operatorName,
+        );
+        // Ожидают ответа — мои active, где последнее сообщение от клиента.
+        const awaitingReply = mineActive.filter((dialog) => dialog.needs_reply);
+        // В диалоге со мной — мои active без неотвеченного сообщения клиента.
+        const mineIdle = mineActive.filter((dialog) => !dialog.needs_reply);
+        setLiveWaiting(
+          awaitingReply.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
+        );
+        setLiveMine(mineIdle.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })));
+
+        setLiveColleagues(
+          activeDialogs
+            .filter((dialog) => dialog.operator_name && dialog.operator_name !== operatorName)
+            .map((dialog) => ({ ...dialogToQueueItem(dialog), readOnly: true })),
+        );
+      }
+
+      const offlineMerged = [...offlineWaiting, ...offlineActive];
+      const offlineUnique = Array.from(
+        new Map(offlineMerged.map((dialog) => [dialog.id, dialog])).values(),
       );
+      setLiveOffline(
+        offlineUnique.map((dialog) => ({
+          ...dialogToQueueItem(dialog),
+          result: "offline" as const,
+        })),
+      );
+
+      setLiveClosed(
+        closedDialogs.slice(0, 20).map((dialog) => ({
+          ...dialogToQueueItem(dialog),
+          result: "closed" as const,
+        })),
+      );
+
+      setLiveInitiated(
+        viewOnly
+          ? []
+          : initiatedDialogs
+              .filter((dialog) => !dialog.operator_name || dialog.operator_name === operatorName)
+              .map((dialog) => dialogToQueueItem(dialog)),
+      );
+      if (viewOnly) {
+        setLiveOffline([]);
+        setLiveClosed([]);
+      }
     } catch {
-      /* Backend may be offline in pure UI/story mode — keep mock queues. */
+      /* Backend may be offline — show empty live queues, never mock clients. */
+      setLiveWaiting([]);
+      setLiveShared([]);
+      setLiveMine([]);
+      setLiveColleagues([]);
+      setLiveOffline([]);
+      setLiveClosed([]);
+      setLiveInitiated([]);
+    } finally {
+      setQueuesReady(true);
     }
-  }, []);
+  }, [operatorName, viewOnly]);
 
   useEffect(() => {
     void refreshLiveQueues();
     const timer = window.setInterval(() => {
       void refreshLiveQueues();
-    }, 4000);
+    }, 2000);
     let socket: WebSocket | null = null;
     try {
       socket = new WebSocket(onlineChatArmWsUrl());
@@ -2394,17 +3045,90 @@ export function ArmOperatorView({
         try {
           const data = JSON.parse(event.data) as {
             type?: string;
-            payload?: OnlineChatMessage & { dialog_id?: string };
+            payload?: OnlineChatMessage & {
+              dialog_id?: string;
+              message_ids?: string[];
+              messages?: OnlineChatMessage[];
+              speaker?: string;
+              text?: string;
+              unread_count?: number;
+              recipient_name?: string;
+              recipient_id?: string;
+            };
           };
-          if (
-            data.type === "message.created" &&
-            data.payload?.dialog_id &&
-            data.payload.dialog_id === selectedQueueRef.current
-          ) {
+          if (data.type === "internal.message.created" || data.type === "internal.messages.read") {
+            void getInternalUnreadCount(operatorName)
+              .then((result) => setInternalUnread(result.unread_count))
+              .catch(() => undefined);
+          }
+          const dialogId = data.payload?.dialog_id;
+          if (data.type === "typing.start") {
+            if (
+              data.payload?.speaker === "client" &&
+              dialogId === selectedQueueRef.current
+            ) {
+              const draftPayload = data.payload as { draft?: string; text?: string };
+              setClientDraft(draftPayload.draft || draftPayload.text || "…");
+            }
+            return;
+          }
+          if (data.type === "typing.stop") {
+            if (dialogId === selectedQueueRef.current) setClientDraft("");
+            return;
+          }
+          if (data.type === "messages.read" && data.payload?.message_ids?.length) {
+            const ids = data.payload.message_ids;
+            ids.forEach((id) => readMessageIdsRef.current.add(id));
+            if (!dialogId || dialogId === selectedQueueRef.current) {
+              setLiveMessages((prev) =>
+                prev.map((item) =>
+                  ids.includes(item.id)
+                    ? { ...item, receipt_status: "read" as ReceiptStatus }
+                    : item,
+                ),
+              );
+            }
+            return;
+          }
+          if (dialogId && dialogId !== selectedQueueRef.current) return;
+          if (data.type === "message.created" && data.payload?.id) {
+            const incoming = data.payload as OnlineChatMessage;
+            const withReceipt =
+              incoming.receipt_status === "read" ||
+              readMessageIdsRef.current.has(incoming.id)
+                ? { ...incoming, receipt_status: "read" as ReceiptStatus }
+                : incoming;
             setLiveMessages((prev) => {
-              if (prev.some((item) => item.id === data.payload?.id)) return prev;
-              return [...prev, data.payload as OnlineChatMessage];
+              if (prev.some((item) => item.id === withReceipt.id)) {
+                return prev.map((item) =>
+                  item.id === withReceipt.id ? { ...item, ...withReceipt } : item,
+                );
+              }
+              return [...prev, withReceipt];
             });
+            if (incoming.speaker === "client" && dialogId && !sharedPeekRef.current) {
+              void markDialogRead(dialogId, "operator").catch(() => {});
+            }
+            return;
+          }
+          if (data.type === "message.updated" && data.payload?.id) {
+            const updated = data.payload as OnlineChatMessage;
+            setLiveMessages((prev) =>
+              prev.map((item) =>
+                item.id === updated.id
+                  ? {
+                      ...item,
+                      ...updated,
+                      receipt_status:
+                        updated.receipt_status ||
+                        (readMessageIdsRef.current.has(updated.id)
+                          ? "read"
+                          : item.receipt_status),
+                    }
+                  : item,
+              ),
+            );
+            return;
           }
         } catch {
           /* ignore malformed events */
@@ -2417,37 +3141,65 @@ export function ArmOperatorView({
       window.clearInterval(timer);
       socket?.close();
     };
-  }, [refreshLiveQueues]);
+  }, [refreshLiveQueues, operatorName]);
+
+  const liveMode = queuesReady;
+
+  const liveSectionItems: Partial<Record<QueueSectionId, QueueItem[]>> = useMemo(
+    () => ({
+      waiting: liveWaiting,
+      mine: liveMine,
+      colleagues: liveColleagues,
+      offline: liveOffline,
+      closed: liveClosed,
+      shared: liveShared,
+      initiated: liveInitiated,
+    }),
+    [
+      liveWaiting,
+      liveShared,
+      liveMine,
+      liveColleagues,
+      liveOffline,
+      liveClosed,
+      liveInitiated,
+    ],
+  );
 
   const visibleSections = useMemo(() => {
     const sections = queueSectionsForRole(armRole);
     return sections.map((section) => {
-      if (section.id === "shared") {
-        const items = [...liveShared, ...section.items];
-        return {
-          ...section,
-          items,
-          count: items.length,
-          /* Auto-expand when real widget dialogs are waiting. */
-          defaultExpanded: liveShared.length > 0 ? true : section.defaultExpanded,
-        };
-      }
-      if (section.id === "mine") {
-        const items = [...liveMine, ...section.items];
-        return { ...section, items, count: items.length };
-      }
-      return section;
+      const items = liveMode ? (liveSectionItems[section.id] ?? []) : [];
+      return {
+        ...section,
+        items,
+        count: items.length,
+        defaultExpanded: items.length > 0,
+      };
     });
-  }, [armRole, liveShared, liveMine]);
+  }, [armRole, liveMode, liveSectionItems]);
 
   const remainingDialogs = visibleSections
     .flatMap((section) => section.items)
     .filter((item) => !closedDialogIds[item.id]);
-  const active = remainingDialogs.find((q) => q.id === selectedQueue) ?? remainingDialogs[0] ?? null;
+  const active =
+    remainingDialogs.find((q) => q.id === selectedQueue) ??
+    remainingDialogs.find((q) => q.live) ??
+    remainingDialogs[0] ??
+    null;
   const hasActiveDialog = !!active;
-  const isReadOnly = viewMode === "colleague";
+  const isSharedQueuePeek =
+    !viewOnly && !!active?.live && liveShared.some((item) => item.id === active.id);
+  sharedPeekRef.current = isSharedQueuePeek;
+  const isReadOnly = viewOnly || viewMode === "colleague" || isSharedQueuePeek;
+  const canTransferDespiteView = (viewOnly || viewMode === "colleague") && allowTransferInView;
   const isClientBlocked = !!(active && blockedDialogIds[active.id]);
   const composerLocked = isReadOnly || isClientBlocked || !hasActiveDialog;
+
+  useEffect(() => {
+    if (!hasActiveDialog) return;
+    scrollMessagesToEnd(liveMessages.length <= 1 ? "auto" : "smooth");
+  }, [liveMessages, clientDraft, active?.id, hasActiveDialog, scrollMessagesToEnd]);
 
   const clientForCard: ClientInfoData = active?.live
     ? {
@@ -2455,7 +3207,7 @@ export function ArmOperatorView({
         name: active.name,
         phoneFull: active.phone || "—",
         phoneMasked: active.phone ? maskPhone(active.phone) : "—",
-        dialogNo: `№ ${active.id.replace(/-/g, "").slice(0, 6)}`,
+        dialogNo: active.refCode ? `№ ${active.refCode}` : `№ ${dialogRefCode({ id: active.id })}`,
         email: "—",
         channel: active.channel,
         entryChannel: "Виджет сайта",
@@ -2464,38 +3216,71 @@ export function ArmOperatorView({
     : ACTIVE_CLIENT;
 
   useEffect(() => {
+    setPendingAttachment(null);
+  }, [active?.id]);
+
+  useEffect(() => {
     if (!active?.live) {
       setLiveMessages([]);
+      setClientDraft("");
+      setQuoteMessage(null);
       return;
     }
     let cancelled = false;
-    void getDialog(active.id)
+    const dialogId = active.id;
+    const peekShared = liveShared.some((item) => item.id === dialogId);
+    void getDialog(dialogId)
       .then((dialog) => {
-        if (!cancelled) setLiveMessages(dialog.messages ?? []);
+        if (!cancelled) {
+          const messages = dialog.messages ?? [];
+          for (const message of messages) {
+            if (message.receipt_status === "read") {
+              readMessageIdsRef.current.add(message.id);
+            }
+          }
+          setLiveMessages(messages);
+          // Viewing shared-queue dialogs must not mark client messages as read.
+          if (!viewOnly && !peekShared) {
+            void markDialogRead(dialogId, "operator").catch(() => {});
+          }
+        }
       })
       .catch(() => {
         if (!cancelled) setLiveMessages([]);
       });
 
-    const isSharedLive = liveShared.some((item) => item.id === active.id);
-    if (isSharedLive && !acceptedLiveRef.current[active.id]) {
-      acceptedLiveRef.current[active.id] = true;
-      void acceptDialog(active.id)
-        .then((dialog) => {
-          if (!cancelled) {
-            setLiveMessages(dialog.messages ?? []);
-            void refreshLiveQueues();
-          }
-        })
-        .catch(() => {
-          acceptedLiveRef.current[active.id] = false;
-        });
-    }
-
     return () => {
       cancelled = true;
     };
-  }, [active?.id, active?.live, liveShared, refreshLiveQueues]);
+  }, [active?.id, active?.live, liveShared, viewOnly]);
+
+  useEffect(() => {
+    void operatorsApi
+      .list()
+      .then((items) => {
+        setTransferOperators(items.filter((item) => item.is_active !== false && item.name));
+      })
+      .catch(() => setTransferOperators([]));
+  }, []);
+
+  useEffect(() => {
+    if (!active?.live || !active.id) {
+      setSummaryHistory(EMPTY_SUMMARY_HISTORY);
+      return;
+    }
+    let cancelled = false;
+    void fetchClientHistory({ dialogId: active.id })
+      .then((response) => {
+        if (cancelled) return;
+        setSummaryHistory(historyToSummary(response.items ?? [], response.summary ?? ""));
+      })
+      .catch(() => {
+        if (!cancelled) setSummaryHistory(EMPTY_SUMMARY_HISTORY);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active?.id, active?.live]);
 
   const handleSelectQueue = (id: string) => {
     onSelectQueue(id);
@@ -2522,8 +3307,17 @@ export function ArmOperatorView({
   const [rightWidth, setRightWidth] = useState(ARM_RIGHT_WIDTH_DEFAULT);
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [canvasBuild, setCanvasBuild] = useState("");
-  const [statsDrawerOpen, setStatsDrawerOpen] = useState(false);
+  const [statsDrawerOpenLocal, setStatsDrawerOpenLocal] = useState(false);
+  const statsDrawerOpen = statsDrawerOpenProp ?? statsDrawerOpenLocal;
+  const setStatsDrawerOpen = useCallback(
+    (open: boolean) => {
+      if (onStatsDrawerOpenChange) onStatsDrawerOpenChange(open);
+      else setStatsDrawerOpenLocal(open);
+    },
+    [onStatsDrawerOpenChange],
+  );
   const [statsTab, setStatsTab] = useState<ArmStatsTab>("dialogs");
+  const [internalUnread, setInternalUnread] = useState(0);
 
   useEffect(() => {
     if (canvasBuild !== CANVAS_MOCKUP_VERSION) {
@@ -2534,20 +3328,26 @@ export function ArmOperatorView({
   }, [canvasBuild, setCanvasBuild, setStatsDrawerOpen, setStatsTab]);
 
   useEffect(() => {
-    if (!ARM_STATS_TAB_ROLES[statsTab].includes(armRole)) {
-      setStatsTab(firstArmStatsTabForRole(armRole));
-    }
-  }, [armRole, statsTab, setStatsTab]);
+    let cancelled = false;
+    const pollUnread = () => {
+      void getInternalUnreadCount(operatorName)
+        .then((result) => {
+          if (!cancelled) setInternalUnread(result.unread_count);
+        })
+        .catch(() => undefined);
+    };
+    pollUnread();
+    const timer = window.setInterval(pollUnread, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [operatorName]);
 
-  const toggleStatsDrawer = () => {
-    setStatsDrawerOpen((open) => {
-      const next = !open;
-      if (next && !ARM_STATS_TAB_ROLES[statsTab].includes(armRole)) {
-        setStatsTab(firstArmStatsTabForRole(armRole));
-      }
-      return next;
-    });
-  };
+  useEffect(() => {
+    const allowed = armMenuItemsForRole(armRole, menuContext).some((item) => item.id === statsTab);
+    if (!allowed) setStatsTab(firstArmStatsTabForRole(armRole, menuContext));
+  }, [armRole, menuContext, statsTab]);
   const [expandedSections, setExpandedSections] = useState<Record<QueueSectionId, boolean>>(
     defaultExpandedSections(),
   );
@@ -2562,9 +3362,44 @@ export function ArmOperatorView({
   const [blockClientConfirmOpen, setBlockClientConfirmOpen] = useState(false);
 
   useEffect(() => {
-    if (liveShared.length === 0) return;
-    setExpandedSections((prev) => (prev.shared ? prev : { ...prev, shared: true }));
-  }, [liveShared.length]);
+    setExpandedSections((prev) => {
+      const next = { ...prev };
+      if (liveWaiting.length > 0) next.waiting = true;
+      if (liveInitiated.length > 0) next.initiated = true;
+      if (liveShared.length > 0) next.shared = true;
+      if (viewOnly && liveColleagues.length > 0) next.colleagues = true;
+      return next;
+    });
+  }, [liveWaiting.length, liveInitiated.length, liveShared.length, liveColleagues.length, viewOnly]);
+
+  useEffect(() => {
+    if (!viewOnly || liveColleagues.length === 0) return;
+    onViewModeChange("colleague");
+    if (!liveColleagues.some((item) => item.id === selectedQueue)) {
+      onSelectQueue(liveColleagues[0].id);
+    }
+  }, [viewOnly, liveColleagues, selectedQueue, onSelectQueue, onViewModeChange]);
+
+  useEffect(() => {
+    if (armRole !== "admin") return;
+    void listClientBlocks(true)
+      .then((blocks) =>
+        setClientBlocks(blocks.map((block) => ({ id: block.id, phone_normalized: block.phone_normalized }))),
+      )
+      .catch(() => {});
+  }, [armRole]);
+
+  useEffect(() => {
+    if (liveMine.length === 0) return;
+    setExpandedSections((prev) => (prev.mine ? prev : { ...prev, mine: true }));
+  }, [liveMine.length]);
+
+  useEffect(() => {
+    if (!liveMode) return;
+    if (selectedQueue && remainingDialogs.some((item) => item.id === selectedQueue)) return;
+    const firstLive = remainingDialogs.find((item) => item.live);
+    if (firstLive) onSelectQueue(firstLive.id);
+  }, [liveMode, selectedQueue, remainingDialogs, onSelectQueue]);
 
   const clearComposerNotice = () => setComposerNotice(null);
 
@@ -2588,6 +3423,12 @@ export function ArmOperatorView({
       setCloseDialogConfirmOpen(false);
       return;
     }
+    const topic = closeTopic.trim();
+    if (!topic) {
+      setCloseDialogConfirmOpen(false);
+      setComposerNotice("Выберите тематику закрытия перед завершением диалога.");
+      return;
+    }
     const closingId = active.id;
     const closedName = active.name;
     const wasLive = !!active.live;
@@ -2600,15 +3441,19 @@ export function ArmOperatorView({
       return next;
     });
     if (wasLive) {
-      void closeDialogRemote(closingId).then(() => void refreshLiveQueues()).catch(() => {});
+      void closeDialogRemote(closingId, topic)
+        .then(() => void refreshLiveQueues())
+        .catch(() => {
+          setComposerNotice("Не удалось закрыть диалог на сервере. Попробуйте ещё раз.");
+        });
     }
     const nextDialog = remainingDialogs.find((item) => item.id !== closingId);
     if (nextDialog) {
       onSelectQueue(nextDialog.id);
-      setComposerNotice(`Диалог с ${closedName} закрыт.`);
+      setComposerNotice(`Диалог с ${closedName} закрыт · ${topic}.`);
     } else {
       onSelectQueue("");
-      setComposerNotice("Диалог закрыт. Очередь пуста.");
+      setComposerNotice(`Диалог закрыт · ${topic}. Очередь пуста.`);
     }
   };
 
@@ -2620,33 +3465,221 @@ export function ArmOperatorView({
     setBlockClientConfirmOpen(false);
     setBlockedDialogIds((prev) => ({ ...prev, [active.id]: true }));
     if (active.live) {
-      void blockDialogRemote(active.id).then(() => void refreshLiveQueues()).catch(() => {});
+      void blockDialogRemote(active.id, { blocked_by: operatorName })
+        .then(() => void refreshLiveQueues())
+        .catch(() => {});
     }
     setComposerNotice(`Клиент ${active.name} заблокирован.`);
   };
 
   const deliverReply = (notice: string) => {
     const text = reply.trim();
-    if (!text || !active || composerLocked) return;
+    const file = pendingAttachment;
+    if ((!text && !file) || !active || composerLocked) return;
+    const replyToId = quoteMessage?.id;
     if (active.live) {
-      void sendOperatorMessage(active.id, text)
+      const sendPromise = file
+        ? uploadOperatorAttachment(active.id, file, operatorName, text)
+        : sendOperatorMessage(active.id, text, {
+            reply_to_id: replyToId,
+            operator_name: operatorName,
+            response_origin: suflerSuggestionText ? "sufler" : undefined,
+            sufler_suggestion_text: suflerSuggestionText || undefined,
+          });
+      void sendPromise
         .then((message) => {
-          setLiveMessages((prev) =>
-            prev.some((item) => item.id === message.id) ? prev : [...prev, message],
-          );
+          const withReceipt =
+            message.receipt_status === "read" ||
+            readMessageIdsRef.current.has(message.id)
+              ? { ...message, receipt_status: "read" as ReceiptStatus }
+              : message;
+          setLiveMessages((prev) => {
+            if (prev.some((item) => item.id === withReceipt.id)) {
+              return prev.map((item) =>
+                item.id === withReceipt.id ? { ...item, ...withReceipt } : item,
+              );
+            }
+            return [...prev, withReceipt];
+          });
           onReplyChange("");
+          setPendingAttachment(null);
+          setQuoteMessage(null);
           setSpellWarning(false);
-          setComposerNotice(notice);
+          setComposerNotice(
+            file
+              ? text
+                ? `Файл «${file.name}» и сообщение отправлены.`
+                : `Файл «${file.name}» отправлен.`
+              : notice,
+          );
           void refreshLiveQueues();
         })
         .catch(() => {
-          setComposerNotice("Не удалось отправить сообщение.");
+          setComposerNotice(file ? "Не удалось отправить файл." : "Не удалось отправить сообщение.");
         });
       return;
     }
     onReplyChange("");
+    setPendingAttachment(null);
+    setQuoteMessage(null);
     setSpellWarning(false);
     setComposerNotice(notice);
+  };
+
+  const transferDepartments = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of transferOperators) {
+      if (item.name === operatorName) continue;
+      const deptName = item.department_name?.trim() || "Без отдела";
+      const deptId = String(item.department_id ?? item.department ?? deptName);
+      map.set(deptId, deptName);
+    }
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [transferOperators, operatorName]);
+
+  const transferOperatorOptions = useMemo(() => {
+    const inDept = transferOperators.filter((item) => {
+      if (item.name === operatorName) return false;
+      const deptName = item.department_name?.trim() || "Без отдела";
+      const deptId = String(item.department_id ?? item.department ?? deptName);
+      return deptId === transferDepartment;
+    });
+    if (inDept.length) {
+      return inDept
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, "ru"))
+        .map((item) => ({ value: item.name, label: item.name }));
+    }
+    // Fallback when directory empty: keep demo names under one virtual dept.
+    if (!transferOperators.length) {
+      return TRANSFER_OPERATORS
+        .filter((name) => name !== operatorName)
+        .map((name) => ({ value: name, label: name }));
+    }
+    return [];
+  }, [transferOperators, transferDepartment, operatorName]);
+
+  const openTransferDialog = () => {
+    if (!active?.live) return;
+    if (composerLocked && !canTransferDespiteView) return;
+    const firstDept = transferDepartments[0]?.id ?? "";
+    setTransferDepartment(firstDept);
+    const firstOps = transferOperators
+      .filter((item) => {
+        if (item.name === operatorName) return false;
+        const deptName = item.department_name?.trim() || "Без отдела";
+        const deptId = String(item.department_id ?? item.department ?? deptName);
+        return deptId === firstDept;
+      })
+      .map((item) => item.name);
+    setTransferOperatorName(firstOps[0] ?? TRANSFER_OPERATORS.find((name) => name !== operatorName) ?? "");
+    setTransferDialogOpen(true);
+  };
+
+  const handleConfirmTransferDialog = () => {
+    if (!active?.live) return;
+    const toName = transferOperatorName.trim();
+    if (!toName) return;
+    const transferredId = active.id;
+    const transferredName = active.name;
+    setTransferDialogOpen(false);
+    const preferNext =
+      liveWaiting.find((item) => item.id !== transferredId)
+      ?? remainingDialogs.find((item) => item.id !== transferredId && !item.readOnly);
+    if (preferNext) onSelectQueue(preferNext.id);
+    else onSelectQueue("");
+    void transferDialogRemote(transferredId, toName, operatorName)
+      .then(async () => {
+        setComposerNotice(`Диалог с ${transferredName} переведён на ${toName}.`);
+        await refreshLiveQueues();
+      })
+      .catch(() => {
+        setComposerNotice("Не удалось перевести диалог.");
+        onSelectQueue(transferredId);
+      });
+  };
+
+  const handleDownloadAttachment = (message: OnlineChatMessage) => {
+    if (!active?.id || !message.attachment_name) return;
+    void downloadAttachment(active.id, message.id, message.attachment_name).catch(() => {
+      setComposerNotice("Не удалось скачать файл.");
+    });
+  };
+
+  const handleFilePick = (file: File) => {
+    if (!active?.live || composerLocked) return;
+    setPendingAttachment(file);
+    setComposerNotice(`Файл «${file.name}» прикреплён. Напишите сообщение при необходимости и нажмите «Отправить».`);
+  };
+
+  const openEditMessage = (message: OnlineChatMessage) => {
+    if (!active?.live) return;
+    setEditMessageTarget(message);
+    setEditMessageText(message.raw_text || message.text);
+  };
+
+  const handleConfirmEditMessage = () => {
+    if (!active?.live || !editMessageTarget) return;
+    const nextText = editMessageText.trim();
+    const previous = (editMessageTarget.raw_text || editMessageTarget.text || "").trim();
+    const hasAttachment = Boolean(editMessageTarget.attachment_key || editMessageTarget.attachment_name);
+    if ((!nextText && !hasAttachment) || nextText === previous) {
+      setEditMessageTarget(null);
+      return;
+    }
+    const messageId = editMessageTarget.id;
+    setEditMessageTarget(null);
+    void editMessageRemote(active.id, messageId, nextText)
+      .then((updated) => {
+        setLiveMessages((prev) =>
+          prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
+        );
+      })
+      .catch(() => {
+        setComposerNotice("Не удалось изменить сообщение.");
+      });
+  };
+
+  const openDeleteMessage = (message: OnlineChatMessage) => {
+    if (!active?.live) return;
+    setDeleteMessageTarget(message);
+  };
+
+  const handleConfirmDeleteMessage = () => {
+    if (!active?.live || !deleteMessageTarget) return;
+    const messageId = deleteMessageTarget.id;
+    setDeleteMessageTarget(null);
+    void deleteMessageRemote(active.id, messageId)
+      .then((deleted) => {
+        setLiveMessages((prev) =>
+          prev.map((item) =>
+            item.id === deleted.id ? { ...item, is_deleted: true, text: "" } : item,
+          ),
+        );
+      })
+      .catch(() => {
+        setComposerNotice("Не удалось удалить сообщение.");
+      });
+  };
+
+  const activePhoneBlock = useMemo(() => {
+    if (!active?.phone || armRole !== "admin") return null;
+    const digits = active.phone.replace(/\D/g, "");
+    return clientBlocks.find((block) => block.phone_normalized.replace(/\D/g, "") === digits) ?? null;
+  }, [active?.phone, armRole, clientBlocks]);
+
+  const handleLiftBlock = () => {
+    if (!activePhoneBlock) return;
+    void liftClientBlock(activePhoneBlock.id, operatorName)
+      .then(() => {
+        setClientBlocks((prev) => prev.filter((block) => block.id !== activePhoneBlock.id));
+        setComposerNotice("Блокировка клиента снята.");
+      })
+      .catch(() => {
+        setComposerNotice("Не удалось снять блокировку.");
+      });
   };
 
   const spellErrors = reply.trim().length > 0 ? findSpellErrors(reply) : [];
@@ -2731,132 +3764,68 @@ export function ArmOperatorView({
           zIndex: 5,
           display: "flex",
           alignItems: "center",
-          gap: 16,
+          gap: 12,
         }}
       >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <Row style={{ gap: 12, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-            <button
-              type="button"
-              aria-expanded={statsDrawerOpen}
-              aria-controls="arm-stats-drawer"
-              title={statsDrawerOpen ? "Скрыть сдвижную панель" : "Меню: диалоги, история, статистика"}
-              onClick={toggleStatsDrawer}
-              style={{
-                border: statsDrawerOpen ? `1px solid ${scheme.accent}` : `1px solid ${t.stroke.secondary}`,
-                background: statsDrawerOpen ? t.fill.tertiary : "transparent",
-                color: statsDrawerOpen ? scheme.accentControl : t.text.secondary,
-                borderRadius: RADIUS_SM,
-                padding: "4px 10px",
-                fontSize: 12,
-                fontFamily: "inherit",
-                cursor: "pointer",
-                lineHeight: 1.3,
-              }}
-            >
-              ☰ Меню
-            </button>
-            <Text weight="semibold">Беларусбанк · Онлайн-чат</Text>
-            <button
-              type="button"
-              className="arm-theme-toggle"
-              title={t.kind === "light" ? "Включить тёмную тему" : "Включить светлую тему"}
-              aria-label={t.kind === "light" ? "Тёмная тема" : "Светлая тема"}
-              onClick={onToggleTheme}
-              style={{
-                width: 34,
-                height: 34,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                border: `1px solid ${scheme.accent}`,
-                background: t.fill.tertiary,
-                color: scheme.accentControl,
-                borderRadius: RADIUS_SM,
-                padding: 0,
-                fontFamily: "inherit",
-                cursor: "pointer",
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <circle cx="12" cy="12" r="4.2" stroke="currentColor" strokeWidth="1.8" />
-                <path
-                  d="M12 3v1.6M12 19.4V21M4.6 12H3M21 12h-1.6M6.2 6.2l1.1 1.1M16.7 16.7l1.1 1.1M6.2 17.8l1.1-1.1M16.7 7.3l1.1-1.1"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          </Row>
-          <Row
-            style={{
-              gap: 6,
-              flexWrap: "wrap",
-              alignItems: "center",
-              marginTop: 10,
-              minWidth: 0,
-            }}
-          >
-            {OPERATOR_STATUSES.map((status) => (
-              <OperatorStatusPill
-                key={status.id}
-                t={t}
-                status={status}
-                active={presence === status.id}
-                size="md"
-                onClick={() => onPresenceChange(status.id)}
-              />
-            ))}
-          </Row>
-        </div>
-        <Stack gap={6} style={{ alignItems: "flex-end", flexShrink: 0, justifyContent: "center" }}>
-          <Text
-            style={{
-              fontSize: 15,
-              fontWeight: 600,
-              color: t.text.primary,
-              whiteSpace: "nowrap",
-            }}
-          >
-            Иванов И.И. · {ARM_ROLE_LABELS[armRole]}
-          </Text>
-          <Row style={{ gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
-            {(["operator", "supervisor", "admin"] as ArmRole[]).map((role) => (
-              <Pill
-                key={role}
-                size="sm"
-                active={armRole === role}
-                onClick={() => setArmRole(role)}
-                title={`Роль: ${ARM_ROLE_LABELS[role]}`}
-              >
-                {role === "operator" ? "Опер." : role === "supervisor" ? "Суп." : "Адм."}
-              </Pill>
-            ))}
-          </Row>
-        </Stack>
+        <Row
+          style={{
+            gap: 6,
+            flexWrap: "wrap",
+            alignItems: "center",
+            minWidth: 0,
+            flex: 1,
+          }}
+        >
+          {OPERATOR_STATUSES.map((status) => (
+            <OperatorStatusPill
+              key={status.id}
+              t={t}
+              status={status}
+              active={presence === status.id}
+              size="md"
+              onClick={viewOnly ? undefined : () => onPresenceChange(status.id)}
+            />
+          ))}
+          {viewOnly ? (
+            <Pill tone="warning" size="sm">
+              только просмотр
+            </Pill>
+          ) : null}
+        </Row>
       </div>
 
       <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative", overflow: "hidden" }}>
-        <div
-          style={{
-            width: statsDrawerOpen ? ARM_STATS_DRAWER_WIDTH : 0,
-            flexShrink: 0,
-            overflow: "hidden",
-            transition: "width 0.22s ease",
-            height: "100%",
-            minHeight: 0,
+        <ArmOverlayMenu
+          t={t}
+          scheme={scheme}
+          open={statsDrawerOpen}
+          armRole={armRole}
+          menuContext={menuContext}
+          activeId={statsTab}
+          badges={{ internal: internalUnread }}
+          onSelect={(id) => {
+            if (id === "employees") {
+              window.location.assign("/online-chat");
+              return;
+            }
+            setStatsTab(id);
+            setStatsDrawerOpen(false);
           }}
-        >
-          <ArmStatsDrawer
+          onClose={() => setStatsDrawerOpen(false)}
+        />
+        {isArmWorkspaceModule(statsTab) ? (
+          <ArmModulesHost
+            tab={statsTab as ArmModuleId}
             t={t}
             scheme={scheme}
+            operatorName={operatorName}
             armRole={armRole}
-            statsTab={statsTab}
-            onTabChange={setStatsTab}
-            onClose={() => setStatsDrawerOpen(false)}
+            onBack={() => setStatsTab("dialogs")}
+            onNavigate={(id) => setStatsTab(id as ArmStatsTab)}
+            onUnreadChange={setInternalUnread}
           />
-        </div>
+        ) : (
+        <>
         {/* Queues */}
         {leftPanelCollapsed ? (
           <div
@@ -2909,22 +3878,37 @@ export function ArmOperatorView({
                 aria-label={allSectionsCollapsed ? "Развернуть все секции" : "Свернуть все секции"}
                 onClick={() => (allSectionsCollapsed ? expandAllQueue() : collapseAllQueue())}
                 style={{
-                  border: `1px solid ${t.stroke.secondary}`,
-                  background: t.fill.secondary,
-                  color: t.text.secondary,
-                  fontSize: 11,
+                  border: `1px solid ${scheme.accentWeak}`,
+                  background: `linear-gradient(180deg, ${t.bg.elevated} 0%, ${t.fill.secondary} 100%)`,
+                  color: scheme.accentControl,
+                  fontSize: 12,
+                  fontWeight: 650,
                   cursor: "pointer",
-                  padding: "2px 6px",
+                  padding: "6px 12px",
                   fontFamily: "inherit",
-                  borderRadius: RADIUS_SM,
-                  display: "flex",
+                  borderRadius: 999,
+                  display: "inline-flex",
                   alignItems: "center",
-                  gap: 4,
-                  lineHeight: 1.3,
+                  gap: 7,
+                  lineHeight: 1.2,
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
                 }}
               >
-                <span aria-hidden style={{ fontSize: 12, lineHeight: 1 }}>
-                  {allSectionsCollapsed ? "⊞" : "⊟"}
+                <span
+                  aria-hidden
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: 999,
+                    display: "inline-grid",
+                    placeItems: "center",
+                    background: scheme.accentWeak,
+                    color: scheme.accentControl,
+                    fontSize: 12,
+                    lineHeight: 1,
+                  }}
+                >
+                  {allSectionsCollapsed ? "+" : "−"}
                 </span>
                 {allSectionsCollapsed ? "Развернуть все" : "Свернуть все"}
               </button>
@@ -2974,6 +3958,7 @@ export function ArmOperatorView({
                                 item={q}
                                 t={t}
                                 selected={q.id === selectedQueue}
+                                nowMs={nowMs}
                                 onClick={() => {
                                   handleSelectQueue(q.id);
                                   expandCard(q.id);
@@ -2989,6 +3974,7 @@ export function ArmOperatorView({
                               t={t}
                               scheme={scheme}
                               selected={q.id === selectedQueue}
+                              nowMs={nowMs}
                               onSelect={() => handleSelectQueue(q.id)}
                               onCollapse={() => collapseCard(q.id)}
                             />
@@ -3038,9 +4024,19 @@ export function ArmOperatorView({
                 gap: 12,
               }}
             >
-              <Text style={{ color: t.text.secondary, fontSize: 14, textAlign: "center" }}>
-                Нет активного диалога. Выберите обращение из очереди слева.
+              <Text style={{ color: t.text.secondary, fontSize: 14, textAlign: "center", maxWidth: 420 }}>
+                {queuesReady
+                  ? "Очередь пуста. Чтобы появился поток обращений, создайте сценарий в разделе «Симулятор» (тест)."
+                  : "Загружаем очереди…"}
               </Text>
+              {queuesReady ? (
+                <a
+                  href="/online-chat/simulator"
+                  style={{ color: scheme.accentControl, fontSize: 13, fontWeight: 600 }}
+                >
+                  Открыть симулятор
+                </a>
+              ) : null}
               {composerNotice ? (
                 <div style={{ width: "100%", maxWidth: 420 }}>
                   <AutoFadeNotice message={composerNotice} onDone={clearComposerNotice} />
@@ -3064,10 +4060,9 @@ export function ArmOperatorView({
                   <Pill tone="info" size="sm">
                     {active.channel}
                   </Pill>
-                  <Text style={{ fontSize: 12, color: t.text.secondary }}>#{active.id}8472</Text>
                 </Row>
               </div>
-              {isReadOnly ? (
+              {viewOnly ? (
                 <div
                   style={{
                     flex: 1,
@@ -3079,16 +4074,25 @@ export function ArmOperatorView({
                   }}
                 >
                   <Callout tone="warning" style={{ fontSize: 12, maxWidth: 420, width: "100%" }}>
-                    Режим просмотра: диалог коллеги без возможности отправки.
+                    {allowTransferInView
+                      ? "Режим просмотра: без ответа клиенту. Можно перевести диалог."
+                      : "Режим просмотра: диалоги оператора только для наблюдения, без действий от его лица."}
                   </Callout>
                 </div>
               ) : (
                 <Spacer />
               )}
               <Stack gap={6} style={{ alignItems: "flex-end", flexShrink: 0 }}>
-                <Pill tone={active.urgent ? "warning" : "neutral"} size="sm">
-                  SLA {active.wait}
-                </Pill>
+                {(() => {
+                  const resolved = resolveQueueWait(active, nowMs);
+                  return resolved.slaTone ? (
+                    <SlaWaitPill wait={`SLA ${resolved.wait}`} slaTone={resolved.slaTone} />
+                  ) : (
+                    <Pill tone={resolved.urgent ? "warning" : "neutral"} size="sm">
+                      SLA {resolved.wait}
+                    </Pill>
+                  );
+                })()}
                 <Text style={{ fontSize: 12, color: t.text.secondary, textAlign: "right" }}>
                   {viewMode === "colleague"
                     ? `Просмотр · ${active.operatorName ?? "коллега"}`
@@ -3109,6 +4113,7 @@ export function ArmOperatorView({
                 <Select
                   value={closeTopic}
                   onChange={onCloseTopicChange}
+                  disabled={isReadOnly}
                   options={CLOSE_TOPICS.map((topic) => ({ value: topic, label: topic }))}
                 />
               </div>
@@ -3122,6 +4127,16 @@ export function ArmOperatorView({
               >
                 {isClientBlocked ? "Заблокирован" : "Заблокировать"}
               </Button>
+              {activePhoneBlock ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  style={{ color: t.text.tertiary, fontSize: 11 }}
+                  onClick={handleLiftBlock}
+                >
+                  Снять блокировку
+                </Button>
+              ) : null}
               <Button
                 variant="primary"
                 size="sm"
@@ -3133,11 +4148,13 @@ export function ArmOperatorView({
             </Row>
           </div>
           <div
+            ref={messagesScrollRef}
             style={{
               flex: 1,
               minHeight: 0,
-              padding: 16,
+              padding: "16px 16px 20px",
               overflowY: "auto",
+              overflowX: "hidden",
               display: "flex",
               flexDirection: "column",
               gap: 10,
@@ -3164,10 +4181,53 @@ export function ArmOperatorView({
                         t={t}
                         scheme={scheme}
                         side="operator"
-                        label="Иванов И.И. · оператор"
-                        avatarInitials="ИИ"
+                        label={`${operatorName} · оператор`}
+                        avatarInitials={operatorInitials}
                         text={message.text}
                         time={messageTimeLabel(message.created_at)}
+                        quotedText={message.quoted_text}
+                        attachmentName={message.attachment_name}
+                        attachmentDownloadable={canDownloadAttachment(message)}
+                        onDownloadAttachment={
+                          canDownloadAttachment(message)
+                            ? () => handleDownloadAttachment(message)
+                            : undefined
+                        }
+                        isDeleted={message.is_deleted}
+                        editedAt={message.edited_at}
+                        receiptStatus={
+                          message.is_deleted
+                            ? undefined
+                            : message.receipt_status === "read" ||
+                                readMessageIdsRef.current.has(message.id)
+                              ? "read"
+                              : "delivered"
+                        }
+                        onEdit={
+                          !isReadOnly && !message.is_deleted
+                            ? () => openEditMessage(message)
+                            : undefined
+                        }
+                        onDelete={
+                          !isReadOnly && !message.is_deleted
+                            ? () => openDeleteMessage(message)
+                            : undefined
+                        }
+                      />
+                    );
+                  }
+                  if (message.speaker === "bot") {
+                    return (
+                      <MessageBubble
+                        key={message.id}
+                        t={t}
+                        scheme={scheme}
+                        side="operator"
+                        label="Виртуальный помощник · бот"
+                        avatarInitials="Б"
+                        text={message.text}
+                        time={messageTimeLabel(message.created_at)}
+                        receiptStatus={message.receipt_status}
                       />
                     );
                   }
@@ -3181,6 +4241,21 @@ export function ArmOperatorView({
                       avatarInitials={initialsFromDisplayName(active.name)}
                       text={message.text}
                       time={messageTimeLabel(message.created_at)}
+                      quotedText={message.quoted_text}
+                      editedAt={message.edited_at}
+                      attachmentName={message.attachment_name}
+                      attachmentDownloadable={canDownloadAttachment(message)}
+                      onDownloadAttachment={
+                        canDownloadAttachment(message)
+                          ? () => handleDownloadAttachment(message)
+                          : undefined
+                      }
+                      isDeleted={message.is_deleted}
+                      onQuote={
+                        !isReadOnly && !message.is_deleted
+                          ? () => setQuoteMessage(message)
+                          : undefined
+                      }
                     />
                   );
                 })
@@ -3195,7 +4270,7 @@ export function ArmOperatorView({
                   t={t}
                   scheme={scheme}
                   side="system"
-                  text="Оператор Иванов И.И. подключился к диалогу"
+                  text={`Оператор ${operatorName} подключился к диалогу`}
                 />
                 <MessageBubble
                   t={t}
@@ -3210,27 +4285,240 @@ export function ArmOperatorView({
                   t={t}
                   scheme={scheme}
                   side="operator"
-                  label="Иванов И.И. · оператор"
-                  avatarInitials="ИИ"
+                  label={`${operatorName} · оператор`}
+                  avatarInitials={operatorInitials}
                   text="Проверяю лимиты по вашей карте, одну минуту."
                   time="10:04"
+                  receiptStatus="read"
                 />
               </>
             )}
+            <div ref={messagesEndRef} aria-hidden style={{ height: 1, flexShrink: 0 }} />
           </div>
-          <div style={{ padding: 12, borderTop: `1px solid ${t.stroke.secondary}`, flexShrink: 0 }}>
-            <Row style={{ gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <Button variant="secondary" disabled={composerLocked}>Шаблоны</Button>
-              <Button variant="secondary" disabled={composerLocked}>Файл</Button>
-              <Button variant="secondary" disabled={composerLocked}>Перевести</Button>
+          <div
+            style={{
+              padding: 12,
+              borderTop: `1px solid ${t.stroke.secondary}`,
+              flexShrink: 0,
+              background: t.bg.elevated,
+            }}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              style={{ display: "none" }}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) handleFilePick(file);
+                event.target.value = "";
+              }}
+            />
+            <Row style={{ gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center", position: "relative" }}>
+              <Button
+                variant={showTemplates ? "primary" : "secondary"}
+                disabled={composerLocked}
+                onClick={() => {
+                  setComposerTemplates(loadReplyTemplates());
+                  setShowTemplates((open) => !open);
+                }}
+              >
+                Шаблоны
+              </Button>
+              {showTemplates && !composerLocked ? (
+                <div
+                  role="listbox"
+                  aria-label="Шаблоны ответов"
+                  style={{
+                    position: "absolute",
+                    bottom: "100%",
+                    left: 0,
+                    marginBottom: 8,
+                    zIndex: 20,
+                    width: 360,
+                    maxWidth: "min(360px, calc(100vw - 48px))",
+                    background: t.bg.elevated,
+                    border: `1px solid ${scheme.accentWeak}`,
+                    borderRadius: 12,
+                    padding: 10,
+                    boxShadow: "0 14px 36px rgba(12, 40, 28, 0.16)",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      padding: "2px 6px 10px",
+                      borderBottom: `1px solid ${t.stroke.secondary}`,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <div>
+                      <Text weight="semibold" style={{ fontSize: 13, color: t.text.primary }}>
+                        Шаблоны ответов
+                      </Text>
+                      <Text style={{ fontSize: 11, color: t.text.tertiary, marginTop: 2 }}>
+                        Вставка в поле ответа · конструктор в меню АРМ
+                      </Text>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label="Закрыть шаблоны"
+                      onClick={() => setShowTemplates(false)}
+                    >
+                      ✕
+                    </Button>
+                  </div>
+                  <Stack gap={4}>
+                    {composerTemplates.map((template, index) => (
+                      <button
+                        key={template.id}
+                        type="button"
+                        role="option"
+                        onClick={() => {
+                          const text = template.body
+                            .replaceAll("{{client_name}}", active?.name ?? "клиент")
+                            .replaceAll("{{operator_name}}", operatorName);
+                          onReplyChange(text);
+                          setShowTemplates(false);
+                        }}
+                        style={{
+                          border: `1px solid ${t.stroke.secondary}`,
+                          background: t.bg.editor,
+                          textAlign: "left",
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          fontSize: 12,
+                          lineHeight: 1.4,
+                          color: t.text.primary,
+                          display: "flex",
+                          gap: 10,
+                          alignItems: "flex-start",
+                          transition: "background 120ms ease, border-color 120ms ease",
+                        }}
+                        onMouseEnter={(event) => {
+                          event.currentTarget.style.background = scheme.accentWeak;
+                          event.currentTarget.style.borderColor = scheme.accent;
+                        }}
+                        onMouseLeave={(event) => {
+                          event.currentTarget.style.background = t.bg.editor;
+                          event.currentTarget.style.borderColor = t.stroke.secondary;
+                        }}
+                      >
+                        <span
+                          style={{
+                            flexShrink: 0,
+                            width: 22,
+                            height: 22,
+                            borderRadius: 7,
+                            background: scheme.accent,
+                            color: "#fff",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            marginTop: 1,
+                          }}
+                        >
+                          {index + 1}
+                        </span>
+                        <span style={{ minWidth: 0 }}>
+                          <span style={{ fontWeight: 600, display: "block", marginBottom: 2 }}>
+                            {template.favorite ? "★ " : ""}
+                            {template.title}
+                          </span>
+                          {template.body}
+                        </span>
+                      </button>
+                    ))}
+                  </Stack>
+                </div>
+              ) : null}
+              <Button
+                variant="secondary"
+                disabled={composerLocked}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Файл
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={!active?.live || (composerLocked && !canTransferDespiteView)}
+                onClick={openTransferDialog}
+              >
+                Перевести
+              </Button>
             </Row>
-            <div style={{ position: "relative" }}>
+            {clientDraft && active?.live && !composerLocked ? (
+              <Callout tone="info" style={{ marginBottom: 8, fontSize: 12 }}>
+                Клиент набирает: {clientDraft}
+              </Callout>
+            ) : null}
+            {isSharedQueuePeek ? (
+              <Callout tone="info" style={{ marginBottom: 8, fontSize: 12 }}>
+                Просмотр общей очереди: ответ недоступен, сообщения клиента не отмечаются как прочитанные.
+              </Callout>
+            ) : null}
+            {quoteMessage ? (
+              <div
+                style={{
+                  marginBottom: 8,
+                  padding: "6px 10px",
+                  borderRadius: RADIUS_SM,
+                  background: t.fill.tertiary,
+                  border: `1px solid ${t.stroke.secondary}`,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Text style={{ fontSize: 12, color: t.text.secondary, flex: 1, minWidth: 0 }}>
+                  Ответ на: {quoteMessage.text.slice(0, 120)}
+                  {quoteMessage.text.length > 120 ? "…" : ""}
+                </Text>
+                <Button variant="ghost" size="sm" onClick={() => setQuoteMessage(null)}>
+                  ✕
+                </Button>
+              </div>
+            ) : null}
+            {pendingAttachment && !composerLocked ? (
+              <div
+                style={{
+                  marginBottom: 8,
+                  padding: "6px 10px",
+                  borderRadius: RADIUS_SM,
+                  background: t.fill.tertiary,
+                  border: `1px solid ${t.stroke.secondary}`,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Text style={{ fontSize: 12, color: t.text.secondary, flex: 1, minWidth: 0 }}>
+                  📎 {pendingAttachment.name}
+                </Text>
+                <Button variant="ghost" size="sm" onClick={() => setPendingAttachment(null)}>
+                  ✕
+                </Button>
+              </div>
+            ) : null}
+            <div style={{ position: "relative", opacity: composerLocked ? 0.55 : 1 }}>
               <Stack gap={8}>
                 <TextArea
                   placeholder={
                     isClientBlocked
                       ? "Клиент заблокирован — ответ недоступен"
-                      : "Введите ответ клиенту…"
+                      : isSharedQueuePeek
+                        ? "Общая очередь — только просмотр"
+                        : pendingAttachment
+                          ? "Добавьте текст к файлу (необязательно)…"
+                          : "Введите ответ клиенту…"
                   }
                   style={{ width: "100%", minHeight: 72, overflow: "auto", resize: "vertical" }}
                   rows={3}
@@ -3271,9 +4559,9 @@ export function ArmOperatorView({
                     </Button>
                     <Button
                       variant="primary"
-                      disabled={composerLocked || reply.trim().length === 0}
+                      disabled={composerLocked || (reply.trim().length === 0 && !pendingAttachment)}
                       onClick={() => {
-                        if (spellErrors.length > 0) {
+                        if (spellErrors.length > 0 && reply.trim()) {
                           setSpellWarning(true);
                           return;
                         }
@@ -3356,7 +4644,7 @@ export function ArmOperatorView({
           <ClientSummaryCard
             t={t}
             scheme={scheme}
-            data={ACTIVE_SUMMARY_HISTORY}
+            data={summaryHistory}
             isExpanded={expandedSummaryCard}
             onToggle={() => setExpandedSummaryCard((open) => !open)}
             disabled={isReadOnly}
@@ -3402,8 +4690,11 @@ export function ArmOperatorView({
           </div>
           </div>
         </div>
+        </>
+        )}
       </div>
 
+      {!isArmWorkspaceModule(statsTab) ? (
       <div
         style={{
           padding: "6px 16px",
@@ -3416,13 +4707,14 @@ export function ArmOperatorView({
       >
         Ctrl+Enter — отправить · Ctrl+K — шаблоны · F2 — следующий диалог
       </div>
+      ) : null}
 
       {closeDialogConfirmOpen ? (
         <ConfirmDialog
           t={t}
           titleId="close-dialog-title"
           title="Вы точно хотите закрыть данный диалог?"
-          description="Диалог будет завершён и исчезнет из очереди. Отменить закрытие после подтверждения будет нельзя."
+          description={`Диалог будет завершён с тематикой «${closeTopic}» и исчезнет из очереди. Отменить закрытие после подтверждения будет нельзя.`}
           confirmLabel="Закрыть"
           onCancel={() => setCloseDialogConfirmOpen(false)}
           onConfirm={handleConfirmCloseDialog}
@@ -3438,6 +4730,134 @@ export function ArmOperatorView({
           confirmLabel="Заблокировать"
           onCancel={() => setBlockClientConfirmOpen(false)}
           onConfirm={handleConfirmBlockClient}
+        />
+      ) : null}
+
+      {transferDialogOpen ? (
+        <div
+          role="presentation"
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(15, 28, 22, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 40,
+            padding: 24,
+          }}
+          onClick={() => setTransferDialogOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="transfer-dialog-title"
+            style={{
+              width: "100%",
+              maxWidth: 460,
+              background: t.bg.elevated,
+              border: `1px solid ${t.stroke.secondary}`,
+              borderRadius: 12,
+              padding: "20px 22px",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Text
+              id="transfer-dialog-title"
+              weight="semibold"
+              style={{ fontSize: 16, marginBottom: 8, color: t.text.primary }}
+            >
+              Перевести диалог
+            </Text>
+            <Text style={{ fontSize: 13, color: t.text.secondary, lineHeight: 1.45, marginBottom: 14 }}>
+              Сначала выберите отдел, затем оператора этого отдела.
+            </Text>
+            <Text style={{ fontSize: 12, color: t.text.secondary, marginBottom: 6 }}>
+              Отдел
+            </Text>
+            {transferDepartments.length > 0 ? (
+              <Select
+                value={transferDepartment}
+                onChange={(value) => {
+                  setTransferDepartment(value);
+                  const first = transferOperators.find((item) => {
+                    if (item.name === operatorName) return false;
+                    const deptName = item.department_name?.trim() || "Без отдела";
+                    const deptId = String(item.department_id ?? item.department ?? deptName);
+                    return deptId === value;
+                  });
+                  setTransferOperatorName(first?.name ?? "");
+                }}
+                options={transferDepartments.map((item) => ({ value: item.id, label: item.name }))}
+                style={{ marginBottom: 12 }}
+              />
+            ) : (
+              <Text style={{ fontSize: 13, color: t.text.tertiary, marginBottom: 12 }}>
+                Отделы не найдены — показан общий список операторов.
+              </Text>
+            )}
+            <Text style={{ fontSize: 12, color: t.text.secondary, marginBottom: 6 }}>
+              Оператор
+            </Text>
+            {transferOperatorOptions.length > 0 ? (
+              <Select
+                value={transferOperatorName}
+                onChange={setTransferOperatorName}
+                options={transferOperatorOptions}
+                style={{ marginBottom: 16 }}
+              />
+            ) : (
+              <Text style={{ fontSize: 13, color: t.text.tertiary, marginBottom: 16 }}>
+                В выбранном отделе нет доступных операторов.
+              </Text>
+            )}
+            <Row style={{ gap: 8, justifyContent: "flex-end" }}>
+              <Button variant="secondary" onClick={() => setTransferDialogOpen(false)}>
+                Отмена
+              </Button>
+              <Button
+                variant="primary"
+                disabled={!transferOperatorName.trim()}
+                onClick={handleConfirmTransferDialog}
+              >
+                Перевести
+              </Button>
+            </Row>
+          </div>
+        </div>
+      ) : null}
+
+      {editMessageTarget ? (
+        <PromptDialog
+          t={t}
+          scheme={scheme}
+          titleId="edit-message-title"
+          title="Редактировать сообщение"
+          description={
+            editMessageTarget.attachment_name
+              ? `Можно изменить подпись к файлу «${editMessageTarget.attachment_name}». Сам файл останется прежним и будет доступен для скачивания.`
+              : "Изменённый текст увидит клиент. Сообщение будет помечено как отредактированное."
+          }
+          label={editMessageTarget.attachment_name ? "Подпись к файлу" : "Текст сообщения"}
+          value={editMessageText}
+          confirmLabel="Сохранить"
+          multiline
+          onChange={setEditMessageText}
+          onCancel={() => setEditMessageTarget(null)}
+          onConfirm={handleConfirmEditMessage}
+        />
+      ) : null}
+
+      {deleteMessageTarget ? (
+        <ConfirmDialog
+          t={t}
+          titleId="delete-message-title"
+          title="Удалить сообщение?"
+          description="Сообщение будет скрыто в переписке для обеих сторон. Отменить удаление нельзя."
+          confirmLabel="Удалить"
+          onCancel={() => setDeleteMessageTarget(null)}
+          onConfirm={handleConfirmDeleteMessage}
         />
       ) : null}
     </div>

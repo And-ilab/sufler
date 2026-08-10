@@ -15,7 +15,7 @@ django.setup()
 
 from django.contrib.auth import get_user_model  # noqa: E402
 from django.contrib.auth.models import Group  # noqa: E402
-from django.test import Client, TestCase  # noqa: E402
+from django.test import Client, TestCase, override_settings  # noqa: E402
 
 from auth.roles import ROLES_BY_CODE  # noqa: E402
 from reports.asr_qa import seed_demo_sessions  # noqa: E402
@@ -120,7 +120,9 @@ class AsrQaApiTest(TestCase):
         self.assertTrue(utterance.training_candidate)
         self.assertEqual(utterance.annotated_by, "asr-qa-contact_center_analyst")
 
+    @override_settings(DEBUG=False)
     def test_operator_forbidden(self):
+        # DEBUG opens ASR QA for local SPA; assert RBAC when DEBUG is off.
         client = Client()
         client.force_login(
             self.user_for_role("contact_center_telephony_operator")

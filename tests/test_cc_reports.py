@@ -16,7 +16,7 @@ django.setup()
 
 from django.contrib.auth import get_user_model  # noqa: E402
 from django.contrib.auth.models import Group  # noqa: E402
-from django.test import Client, TestCase  # noqa: E402
+from django.test import Client, TestCase, override_settings  # noqa: E402
 
 from auth.roles import ROLES_BY_CODE  # noqa: E402
 
@@ -89,8 +89,32 @@ class CcReportsApiTest(TestCase):
             sheet = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
             self.assertIn("recognized_pct", sheet)
 
+    @override_settings(DEBUG=False)
     def test_forbidden_without_reports_permission(self):
         client = Client()
         client.force_login(self.user_for_role("contact_center_telephony_operator"))
         response = client.get("/api/reports/cc/analytics/")
         self.assertIn(response.status_code, (401, 403))
+
+    def test_live_and_catalog_endpoints(self):
+        client = Client()
+        client.force_login(self.user_for_role("contact_center_analyst"))
+
+        live = client.get("/api/reports/cc/live/")
+        self.assertEqual(live.status_code, 200)
+        live_body = live.json()
+        self.assertIn("kpis", live_body)
+        self.assertIn("operators", live_body)
+
+        catalog = client.get(
+            "/api/reports/cc/catalog/",
+            {"report": "topics", "date_from": "2026-07-01", "date_to": "2026-07-07"},
+        )
+        self.assertEqual(catalog.status_code, 200)
+        catalog_body = catalog.json()
+        self.assertEqual(catalog_body["report"]["id"], "topics")
+        self.assertGreater(len(catalog_body["rows"]), 0)
+
+        builder = client.get("/api/reports/cc/builder/")
+        self.assertEqual(builder.status_code, 200)
+        self.assertIn("templates", builder.json())

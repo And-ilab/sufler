@@ -16,6 +16,7 @@ import { Button } from './Button'
 import { Card } from './Card'
 import { Fab } from './Fab'
 import { StatusBadge } from './StatusBadge'
+import { storeDemoRole } from '../auth/demoRoles'
 import {
   canOpenKbAdminDeepLink,
   canWriteAssistantChat,
@@ -44,11 +45,13 @@ export interface PortalLauncherProps {
 const MODULE_LABELS: Record<LauncherModule, string> = {
   sufler: 'Суфлёр',
   assistant: 'Ассистент',
+  online_chat: 'Онлайн-чат',
 }
 
 const MODULE_GLYPH: Record<LauncherModule, string> = {
   sufler: 'S',
   assistant: 'A',
+  online_chat: 'C',
 }
 
 function ModuleGlyph({ module }: { module: LauncherModule }) {
@@ -395,6 +398,14 @@ export function PortalLauncher({
   )
 
   const openModule = (module: LauncherModule) => {
+    if (module === 'online_chat') {
+      const activeRole = roles[0]
+      if (activeRole) storeDemoRole(activeRole)
+      const qs = activeRole ? `?demo_role=${encodeURIComponent(activeRole)}` : ''
+      window.location.assign(`/online-chat${qs}`)
+      onOpenModule?.(module)
+      return
+    }
     setOpenWindows((current) => new Set(current).add(module))
     setMenuOpen(false)
     onOpenModule?.(module)

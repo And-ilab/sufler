@@ -105,20 +105,22 @@ function toQuery(filters: AsrSessionFilters): string {
   return query ? `?${query}` : ''
 }
 
+async function authedFetch(input: string, init?: RequestInit): Promise<Response> {
+  const { ensureDevSession } = await import('../../../auth/ensureDevSession')
+  await ensureDevSession()
+  return fetch(input, { credentials: 'include', ...init })
+}
+
 export async function listAsrSessions(filters: AsrSessionFilters = {}): Promise<{
   items: AsrSessionSummary[]
   stats: AsrCatalogueStats
 }> {
-  const response = await fetch(`/api/reports/asr/sessions/${toQuery(filters)}`, {
-    credentials: 'include',
-  })
+  const response = await authedFetch(`/api/reports/asr/sessions/${toQuery(filters)}`)
   return parseResponse(response)
 }
 
 export async function getAsrSession(sessionId: number): Promise<AsrSessionDetail> {
-  const response = await fetch(`/api/reports/asr/sessions/${sessionId}/`, {
-    credentials: 'include',
-  })
+  const response = await authedFetch(`/api/reports/asr/sessions/${sessionId}/`)
   return parseResponse(response)
 }
 
@@ -127,11 +129,10 @@ export async function setTrainingCandidate(
   utteranceId: number,
   trainingCandidate: boolean,
 ): Promise<{ utterance: AsrUtterance; session: AsrSessionSummary }> {
-  const response = await fetch(
+  const response = await authedFetch(
     `/api/reports/asr/sessions/${sessionId}/utterances/${utteranceId}/`,
     {
       method: 'POST',
-      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRFToken': csrfToken(),
@@ -146,9 +147,8 @@ export async function seedAsrDemo(force = true): Promise<{
   items: AsrSessionSummary[]
   stats: AsrCatalogueStats
 }> {
-  const response = await fetch('/api/reports/asr/seed-demo/', {
+  const response = await authedFetch('/api/reports/asr/seed-demo/', {
     method: 'POST',
-    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       'X-CSRFToken': csrfToken(),

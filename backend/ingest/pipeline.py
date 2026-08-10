@@ -12,6 +12,15 @@ from core.model_registry import ModelRegistry
 from ingest.models import CCProductionChunk, KnowledgeIngestEvent
 from ingest.schema import SuzPayload, SuzPayloadError
 
+# Re-export for tests/acceptance fixtures that import from ingest.pipeline.
+__all__ = (
+    "IngestResult",
+    "checksum_for_text",
+    "chunk_text",
+    "deterministic_embedding",
+    "ingest_payload",
+    "normalize_text",
+)
 
 INDEX_NAME = "cc_production"
 KC_SCOPES = frozenset({"kc_operator", "contact_center", "cc"})

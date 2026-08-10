@@ -352,6 +352,38 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Online-chat transcript e-mail (§4.4.28).
+# Local default: file backend → letters as .log/.eml under EMAIL_FILE_PATH (always works).
+# Docker compose: SMTP → Mailpit (UI http://localhost:8025).
+# Prod: bank SMTP relay + ONLINE_CHAT_FROM_EMAIL from ДРиРИТ.
+_email_backend_default = "django.core.mail.backends.filebased.EmailBackend"
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", _email_backend_default)
+EMAIL_FILE_PATH = Path(
+    os.getenv(
+        "EMAIL_FILE_PATH",
+        str(BASE_DIR / "var" / "mail"),
+    )
+)
+try:
+    EMAIL_FILE_PATH.mkdir(parents=True, exist_ok=True)
+except OSError:
+    pass
+EMAIL_HOST = os.getenv("EMAIL_HOST", "127.0.0.1")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "1025"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "false").lower() in {"1", "true", "yes"}
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "false").lower() in {"1", "true", "yes"}
+DEFAULT_FROM_EMAIL = os.getenv(
+    "DEFAULT_FROM_EMAIL",
+    "online-chat@belarusbank.by",
+)
+ONLINE_CHAT_FROM_EMAIL = os.getenv("ONLINE_CHAT_FROM_EMAIL", DEFAULT_FROM_EMAIL)
+ONLINE_CHAT_TRANSCRIPT_SUBJECT = os.getenv(
+    "ONLINE_CHAT_TRANSCRIPT_SUBJECT",
+    "Беларусбанк: переписка с онлайн-консультантом",
+)
+
 # Настройки сессии
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 SESSION_COOKIE_AGE = 3600  # 1 час
@@ -391,6 +423,10 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ROOT_USER", "")
 MINIO_SECRET_KEY = os.getenv("MINIO_ROOT_PASSWORD", "")
 MINIO_OCR_BUCKET = os.getenv("MINIO_OCR_BUCKET", "sufler-ocr")
+MINIO_ONLINE_CHAT_BUCKET = os.getenv(
+    "MINIO_ONLINE_CHAT_BUCKET",
+    "sufler-online-chat",
+)
 # auto | fs | minio — fs used when credentials empty or tests override.
 OCR_OBJECT_STORE_BACKEND = os.getenv("OCR_OBJECT_STORE_BACKEND", "auto")
 OCR_OBJECT_STORE_ROOT = Path(
@@ -400,6 +436,54 @@ OCR_OBJECT_STORE_ROOT = Path(
     )
 )
 OCR_MAX_UPLOAD_BYTES = int(os.getenv("OCR_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
+
+# Online-chat external seams. Local runs use filesystem storage and disabled
+# channel delivery; production only needs credentials/endpoints supplied via env.
+ONLINE_CHAT_OBJECT_STORE_BACKEND = os.getenv(
+    "ONLINE_CHAT_OBJECT_STORE_BACKEND",
+    "auto",
+)
+ONLINE_CHAT_OBJECT_STORE_ROOT = Path(
+    os.getenv(
+        "ONLINE_CHAT_OBJECT_STORE_ROOT",
+        str(BASE_DIR / "var" / "online-chat-objects"),
+    )
+)
+ONLINE_CHAT_MAX_UPLOAD_BYTES = int(
+    os.getenv("ONLINE_CHAT_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024))
+)
+ONLINE_CHAT_ALLOWED_UPLOAD_TYPES = tuple(
+    item.strip()
+    for item in os.getenv(
+        "ONLINE_CHAT_ALLOWED_UPLOAD_TYPES",
+        "image/jpeg,image/png,application/pdf,text/plain",
+    ).split(",")
+    if item.strip()
+)
+ONLINE_CHAT_CHANNEL_HTTP_TIMEOUT_SECONDS = float(
+    os.getenv("ONLINE_CHAT_CHANNEL_HTTP_TIMEOUT_SECONDS", "10")
+)
+ONLINE_CHAT_LOST_TIMEOUT_SECONDS = int(
+    os.getenv("ONLINE_CHAT_LOST_TIMEOUT_SECONDS", "600")
+)
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+VIBER_AUTH_TOKEN = os.getenv("VIBER_AUTH_TOKEN", "")
+VK_ACCESS_TOKEN = os.getenv("VK_ACCESS_TOKEN", "")
+VK_WEBHOOK_SECRET = os.getenv("VK_WEBHOOK_SECRET", "")
+VK_CONFIRMATION_CODE = os.getenv("VK_CONFIRMATION_CODE", "")
+OK_ACCESS_TOKEN = os.getenv("OK_ACCESS_TOKEN", "")
+OK_WEBHOOK_SECRET = os.getenv("OK_WEBHOOK_SECRET", "")
+ONLINE_CHAT_API_CHANNEL_SIGNING_SECRET = os.getenv(
+    "ONLINE_CHAT_API_CHANNEL_SIGNING_SECRET",
+    "",
+)
+CELERY_BEAT_SCHEDULE = {
+    "online-chat-classify-stale-dialogs": {
+        "task": "online_chat.tasks.classify_stale_dialogs",
+        "schedule": 60.0,
+    },
+}
 
 # Django REST Framework + drf-spectacular (OpenAPI `/api/schema/`).
 REST_FRAMEWORK = {

@@ -137,6 +137,10 @@
   background: var(--color-secondary);
 }
 
+.role-picker__module--online_chat {
+  background: #0a6b3c;
+}
+
 .role-picker__module--settings {
   background: color-mix(in srgb, var(--color-primary) 75%, #000);
 }

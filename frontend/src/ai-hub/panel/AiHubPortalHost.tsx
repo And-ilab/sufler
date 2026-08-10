@@ -44,6 +44,7 @@ export function AiHubPortalHost({
   }, [role])
 
   const selectRole = (next: DemoRoleDefinition) => {
+    storeDemoRole(next.code)
     setRole(next)
     setPicking(false)
   }
