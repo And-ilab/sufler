@@ -476,6 +476,47 @@ def list_assistant_kbs(*, seed: bool = False) -> list[dict[str, Any]]:
     return [serialize_kb(item) for item in AssistantKnowledgeBase.objects.all()]
 
 
+def list_chat_knowledge_bases(*, seed: bool = False) -> list[dict[str, Any]]:
+    """Chat dropdown catalog: assistant_* + CC/SUZ rows from settings «Базы знаний»."""
+    from hub.kb_admin import ensure_suz_knowledge_base, list_knowledge_bases
+
+    if seed:
+        ensure_assistant_seed()
+    ensure_suz_knowledge_base()
+
+    items: list[dict[str, Any]] = []
+    for item in list_assistant_kbs(seed=False):
+        items.append(
+            {
+                **item,
+                "id": f"assistant:{item['id']}",
+                "source": "assistant",
+                "source_label": "Ассистент",
+                "catalog": "assistant",
+            }
+        )
+    for payload in list_knowledge_bases():
+        items.append(
+            {
+                "id": f"cc:{payload['id']}",
+                "name": payload["name"],
+                "slug": payload["slug"],
+                "description": payload.get("description") or "",
+                "document_count": payload.get("document_count") or 0,
+                "chunk_count": payload.get("chunk_count") or 0,
+                "status": payload.get("status") or "",
+                "status_message": payload.get("status_message") or "",
+                "source": payload.get("source") or "manual",
+                "source_label": payload.get("source_label") or "КЦ",
+                "readonly": bool(payload.get("readonly")),
+                "namespace": "cc_production",
+                "catalog": "cc",
+            }
+        )
+    items.sort(key=lambda row: str(row.get("name") or "").casefold())
+    return items
+
+
 def create_assistant_kb(
     payload: Mapping[str, Any],
     *,

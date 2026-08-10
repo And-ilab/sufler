@@ -410,12 +410,13 @@ export function AiHubAdminApp({
             )}
             {!demoRoleSwitcher && <StatusBadge status="success">RBAC активен</StatusBadge>}
             <a
-              href="/ai-hub"
-              className="admin-topbar__home"
+              href="/ai-hub?open=assistant"
+              className="admin-topbar__chat-fab"
               data-testid="admin-back-to-chat"
-              title="Вернуться в чат на портал"
+              title="Открыть ИИ-чат"
+              aria-label="Открыть ИИ-чат"
             >
-              ← В чат
+              <span className="admin-topbar__chat-fab-mark" aria-hidden="true">AI</span>
             </a>
           </div>
         </header>

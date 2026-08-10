@@ -158,24 +158,37 @@
   gap: var(--space-3);
 }
 
-.admin-topbar__home {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 0 var(--space-3);
-  color: var(--color-primary);
-  font-size: .8125rem;
-  font-weight: 700;
+.admin-topbar__chat-fab {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  color: var(--color-white);
   text-decoration: none;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  background: var(--color-surface);
-  transition: border-color var(--transition-fast), background var(--transition-fast);
+  border: 2px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  border-radius: 999px;
+  background: radial-gradient(
+    circle at 30% 28%,
+    color-mix(in srgb, var(--color-primary) 82%, white),
+    var(--color-primary) 55%,
+    var(--color-primary-dark)
+  );
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
-.admin-topbar__home:hover {
+.admin-topbar__chat-fab:hover {
   border-color: var(--color-primary);
-  background: var(--color-info-bg);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.admin-topbar__chat-fab-mark {
+  font-size: .75rem;
+  font-weight: 800;
+  letter-spacing: .02em;
+  line-height: 1;
 }
 
 .admin-role-switcher {
