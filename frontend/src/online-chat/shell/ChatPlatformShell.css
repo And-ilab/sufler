@@ -201,12 +201,19 @@
 }
 
 .chat-platform-shell__content {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow: auto;
 }
 
-.chat-platform-shell__content > .chat-arm-page {
+.chat-platform-shell__content:has(> .chat-arm-page),
+.chat-platform-shell__content:has(> .arm-menu-host) {
+  overflow: hidden;
+}
+
+.chat-platform-shell__content > .chat-arm-page,
+.chat-platform-shell__content > .arm-menu-host {
   height: 100%;
   max-height: 100%;
 }

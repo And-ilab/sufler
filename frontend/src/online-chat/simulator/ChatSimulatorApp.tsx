@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { resetSimulation, seedSimulation, type SeedResult } from '../api/managementApi'
 import '../shell/Management.css'
+
+const SIM_SEED_STORAGE_KEY = 'online-chat-simulator-seed-v1'
 
 const presets = [
   {
@@ -26,16 +28,69 @@ type SeedClient = {
   operator_name?: string
 }
 
+type StoredSeed = {
+  result: SeedResult
+  operators: number
+  clients: number
+  messages: number
+  autoAssign: boolean
+}
+
+function readStoredSeed(): StoredSeed | null {
+  try {
+    const raw = sessionStorage.getItem(SIM_SEED_STORAGE_KEY)
+      ?? localStorage.getItem(SIM_SEED_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as StoredSeed
+    if (!parsed?.result?.ok) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function writeStoredSeed(payload: StoredSeed | null) {
+  try {
+    if (!payload) {
+      sessionStorage.removeItem(SIM_SEED_STORAGE_KEY)
+      localStorage.removeItem(SIM_SEED_STORAGE_KEY)
+      return
+    }
+    const raw = JSON.stringify(payload)
+    sessionStorage.setItem(SIM_SEED_STORAGE_KEY, raw)
+    localStorage.setItem(SIM_SEED_STORAGE_KEY, raw)
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
 export function ChatSimulatorApp() {
-  const [operators, setOperators] = useState(1)
-  const [clients, setClients] = useState(10)
-  const [messages, setMessages] = useState(2)
-  const [autoAssign, setAutoAssign] = useState(true)
+  const stored = useMemo(() => readStoredSeed(), [])
+  const [operators, setOperators] = useState(stored?.operators ?? 1)
+  const [clients, setClients] = useState(stored?.clients ?? 10)
+  const [messages, setMessages] = useState(stored?.messages ?? 2)
+  const [autoAssign, setAutoAssign] = useState(stored?.autoAssign ?? true)
   const [resetBeforeSeed, setResetBeforeSeed] = useState(true)
-  const [result, setResult] = useState<SeedResult | null>(null)
+  const [result, setResult] = useState<SeedResult | null>(stored?.result ?? null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState(
+    stored?.result ? 'Восстановлен последний сценарий симулятора.' : '',
+  )
+
+  useEffect(() => {
+    if (!result) {
+      writeStoredSeed(null)
+      return
+    }
+    writeStoredSeed({
+      result,
+      operators,
+      clients,
+      messages,
+      autoAssign,
+    })
+  }, [result, operators, clients, messages, autoAssign])
 
   const operatorNames = useMemo(() => {
     const fromResult = result?.operator_names
@@ -87,20 +142,13 @@ export function ChatSimulatorApp() {
     try {
       await resetSimulation()
       setResult(null)
+      writeStoredSeed(null)
       setNotice('Тестовые данные удалены.')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Не удалось сбросить данные')
     } finally {
       setLoading(false)
     }
-  }
-
-  const openMany = (urls: string[], limit = 8) => {
-    urls.slice(0, limit).forEach((url, index) => {
-      window.setTimeout(() => {
-        window.open(url, `_sim_${index}`, 'noopener,noreferrer')
-      }, index * 250)
-    })
   }
 
   return (
@@ -113,9 +161,6 @@ export function ChatSimulatorApp() {
               Тестовый стенд: создайте клиентов здесь — в АРМ появятся только реальные диалоги симулятора (без заглушек).
             </p>
           </div>
-          <a className="chat-button is-secondary" href="/online-chat/supervisor" target="_blank" rel="noreferrer">
-            Открыть панель супервизора
-          </a>
         </div>
         <p className="chat-management__notice">
           1) Создайте сценарий → 2) Откройте оператора (режим работы, не просмотр) и виджеты клиентов → 3) Пишите с обеих сторон.
@@ -223,18 +268,6 @@ export function ChatSimulatorApp() {
               <div className="chat-management__card">
                 <div className="chat-management__toolbar">
                   <h2>АРМ операторов</h2>
-                  <button
-                    className="is-secondary"
-                    type="button"
-                    onClick={() => openMany(
-                      operatorNames.map(
-                        (name) => `/online-chat?mode=operate&operator=${encodeURIComponent(name)}`,
-                      ),
-                      6,
-                    )}
-                  >
-                    Открыть первые 6
-                  </button>
                 </div>
                 <ul className="chat-management__list">
                   {operatorNames.map((name) => (
@@ -254,16 +287,6 @@ export function ChatSimulatorApp() {
               <div className="chat-management__card">
                 <div className="chat-management__toolbar">
                   <h2>Виджеты клиентов</h2>
-                  <button
-                    className="is-secondary"
-                    type="button"
-                    onClick={() => openMany(
-                      seedClients.map((client) => client.widget_url || `/widget/sample.html?sim_client=${encodeURIComponent(client.id)}`),
-                      6,
-                    )}
-                  >
-                    Открыть первые 6
-                  </button>
                 </div>
                 <ul className="chat-management__list">
                   {seedClients.map((client, index) => (

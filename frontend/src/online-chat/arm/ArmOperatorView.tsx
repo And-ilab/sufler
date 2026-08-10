@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react'
 import type { ArmTheme } from './theme'
 import {
-  acceptDialog,
-  attachmentDownloadUrl,
   blockDialogRemote,
+  canDownloadAttachment,
   closeDialogRemote,
   deleteMessageRemote,
   dialogRefCode,
+  downloadAttachment,
   editMessageRemote,
   fetchClientHistory,
   formatWaitMmSs,
@@ -28,8 +28,7 @@ import {
   type ReceiptStatus,
   type SlaTone,
 } from '../api/onlineChatApi'
-import { operatorsApi } from '../api/managementApi'
-import { getAllowedLauncherModules } from '../../auth/roleAccess'
+import { operatorsApi, type ChatOperator } from '../api/managementApi'
 import {
   Button,
   Callout,
@@ -236,9 +235,12 @@ type ArmStatsTab =
   | "colleagues"
   | "internal"
   | "templates"
+  | "employees"
   | "settings"
   | "help";
 type ArmRole = "operator" | "supervisor" | "admin";
+/** Context for ARM side-menu RBAC: picker vs observation vs live operate. */
+export type ArmMenuContext = "picker" | "view" | "operate";
 
 const ARM_ROLE_LABELS: Record<ArmRole, string> = {
   operator: "Оператор КЦ",
@@ -246,30 +248,90 @@ const ARM_ROLE_LABELS: Record<ArmRole, string> = {
   admin: "Администратор",
 };
 
-/** Overlay menu stubs aligned with TZ II.5 / АРМ (colleagues hidden for admin — II.5.4). */
-const ARM_MENU_ITEMS: { id: ArmStatsTab; label: string; hint: string; roles: ArmRole[] }[] = [
-  { id: "dialogs", label: "Диалоги", hint: "Очереди и активная переписка", roles: ["operator", "supervisor", "admin"] },
-  { id: "history", label: "История обращений", hint: "Единая история клиента", roles: ["operator", "supervisor", "admin"] },
-  { id: "stats", label: "Статистика смены", hint: "Личные показатели оператора", roles: ["operator", "supervisor"] },
-  { id: "colleagues", label: "Диалоги коллег", hint: "Просмотр без ответа", roles: ["operator", "supervisor"] },
-  { id: "internal", label: "Внутренний чат", hint: "Переписка между операторами", roles: ["operator", "supervisor"] },
-  { id: "templates", label: "Шаблоны ответов", hint: "Быстрые заготовки", roles: ["operator", "supervisor", "admin"] },
-  { id: "settings", label: "Настройки АРМ", hint: "Тема, уведомления, звук", roles: ["operator", "supervisor", "admin"] },
-  { id: "help", label: "Справка", hint: "Краткая инструкция по АРМ", roles: ["operator", "supervisor", "admin"] },
+/**
+ * Side-menu modules by role + context.
+ * Admin gets dialogs/history only while observing an operator ARM (view).
+ */
+const ARM_MENU_ITEMS: {
+  id: ArmStatsTab;
+  label: string;
+  hint: string;
+  roles: ArmRole[];
+  contexts: ArmMenuContext[];
+}[] = [
+  {
+    id: "dialogs",
+    label: "Диалоги",
+    hint: "Очереди и активная переписка",
+    roles: ["operator", "supervisor", "admin"],
+    contexts: ["operate", "view"],
+  },
+  {
+    id: "history",
+    label: "История обращений",
+    hint: "Единая история клиента",
+    roles: ["operator", "supervisor", "admin"],
+    contexts: ["operate", "view"],
+  },
+  {
+    id: "stats",
+    label: "Статистика смены",
+    hint: "Показатели оператора / смены",
+    roles: ["operator", "supervisor"],
+    contexts: ["operate", "view"],
+  },
+  {
+    id: "colleagues",
+    label: "Диалоги коллег",
+    hint: "Просмотр без ответа",
+    roles: ["operator", "supervisor"],
+    contexts: ["operate", "view"],
+  },
+  {
+    id: "internal",
+    label: "Внутренний чат",
+    hint: "Переписка между операторами",
+    roles: ["operator", "supervisor"],
+    contexts: ["operate", "view"],
+  },
+  {
+    id: "templates",
+    label: "Шаблоны ответов",
+    hint: "Быстрые заготовки",
+    roles: ["operator", "supervisor"],
+    contexts: ["operate"],
+  },
+  {
+    id: "employees",
+    label: "Сотрудники",
+    hint: "Список операторов для просмотра",
+    roles: ["supervisor", "admin"],
+    contexts: ["picker", "view"],
+  },
+  {
+    id: "settings",
+    label: "Настройки АРМ",
+    hint: "Тема, уведомления, звук",
+    roles: ["operator", "supervisor", "admin"],
+    contexts: ["picker", "operate", "view"],
+  },
+  {
+    id: "help",
+    label: "Справка",
+    hint: "Краткая инструкция по АРМ",
+    roles: ["operator", "supervisor", "admin"],
+    contexts: ["picker", "operate", "view"],
+  },
 ];
 
-const PORTAL_MODULE_LINKS: { id: "sufler" | "assistant" | "online_chat"; label: string; href: string }[] = [
-  { id: "sufler", label: "Суфлёр", href: "/sufler" },
-  { id: "assistant", label: "Ассистент", href: "/assistant" },
-  { id: "online_chat", label: "Онлайн-чат", href: "/online-chat" },
-];
-
-function armMenuItemsForRole(role: ArmRole) {
-  return ARM_MENU_ITEMS.filter((item) => item.roles.includes(role));
+function armMenuItemsForRole(role: ArmRole, context: ArmMenuContext = "operate") {
+  return ARM_MENU_ITEMS.filter(
+    (item) => item.roles.includes(role) && item.contexts.includes(context),
+  );
 }
 
-function firstArmStatsTabForRole(role: ArmRole): ArmStatsTab {
-  return armMenuItemsForRole(role)[0]?.id ?? "dialogs";
+function firstArmStatsTabForRole(role: ArmRole, context: ArmMenuContext = "operate"): ArmStatsTab {
+  return armMenuItemsForRole(role, context)[0]?.id ?? "dialogs";
 }
 
 export type ColorScheme =
@@ -429,6 +491,9 @@ type QueueItem = {
   dept: string;
   preview: string;
   wait: string;
+  /** Seconds at fetch time; used with waitFetchedAt for 1s SLA ticks. */
+  waitBaseSeconds?: number;
+  waitFetchedAt?: number;
   urgent: boolean;
   active?: boolean;
   result?: "offline" | "closed" | "declined";
@@ -445,6 +510,25 @@ type QueueItem = {
   refCode?: string;
   needsReply?: boolean;
 };
+
+function liveWaitSeconds(item: QueueItem, nowMs: number): number | null {
+  if (item.waitBaseSeconds == null || item.waitFetchedAt == null) return null;
+  const elapsed = Math.max(0, Math.floor((nowMs - item.waitFetchedAt) / 1000));
+  return item.waitBaseSeconds + elapsed;
+}
+
+function resolveQueueWait(item: QueueItem, nowMs: number): { wait: string; slaTone?: SlaTone; urgent: boolean } {
+  const seconds = liveWaitSeconds(item, nowMs);
+  if (seconds == null) {
+    return { wait: item.wait, slaTone: item.slaTone, urgent: item.urgent };
+  }
+  const slaTone = slaToneFromSeconds(seconds);
+  return {
+    wait: formatWaitMmSs(seconds),
+    slaTone,
+    urgent: slaTone === "critical",
+  };
+}
 
 function slaToneColor(tone?: SlaTone): string {
   if (tone === "critical") return "#E53935";
@@ -478,17 +562,22 @@ function dialogToQueueItem(
   options?: { active?: boolean },
 ): QueueItem {
   const needsReply = dialog.needs_reply ?? false;
-  const waitSeconds = needsReply ? dialog.wait_seconds : 0;
-  const slaTone = needsReply ? slaToneFromSeconds(waitSeconds) : "ok";
+  const inSharedQueue = dialog.status === "waiting";
+  const trackWait = needsReply || inSharedQueue;
+  const waitSeconds = trackWait ? dialog.wait_seconds : 0;
+  const slaTone = trackWait ? slaToneFromSeconds(waitSeconds) : "ok";
+  const fetchedAt = Date.now();
   return {
     id: dialog.id,
     name: dialog.client_name || "Клиент",
     channel: dialog.channel === "widget" ? "Сайт" : dialog.channel,
     dept: "Розничные продукты",
     preview: dialog.preview || "—",
-    wait: needsReply ? formatWaitMmSs(waitSeconds) : "—",
-    urgent: needsReply && slaTone === "critical",
-    slaTone,
+    wait: trackWait ? formatWaitMmSs(waitSeconds) : "—",
+    waitBaseSeconds: trackWait ? waitSeconds : undefined,
+    waitFetchedAt: trackWait ? fetchedAt : undefined,
+    urgent: trackWait && slaTone === "critical",
+    slaTone: trackWait ? slaTone : undefined,
     active: options?.active,
     live: true,
     phone: dialog.client_phone,
@@ -690,10 +779,10 @@ type QueueSectionDef = {
 const QUEUE_SECTIONS: QueueSectionDef[] = [
   { id: "waiting", title: "Ожидают ответа", count: 3, items: QUEUE, defaultExpanded: true },
   { id: "mine", title: "В диалоге со мной", count: 2, items: MY_DIALOGUES, defaultExpanded: true },
+  { id: "initiated", title: "Инициированные мной", count: 1, items: INITIATED_QUEUE, defaultExpanded: false },
   { id: "offline", title: "Офлайн", count: 1, items: OFFLINE_QUEUE, defaultExpanded: false },
   { id: "closed", title: "Недавно закрытые", count: 1, items: CLOSED_QUEUE, defaultExpanded: false },
   { id: "shared", title: "Общая очередь", count: 5, items: SHARED_QUEUE, defaultExpanded: false },
-  { id: "initiated", title: "Инициированные мной", count: 1, items: INITIATED_QUEUE, defaultExpanded: false },
 ];
 
 const COLLEAGUES_SECTION: QueueSectionDef = {
@@ -705,10 +794,19 @@ const COLLEAGUES_SECTION: QueueSectionDef = {
 };
 
 function queueSectionsForRole(role: ArmRole): QueueSectionDef[] {
+  // «Общая очередь» всегда последняя; «Диалоги коллег» — после «В диалоге со мной».
+  const withoutShared = QUEUE_SECTIONS.filter((section) => section.id !== "shared");
+  const shared = QUEUE_SECTIONS.find((section) => section.id === "shared")!;
   if (role === "operator" || role === "supervisor") {
-    return [QUEUE_SECTIONS[0], QUEUE_SECTIONS[1], COLLEAGUES_SECTION, ...QUEUE_SECTIONS.slice(2)];
+    return [
+      withoutShared[0],
+      withoutShared[1],
+      COLLEAGUES_SECTION,
+      ...withoutShared.slice(2),
+      shared,
+    ];
   }
-  return QUEUE_SECTIONS;
+  return [...withoutShared, shared];
 }
 
 function findSectionForQueueItem(queueId: string, sections: QueueSectionDef[]): QueueSectionDef | undefined {
@@ -2036,13 +2134,16 @@ function QueueListRow({
   t,
   selected,
   onClick,
+  nowMs = Date.now(),
 }: {
   item: QueueItem;
   t: ArmTheme;
   selected: boolean;
   onClick: () => void;
+  nowMs?: number;
 }): JSX.Element {
-  const showTimer = item.wait && item.wait !== "—";
+  const resolved = resolveQueueWait(item, nowMs);
+  const showTimer = resolved.wait && resolved.wait !== "—";
 
   return (
     <div
@@ -2069,13 +2170,13 @@ function QueueListRow({
       }}
     >
       <Row style={{ gap: 6, alignItems: "flex-start", minWidth: 0, flex: 1 }}>
-        {item.urgent && (
+            {resolved.urgent && (
           <span
             style={{
               width: 6,
               height: 6,
               borderRadius: "50%",
-              background: slaToneColor(item.slaTone),
+              background: slaToneColor(resolved.slaTone),
               display: "inline-block",
               flexShrink: 0,
               marginTop: 5,
@@ -2118,11 +2219,11 @@ function QueueListRow({
         </div>
       </Row>
       {showTimer ? (
-        item.slaTone ? (
-          <SlaWaitPill wait={item.wait} slaTone={item.slaTone} />
+        resolved.slaTone ? (
+          <SlaWaitPill wait={resolved.wait} slaTone={resolved.slaTone} />
         ) : (
-          <Pill tone={item.urgent ? "warning" : "neutral"} size="sm">
-            {item.wait}
+          <Pill tone={resolved.urgent ? "warning" : "neutral"} size="sm">
+            {resolved.wait}
           </Pill>
         )
       ) : null}
@@ -2137,6 +2238,7 @@ function QueueCard({
   selected,
   onSelect,
   onCollapse,
+  nowMs = Date.now(),
 }: {
   item: QueueItem;
   t: ArmTheme;
@@ -2144,8 +2246,10 @@ function QueueCard({
   selected: boolean;
   onSelect: () => void;
   onCollapse: () => void;
+  nowMs?: number;
 }): JSX.Element {
-  const showTimer = item.wait && item.wait !== "—";
+  const resolved = resolveQueueWait(item, nowMs);
+  const showTimer = resolved.wait && resolved.wait !== "—";
   const hasMetaRow = showTimer || item.readOnly;
 
   return (
@@ -2182,11 +2286,11 @@ function QueueCard({
           }}
         >
           {showTimer ? (
-            item.slaTone ? (
-              <SlaWaitPill wait={item.wait} slaTone={item.slaTone} />
+            resolved.slaTone ? (
+              <SlaWaitPill wait={resolved.wait} slaTone={resolved.slaTone} />
             ) : (
-              <Pill tone={item.urgent ? "warning" : "neutral"} size="sm">
-                {item.wait}
+              <Pill tone={resolved.urgent ? "warning" : "neutral"} size="sm">
+                {resolved.wait}
               </Pill>
             )
           ) : null}
@@ -2198,13 +2302,13 @@ function QueueCard({
         </Row>
       ) : null}
       <Row style={{ gap: 8, alignItems: "flex-start", minWidth: 0 }}>
-        {item.urgent && (
+        {resolved.urgent && (
           <span
             style={{
               width: 8,
               height: 8,
               borderRadius: "50%",
-              background: slaToneColor(item.slaTone),
+              background: slaToneColor(resolved.slaTone),
               display: "inline-block",
               flexShrink: 0,
               marginTop: 4,
@@ -2327,6 +2431,13 @@ function ReadReceiptMarks({
   );
 }
 
+function messageCaption(text: string, attachmentName?: string): string {
+  if (!attachmentName) return text;
+  const fileLabel = `Файл: ${attachmentName}`;
+  if (!text || text === fileLabel || text === `Файл: ${attachmentName}`) return "";
+  return text;
+}
+
 function MessageBubble({
   t,
   scheme,
@@ -2339,7 +2450,8 @@ function MessageBubble({
   receiptStatus,
   quotedText,
   attachmentName,
-  attachmentHref,
+  attachmentDownloadable,
+  onDownloadAttachment,
   isDeleted,
   editedAt,
   onQuote,
@@ -2357,7 +2469,8 @@ function MessageBubble({
   receiptStatus?: ReceiptStatus;
   quotedText?: string;
   attachmentName?: string;
-  attachmentHref?: string;
+  attachmentDownloadable?: boolean;
+  onDownloadAttachment?: () => void;
   isDeleted?: boolean;
   editedAt?: string | null;
   onQuote?: () => void;
@@ -2381,7 +2494,8 @@ function MessageBubble({
   const isOp = side === "operator";
   const avatarBg = avatarColor ?? (isOp ? scheme.accentControl : scheme.accentWeak);
   const avatarFg = isOp ? "#fff" : scheme.accentControl;
-  const displayText = isDeleted ? "Сообщение удалено" : text;
+  const caption = isDeleted ? "Сообщение удалено" : messageCaption(text, attachmentName);
+  const displayText = caption || (attachmentName && !isDeleted ? "" : text);
   const hasActions = !!(onQuote || onEdit || onDelete);
   return (
     <div
@@ -2439,35 +2553,43 @@ function MessageBubble({
             {quotedText}
           </div>
         ) : null}
-        <Text
-          style={{
-            fontSize: 13,
-            lineHeight: 1.45,
-            color: t.text.primary,
-            fontWeight: 600,
-            fontStyle: isDeleted ? "italic" : "normal",
-          }}
-        >
-          {displayText}
-        </Text>
-        {attachmentName ? (
-          attachmentHref ? (
-            <a
-              href={attachmentHref}
-              target="_blank"
-              rel="noreferrer"
+        {displayText ? (
+          <Text
+            style={{
+              fontSize: 13,
+              lineHeight: 1.45,
+              color: t.text.primary,
+              fontWeight: 600,
+              fontStyle: isDeleted ? "italic" : "normal",
+            }}
+          >
+            {displayText}
+          </Text>
+        ) : null}
+        {attachmentName && !isDeleted ? (
+          attachmentDownloadable && onDownloadAttachment ? (
+            <button
+              type="button"
+              onClick={onDownloadAttachment}
               style={{
-                fontSize: 11,
-                color: scheme.accentControl,
+                alignSelf: "flex-start",
                 marginTop: 6,
-                textDecoration: "underline",
+                padding: "4px 8px",
+                borderRadius: 6,
+                border: `1px solid ${scheme.accentWeak}`,
+                background: t.fill.secondary,
+                color: scheme.accentControl,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
               }}
             >
-              📎 {attachmentName}
-            </a>
+              📎 Скачать: {attachmentName}
+            </button>
           ) : (
             <Text style={{ fontSize: 11, color: t.text.secondary, marginTop: 6 }}>
-              📎 {attachmentName}
+              📎 {attachmentName} (недоступно для скачивания)
             </Text>
           )
         ) : null}
@@ -2521,35 +2643,33 @@ function MessageBubble({
   );
 }
 
-function ArmOverlayMenu({
+export function ArmOverlayMenu({
   t,
   scheme,
   open,
   armRole,
+  menuContext = "operate",
   activeId,
   onSelect,
   onClose,
-  portalRoles = [],
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
   open: boolean;
   armRole: ArmRole;
+  menuContext?: ArmMenuContext;
   activeId: ArmStatsTab;
   onSelect: (id: ArmStatsTab) => void;
   onClose: () => void;
-  portalRoles?: readonly string[];
 }): JSX.Element {
-  const items = armMenuItemsForRole(armRole);
-  const allowedModules = new Set(getAllowedLauncherModules(portalRoles));
-  const moduleLinks = PORTAL_MODULE_LINKS.filter((item) => allowedModules.has(item.id));
+  const items = armMenuItemsForRole(armRole, menuContext);
   return (
     <div
       aria-hidden={!open}
       style={{
         position: "absolute",
         inset: 0,
-        zIndex: 40,
+        zIndex: 80,
         pointerEvents: open ? "auto" : "none",
       }}
     >
@@ -2588,6 +2708,7 @@ function ArmOverlayMenu({
           transform: open ? "translateX(0)" : "translateX(-105%)",
           transition: "transform 0.26s cubic-bezier(0.22, 1, 0.36, 1)",
           overflow: "hidden",
+          zIndex: 1,
         }}
       >
         <div
@@ -2636,39 +2757,6 @@ function ArmOverlayMenu({
             minHeight: 0,
           }}
         >
-          {moduleLinks.length > 0 ? (
-            <div style={{ marginBottom: 4 }}>
-              <Text style={{ display: "block", fontSize: 11, color: t.text.tertiary, margin: "0 0 8px 4px" }}>
-                Модули
-              </Text>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {moduleLinks.map((module) => (
-                  <a
-                    key={module.id}
-                    href={module.href}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      padding: "12px 14px",
-                      border: `1px solid ${t.stroke.secondary}`,
-                      borderRadius: 10,
-                      background: t.bg.editor,
-                      color: t.text.primary,
-                      textDecoration: "none",
-                      fontSize: 14,
-                      fontWeight: 700,
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    {module.label}
-                  </a>
-                ))}
-              </div>
-              <Text style={{ display: "block", fontSize: 11, color: t.text.tertiary, margin: "14px 0 8px 4px" }}>
-                Разделы АРМ
-              </Text>
-            </div>
-          ) : null}
           {items.map((item) => {
             const active = activeId === item.id;
             return (
@@ -2728,7 +2816,6 @@ export function ArmOperatorView({
   armRole: armRoleProp = "operator",
   viewOnly = false,
   allowTransferInView = false,
-  portalRoles = [],
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
@@ -2753,14 +2840,16 @@ export function ArmOperatorView({
   armRole?: ArmRole;
   viewOnly?: boolean;
   allowTransferInView?: boolean;
-  portalRoles?: readonly string[];
 }): JSX.Element {
   const operatorInitials = initialsFromDisplayName(operatorName);
-  const armRole: ArmRole = viewOnly && armRoleProp === "admin" ? "supervisor" : armRoleProp;
+  const armRole: ArmRole = armRoleProp;
+  const menuContext: ArmMenuContext = viewOnly ? "view" : "operate";
   const [closedDialogIds, setClosedDialogIds] = useState<Record<string, boolean>>({});
   const [blockedDialogIds, setBlockedDialogIds] = useState<Record<string, boolean>>({});
   const [summaryHistory, setSummaryHistory] = useState<SummaryHistoryData>(EMPTY_SUMMARY_HISTORY);
-  const [directoryOperators, setDirectoryOperators] = useState<string[]>([]);
+  const [transferOperators, setTransferOperators] = useState<ChatOperator[]>([]);
+  const [transferDepartment, setTransferDepartment] = useState("");
+  const [pendingAttachment, setPendingAttachment] = useState<File | null>(null);
   const [queuesReady, setQueuesReady] = useState(false);
   const [liveWaiting, setLiveWaiting] = useState<QueueItem[]>([]);
   const [liveShared, setLiveShared] = useState<QueueItem[]>([]);
@@ -2779,14 +2868,19 @@ export function ArmOperatorView({
   const [editMessageText, setEditMessageText] = useState("");
   const [deleteMessageTarget, setDeleteMessageTarget] = useState<OnlineChatMessage | null>(null);
   const [clientBlocks, setClientBlocks] = useState<{ id: string; phone_normalized: string }[]>([]);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const acceptedLiveRef = useRef<Record<string, boolean>>({});
-  const acceptInFlightRef = useRef<Record<string, boolean>>({});
   const readMessageIdsRef = useRef<Set<string>>(new Set());
   const selectedQueueRef = useRef(selectedQueue);
+  const sharedPeekRef = useRef(false);
   selectedQueueRef.current = selectedQueue;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const scrollMessagesToEnd = useCallback((behavior: ScrollBehavior = "smooth") => {
     const scroller = messagesScrollRef.current;
@@ -2901,7 +2995,7 @@ export function ArmOperatorView({
     void refreshLiveQueues();
     const timer = window.setInterval(() => {
       void refreshLiveQueues();
-    }, 4000);
+    }, 2000);
     let socket: WebSocket | null = null;
     try {
       socket = new WebSocket(onlineChatArmWsUrl());
@@ -2963,7 +3057,7 @@ export function ArmOperatorView({
               }
               return [...prev, withReceipt];
             });
-            if (incoming.speaker === "client" && dialogId) {
+            if (incoming.speaker === "client" && dialogId && !sharedPeekRef.current) {
               void markDialogRead(dialogId, "operator").catch(() => {});
             }
             return;
@@ -3045,8 +3139,11 @@ export function ArmOperatorView({
     remainingDialogs[0] ??
     null;
   const hasActiveDialog = !!active;
-  const isReadOnly = viewOnly || viewMode === "colleague";
-  const canTransferDespiteView = isReadOnly && allowTransferInView;
+  const isSharedQueuePeek =
+    !viewOnly && !!active?.live && liveShared.some((item) => item.id === active.id);
+  sharedPeekRef.current = isSharedQueuePeek;
+  const isReadOnly = viewOnly || viewMode === "colleague" || isSharedQueuePeek;
+  const canTransferDespiteView = (viewOnly || viewMode === "colleague") && allowTransferInView;
   const isClientBlocked = !!(active && blockedDialogIds[active.id]);
   const composerLocked = isReadOnly || isClientBlocked || !hasActiveDialog;
 
@@ -3070,6 +3167,10 @@ export function ArmOperatorView({
     : ACTIVE_CLIENT;
 
   useEffect(() => {
+    setPendingAttachment(null);
+  }, [active?.id]);
+
+  useEffect(() => {
     if (!active?.live) {
       setLiveMessages([]);
       setClientDraft("");
@@ -3078,6 +3179,7 @@ export function ArmOperatorView({
     }
     let cancelled = false;
     const dialogId = active.id;
+    const peekShared = liveShared.some((item) => item.id === dialogId);
     void getDialog(dialogId)
       .then((dialog) => {
         if (!cancelled) {
@@ -3088,50 +3190,28 @@ export function ArmOperatorView({
             }
           }
           setLiveMessages(messages);
-          void markDialogRead(dialogId, "operator").catch(() => {});
+          // Viewing shared-queue dialogs must not mark client messages as read.
+          if (!viewOnly && !peekShared) {
+            void markDialogRead(dialogId, "operator").catch(() => {});
+          }
         }
       })
       .catch(() => {
         if (!cancelled) setLiveMessages([]);
       });
 
-    const needsAccept =
-      !viewOnly &&
-      liveShared.some((item) => item.id === dialogId) &&
-      !acceptedLiveRef.current[dialogId] &&
-      !acceptInFlightRef.current[dialogId];
-
-    if (needsAccept) {
-      acceptInFlightRef.current[dialogId] = true;
-      void acceptDialog(dialogId, operatorName)
-        .then((dialog) => {
-          acceptedLiveRef.current[dialogId] = true;
-          acceptInFlightRef.current[dialogId] = false;
-          void refreshLiveQueues();
-          if (!cancelled) setLiveMessages(dialog.messages ?? []);
-        })
-        .catch(() => {
-          acceptInFlightRef.current[dialogId] = false;
-        });
-    }
-
     return () => {
       cancelled = true;
     };
-  }, [active?.id, active?.live, liveShared, refreshLiveQueues, operatorName, viewOnly]);
+  }, [active?.id, active?.live, liveShared, viewOnly]);
 
   useEffect(() => {
     void operatorsApi
       .list()
       .then((items) => {
-        setDirectoryOperators(
-          items
-            .filter((item) => item.is_active !== false)
-            .map((item) => item.name)
-            .filter(Boolean),
-        );
+        setTransferOperators(items.filter((item) => item.is_active !== false && item.name));
       })
-      .catch(() => setDirectoryOperators([]));
+      .catch(() => setTransferOperators([]));
   }, []);
 
   useEffect(() => {
@@ -3180,7 +3260,13 @@ export function ArmOperatorView({
   const [canvasBuild, setCanvasBuild] = useState("");
   const [statsDrawerOpenLocal, setStatsDrawerOpenLocal] = useState(false);
   const statsDrawerOpen = statsDrawerOpenProp ?? statsDrawerOpenLocal;
-  const setStatsDrawerOpen = onStatsDrawerOpenChange ?? setStatsDrawerOpenLocal;
+  const setStatsDrawerOpen = useCallback(
+    (open: boolean) => {
+      if (onStatsDrawerOpenChange) onStatsDrawerOpenChange(open);
+      else setStatsDrawerOpenLocal(open);
+    },
+    [onStatsDrawerOpenChange],
+  );
   const [statsTab, setStatsTab] = useState<ArmStatsTab>("dialogs");
 
   useEffect(() => {
@@ -3192,9 +3278,9 @@ export function ArmOperatorView({
   }, [canvasBuild, setCanvasBuild, setStatsDrawerOpen, setStatsTab]);
 
   useEffect(() => {
-    const allowed = armMenuItemsForRole(armRole).some((item) => item.id === statsTab);
-    if (!allowed) setStatsTab(firstArmStatsTabForRole(armRole));
-  }, [armRole, statsTab]);
+    const allowed = armMenuItemsForRole(armRole, menuContext).some((item) => item.id === statsTab);
+    if (!allowed) setStatsTab(firstArmStatsTabForRole(armRole, menuContext));
+  }, [armRole, menuContext, statsTab]);
   const [expandedSections, setExpandedSections] = useState<Record<QueueSectionId, boolean>>(
     defaultExpandedSections(),
   );
@@ -3212,11 +3298,12 @@ export function ArmOperatorView({
     setExpandedSections((prev) => {
       const next = { ...prev };
       if (liveWaiting.length > 0) next.waiting = true;
+      if (liveInitiated.length > 0) next.initiated = true;
       if (liveShared.length > 0) next.shared = true;
       if (viewOnly && liveColleagues.length > 0) next.colleagues = true;
       return next;
     });
-  }, [liveWaiting.length, liveShared.length, liveColleagues.length, viewOnly]);
+  }, [liveWaiting.length, liveInitiated.length, liveShared.length, liveColleagues.length, viewOnly]);
 
   useEffect(() => {
     if (!viewOnly || liveColleagues.length === 0) return;
@@ -3320,15 +3407,19 @@ export function ArmOperatorView({
 
   const deliverReply = (notice: string) => {
     const text = reply.trim();
-    if (!text || !active || composerLocked) return;
+    const file = pendingAttachment;
+    if ((!text && !file) || !active || composerLocked) return;
     const replyToId = quoteMessage?.id;
     if (active.live) {
-      void sendOperatorMessage(active.id, text, {
-        reply_to_id: replyToId,
-        operator_name: operatorName,
-        response_origin: suflerSuggestionText ? 'sufler' : undefined,
-        sufler_suggestion_text: suflerSuggestionText || undefined,
-      })
+      const sendPromise = file
+        ? uploadOperatorAttachment(active.id, file, operatorName, text)
+        : sendOperatorMessage(active.id, text, {
+            reply_to_id: replyToId,
+            operator_name: operatorName,
+            response_origin: suflerSuggestionText ? "sufler" : undefined,
+            sufler_suggestion_text: suflerSuggestionText || undefined,
+          });
+      void sendPromise
         .then((message) => {
           const withReceipt =
             message.receipt_status === "read" ||
@@ -3344,39 +3435,79 @@ export function ArmOperatorView({
             return [...prev, withReceipt];
           });
           onReplyChange("");
+          setPendingAttachment(null);
           setQuoteMessage(null);
           setSpellWarning(false);
-          setComposerNotice(notice);
+          setComposerNotice(
+            file
+              ? text
+                ? `Файл «${file.name}» и сообщение отправлены.`
+                : `Файл «${file.name}» отправлен.`
+              : notice,
+          );
           void refreshLiveQueues();
         })
         .catch(() => {
-          setComposerNotice("Не удалось отправить сообщение.");
+          setComposerNotice(file ? "Не удалось отправить файл." : "Не удалось отправить сообщение.");
         });
       return;
     }
     onReplyChange("");
+    setPendingAttachment(null);
     setQuoteMessage(null);
     setSpellWarning(false);
     setComposerNotice(notice);
   };
 
-  const transferOperatorOptions = useMemo(() => {
-    const names = new Set<string>(
-      directoryOperators.length ? directoryOperators : TRANSFER_OPERATORS,
-    );
-    for (const item of liveColleagues) {
-      if (item.operatorName) names.add(item.operatorName);
+  const transferDepartments = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of transferOperators) {
+      if (item.name === operatorName) continue;
+      const deptName = item.department_name?.trim() || "Без отдела";
+      const deptId = String(item.department_id ?? item.department ?? deptName);
+      map.set(deptId, deptName);
     }
-    names.delete(operatorName);
-    return Array.from(names)
-      .sort((a, b) => a.localeCompare(b, "ru"))
-      .map((name) => ({ value: name, label: name }));
-  }, [directoryOperators, liveColleagues, operatorName]);
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [transferOperators, operatorName]);
+
+  const transferOperatorOptions = useMemo(() => {
+    const inDept = transferOperators.filter((item) => {
+      if (item.name === operatorName) return false;
+      const deptName = item.department_name?.trim() || "Без отдела";
+      const deptId = String(item.department_id ?? item.department ?? deptName);
+      return deptId === transferDepartment;
+    });
+    if (inDept.length) {
+      return inDept
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, "ru"))
+        .map((item) => ({ value: item.name, label: item.name }));
+    }
+    // Fallback when directory empty: keep demo names under one virtual dept.
+    if (!transferOperators.length) {
+      return TRANSFER_OPERATORS
+        .filter((name) => name !== operatorName)
+        .map((name) => ({ value: name, label: name }));
+    }
+    return [];
+  }, [transferOperators, transferDepartment, operatorName]);
 
   const openTransferDialog = () => {
     if (!active?.live) return;
     if (composerLocked && !canTransferDespiteView) return;
-    setTransferOperatorName(transferOperatorOptions[0]?.value ?? "");
+    const firstDept = transferDepartments[0]?.id ?? "";
+    setTransferDepartment(firstDept);
+    const firstOps = transferOperators
+      .filter((item) => {
+        if (item.name === operatorName) return false;
+        const deptName = item.department_name?.trim() || "Без отдела";
+        const deptId = String(item.department_id ?? item.department ?? deptName);
+        return deptId === firstDept;
+      })
+      .map((item) => item.name);
+    setTransferOperatorName(firstOps[0] ?? TRANSFER_OPERATORS.find((name) => name !== operatorName) ?? "");
     setTransferDialogOpen(true);
   };
 
@@ -3384,30 +3515,36 @@ export function ArmOperatorView({
     if (!active?.live) return;
     const toName = transferOperatorName.trim();
     if (!toName) return;
+    const transferredId = active.id;
+    const transferredName = active.name;
     setTransferDialogOpen(false);
-    void transferDialogRemote(active.id, toName, operatorName)
-      .then(() => {
-        setComposerNotice(`Диалог переведён на ${toName}.`);
-        void refreshLiveQueues();
+    const preferNext =
+      liveWaiting.find((item) => item.id !== transferredId)
+      ?? remainingDialogs.find((item) => item.id !== transferredId && !item.readOnly);
+    if (preferNext) onSelectQueue(preferNext.id);
+    else onSelectQueue("");
+    void transferDialogRemote(transferredId, toName, operatorName)
+      .then(async () => {
+        setComposerNotice(`Диалог с ${transferredName} переведён на ${toName}.`);
+        await refreshLiveQueues();
       })
       .catch(() => {
         setComposerNotice("Не удалось перевести диалог.");
+        onSelectQueue(transferredId);
       });
+  };
+
+  const handleDownloadAttachment = (message: OnlineChatMessage) => {
+    if (!active?.id || !message.attachment_name) return;
+    void downloadAttachment(active.id, message.id, message.attachment_name).catch(() => {
+      setComposerNotice("Не удалось скачать файл.");
+    });
   };
 
   const handleFilePick = (file: File) => {
     if (!active?.live || composerLocked) return;
-    void uploadOperatorAttachment(active.id, file, operatorName)
-      .then((message) => {
-        setLiveMessages((prev) =>
-          prev.some((item) => item.id === message.id) ? prev : [...prev, message],
-        );
-        setComposerNotice(`Файл «${file.name}» отправлен.`);
-        void refreshLiveQueues();
-      })
-      .catch(() => {
-        setComposerNotice("Не удалось отправить файл.");
-      });
+    setPendingAttachment(file);
+    setComposerNotice(`Файл «${file.name}» прикреплён. Напишите сообщение при необходимости и нажмите «Отправить».`);
   };
 
   const openEditMessage = (message: OnlineChatMessage) => {
@@ -3419,7 +3556,9 @@ export function ArmOperatorView({
   const handleConfirmEditMessage = () => {
     if (!active?.live || !editMessageTarget) return;
     const nextText = editMessageText.trim();
-    if (!nextText || nextText === (editMessageTarget.raw_text || editMessageTarget.text)) {
+    const previous = (editMessageTarget.raw_text || editMessageTarget.text || "").trim();
+    const hasAttachment = Boolean(editMessageTarget.attachment_key || editMessageTarget.attachment_name);
+    if ((!nextText && !hasAttachment) || nextText === previous) {
       setEditMessageTarget(null);
       return;
     }
@@ -3428,7 +3567,7 @@ export function ArmOperatorView({
     void editMessageRemote(active.id, messageId, nextText)
       .then((updated) => {
         setLiveMessages((prev) =>
-          prev.map((item) => (item.id === updated.id ? updated : item)),
+          prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
         );
       })
       .catch(() => {
@@ -3594,9 +3733,13 @@ export function ArmOperatorView({
           scheme={scheme}
           open={statsDrawerOpen}
           armRole={armRole}
+          menuContext={menuContext}
           activeId={statsTab}
-          portalRoles={portalRoles}
           onSelect={(id) => {
+            if (id === "employees") {
+              window.location.assign("/online-chat");
+              return;
+            }
             setStatsTab(id);
             setComposerNotice(`Раздел «${ARM_MENU_ITEMS.find((item) => item.id === id)?.label ?? id}» пока недоступен.`);
             setStatsDrawerOpen(false);
@@ -3735,6 +3878,7 @@ export function ArmOperatorView({
                                 item={q}
                                 t={t}
                                 selected={q.id === selectedQueue}
+                                nowMs={nowMs}
                                 onClick={() => {
                                   handleSelectQueue(q.id);
                                   expandCard(q.id);
@@ -3750,6 +3894,7 @@ export function ArmOperatorView({
                               t={t}
                               scheme={scheme}
                               selected={q.id === selectedQueue}
+                              nowMs={nowMs}
                               onSelect={() => handleSelectQueue(q.id)}
                               onCollapse={() => collapseCard(q.id)}
                             />
@@ -3837,7 +3982,7 @@ export function ArmOperatorView({
                   </Pill>
                 </Row>
               </div>
-              {isReadOnly ? (
+              {viewOnly ? (
                 <div
                   style={{
                     flex: 1,
@@ -3858,13 +4003,16 @@ export function ArmOperatorView({
                 <Spacer />
               )}
               <Stack gap={6} style={{ alignItems: "flex-end", flexShrink: 0 }}>
-                {active.slaTone ? (
-                  <SlaWaitPill wait={`SLA ${active.wait}`} slaTone={active.slaTone} />
-                ) : (
-                  <Pill tone={active.urgent ? "warning" : "neutral"} size="sm">
-                    SLA {active.wait}
-                  </Pill>
-                )}
+                {(() => {
+                  const resolved = resolveQueueWait(active, nowMs);
+                  return resolved.slaTone ? (
+                    <SlaWaitPill wait={`SLA ${resolved.wait}`} slaTone={resolved.slaTone} />
+                  ) : (
+                    <Pill tone={resolved.urgent ? "warning" : "neutral"} size="sm">
+                      SLA {resolved.wait}
+                    </Pill>
+                  );
+                })()}
                 <Text style={{ fontSize: 12, color: t.text.secondary, textAlign: "right" }}>
                   {viewMode === "colleague"
                     ? `Просмотр · ${active.operatorName ?? "коллега"}`
@@ -3885,6 +4033,7 @@ export function ArmOperatorView({
                 <Select
                   value={closeTopic}
                   onChange={onCloseTopicChange}
+                  disabled={isReadOnly}
                   options={CLOSE_TOPICS.map((topic) => ({ value: topic, label: topic }))}
                 />
               </div>
@@ -3958,9 +4107,10 @@ export function ArmOperatorView({
                         time={messageTimeLabel(message.created_at)}
                         quotedText={message.quoted_text}
                         attachmentName={message.attachment_name}
-                        attachmentHref={
-                          message.attachment_name && active?.id
-                            ? attachmentDownloadUrl(active.id, message.id)
+                        attachmentDownloadable={canDownloadAttachment(message)}
+                        onDownloadAttachment={
+                          canDownloadAttachment(message)
+                            ? () => handleDownloadAttachment(message)
                             : undefined
                         }
                         isDeleted={message.is_deleted}
@@ -4014,9 +4164,10 @@ export function ArmOperatorView({
                       quotedText={message.quoted_text}
                       editedAt={message.edited_at}
                       attachmentName={message.attachment_name}
-                      attachmentHref={
-                        message.attachment_name && active?.id
-                          ? attachmentDownloadUrl(active.id, message.id)
+                      attachmentDownloadable={canDownloadAttachment(message)}
+                      onDownloadAttachment={
+                        canDownloadAttachment(message)
+                          ? () => handleDownloadAttachment(message)
                           : undefined
                       }
                       isDeleted={message.is_deleted}
@@ -4217,6 +4368,11 @@ export function ArmOperatorView({
                 Клиент набирает: {clientDraft}
               </Callout>
             ) : null}
+            {isSharedQueuePeek ? (
+              <Callout tone="info" style={{ marginBottom: 8, fontSize: 12 }}>
+                Просмотр общей очереди: ответ недоступен, сообщения клиента не отмечаются как прочитанные.
+              </Callout>
+            ) : null}
             {quoteMessage ? (
               <div
                 style={{
@@ -4239,13 +4395,38 @@ export function ArmOperatorView({
                 </Button>
               </div>
             ) : null}
-            <div style={{ position: "relative" }}>
+            {pendingAttachment && !composerLocked ? (
+              <div
+                style={{
+                  marginBottom: 8,
+                  padding: "6px 10px",
+                  borderRadius: RADIUS_SM,
+                  background: t.fill.tertiary,
+                  border: `1px solid ${t.stroke.secondary}`,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Text style={{ fontSize: 12, color: t.text.secondary, flex: 1, minWidth: 0 }}>
+                  📎 {pendingAttachment.name}
+                </Text>
+                <Button variant="ghost" size="sm" onClick={() => setPendingAttachment(null)}>
+                  ✕
+                </Button>
+              </div>
+            ) : null}
+            <div style={{ position: "relative", opacity: composerLocked ? 0.55 : 1 }}>
               <Stack gap={8}>
                 <TextArea
                   placeholder={
                     isClientBlocked
                       ? "Клиент заблокирован — ответ недоступен"
-                      : "Введите ответ клиенту…"
+                      : isSharedQueuePeek
+                        ? "Общая очередь — только просмотр"
+                        : pendingAttachment
+                          ? "Добавьте текст к файлу (необязательно)…"
+                          : "Введите ответ клиенту…"
                   }
                   style={{ width: "100%", minHeight: 72, overflow: "auto", resize: "vertical" }}
                   rows={3}
@@ -4286,9 +4467,9 @@ export function ArmOperatorView({
                     </Button>
                     <Button
                       variant="primary"
-                      disabled={composerLocked || reply.trim().length === 0}
+                      disabled={composerLocked || (reply.trim().length === 0 && !pendingAttachment)}
                       onClick={() => {
-                        if (spellErrors.length > 0) {
+                        if (spellErrors.length > 0 && reply.trim()) {
                           setSpellWarning(true);
                           return;
                         }
@@ -4494,8 +4675,32 @@ export function ArmOperatorView({
               Перевести диалог
             </Text>
             <Text style={{ fontSize: 13, color: t.text.secondary, lineHeight: 1.45, marginBottom: 14 }}>
-              Выберите оператора отдела, которому нужно передать обращение.
+              Сначала выберите отдел, затем оператора этого отдела.
             </Text>
+            <Text style={{ fontSize: 12, color: t.text.secondary, marginBottom: 6 }}>
+              Отдел
+            </Text>
+            {transferDepartments.length > 0 ? (
+              <Select
+                value={transferDepartment}
+                onChange={(value) => {
+                  setTransferDepartment(value);
+                  const first = transferOperators.find((item) => {
+                    if (item.name === operatorName) return false;
+                    const deptName = item.department_name?.trim() || "Без отдела";
+                    const deptId = String(item.department_id ?? item.department ?? deptName);
+                    return deptId === value;
+                  });
+                  setTransferOperatorName(first?.name ?? "");
+                }}
+                options={transferDepartments.map((item) => ({ value: item.id, label: item.name }))}
+                style={{ marginBottom: 12 }}
+              />
+            ) : (
+              <Text style={{ fontSize: 13, color: t.text.tertiary, marginBottom: 12 }}>
+                Отделы не найдены — показан общий список операторов.
+              </Text>
+            )}
             <Text style={{ fontSize: 12, color: t.text.secondary, marginBottom: 6 }}>
               Оператор
             </Text>
@@ -4508,7 +4713,7 @@ export function ArmOperatorView({
               />
             ) : (
               <Text style={{ fontSize: 13, color: t.text.tertiary, marginBottom: 16 }}>
-                Нет доступных операторов для перевода.
+                В выбранном отделе нет доступных операторов.
               </Text>
             )}
             <Row style={{ gap: 8, justifyContent: "flex-end" }}>
@@ -4533,8 +4738,12 @@ export function ArmOperatorView({
           scheme={scheme}
           titleId="edit-message-title"
           title="Редактировать сообщение"
-          description="Изменённый текст увидит клиент. Сообщение будет помечено как отредактированное."
-          label="Текст сообщения"
+          description={
+            editMessageTarget.attachment_name
+              ? `Можно изменить подпись к файлу «${editMessageTarget.attachment_name}». Сам файл останется прежним и будет доступен для скачивания.`
+              : "Изменённый текст увидит клиент. Сообщение будет помечено как отредактированное."
+          }
+          label={editMessageTarget.attachment_name ? "Подпись к файлу" : "Текст сообщения"}
           value={editMessageText}
           confirmLabel="Сохранить"
           multiline

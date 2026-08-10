@@ -371,6 +371,8 @@ def dialog_attachment_upload(request: HttpRequest, dialog_id: str) -> HttpRespon
         uploaded.read(),
         content_type=content_type,
     )
+    # Mark clean after type/size validation unless an external AV scanner is enabled.
+    av_enabled = bool(getattr(settings, "ONLINE_CHAT_AV_ENABLED", False))
     message = append_message(
         dialog,
         speaker=speaker,
@@ -379,9 +381,7 @@ def dialog_attachment_upload(request: HttpRequest, dialog_id: str) -> HttpRespon
         attachment_key=key,
         attachment_content_type=content_type,
         attachment_size=uploaded.size,
-        # The hook is ready for an external antivirus scanner. Local files are
-        # marked clean after strict type/size validation.
-        attachment_scan_status="clean" if settings.DEBUG else "pending",
+        attachment_scan_status="pending" if av_enabled else "clean",
     )
     return JsonResponse(
         {"ok": True, "message": serialize_message(message)},
@@ -400,7 +400,7 @@ def dialog_attachment_download(
         pk=message_id,
         dialog_id=dialog_id,
     )
-    if not message.attachment_key:
+    if message.is_deleted or not message.attachment_key:
         return JsonResponse({"detail": "Not found"}, status=404)
     if message.attachment_scan_status not in {"clean", "not_required"}:
         return JsonResponse(
@@ -433,8 +433,10 @@ def dialog_message_detail(
             delete_message(message)
             return JsonResponse({"ok": True, "message": serialize_message(message)})
         payload = _json_body(request)
-        text = _str_field(payload, "text")
-        if not text:
+        if "text" not in payload:
+            raise OnlineChatApiError("text is required")
+        text = str(payload.get("text") or "")
+        if not text.strip() and not message.attachment_key:
             raise OnlineChatApiError("text is required")
         edit_message(message, text=text)
         return JsonResponse({"ok": True, "message": serialize_message(message)})
@@ -467,6 +469,8 @@ def dialog_accept(request: HttpRequest, dialog_id: str) -> HttpResponse:
 @csrf_exempt
 @require_http_methods(["POST"])
 def dialog_transfer(request: HttpRequest, dialog_id: str) -> HttpResponse:
+    from online_chat.routing_services import run_assignments
+
     dialog = get_object_or_404(Dialog, pk=dialog_id)
     try:
         payload = _json_body(request)
@@ -479,6 +483,10 @@ def dialog_transfer(request: HttpRequest, dialog_id: str) -> HttpResponse:
             raise OnlineChatApiError("to_operator_name or operator_id is required")
         if dialog.status in {Dialog.Status.CLOSED, Dialog.Status.BLOCKED}:
             raise OnlineChatApiError("dialog is closed")
+        previous_operator = dialog.operator
+        previous_departments = list(
+            previous_operator.departments.filter(is_active=True)
+        ) if previous_operator else []
         if operator_id:
             dialog = transfer_to_operator(dialog, operator_id=operator_id)
         else:
@@ -487,6 +495,12 @@ def dialog_transfer(request: HttpRequest, dialog_id: str) -> HttpResponse:
                 to_operator_name=to_operator,
                 from_operator_name=_str_field(payload, "from_operator_name"),
             )
+        # Free slot of the previous operator → pull next waiting dialogs.
+        if previous_departments:
+            for department in previous_departments:
+                run_assignments(department=department)
+        else:
+            run_assignments()
         return JsonResponse({"ok": True, "dialog": serialize_dialog(dialog)})
     except (OnlineChatApiError, ValueError) as exc:
         return _error(OnlineChatApiError(str(exc)))
@@ -495,6 +509,8 @@ def dialog_transfer(request: HttpRequest, dialog_id: str) -> HttpResponse:
 @csrf_exempt
 @require_http_methods(["POST"])
 def dialog_close(request: HttpRequest, dialog_id: str) -> HttpResponse:
+    from online_chat.routing_services import run_assignments
+
     dialog = get_object_or_404(Dialog, pk=dialog_id)
     try:
         payload = _json_body(request)
@@ -506,7 +522,16 @@ def dialog_close(request: HttpRequest, dialog_id: str) -> HttpResponse:
                 dialog.close_topic = topic
                 dialog.save(update_fields=["close_topic", "updated_at"])
             return JsonResponse({"ok": True, "dialog": serialize_dialog(dialog)})
+        previous_operator = dialog.operator
+        previous_departments = list(
+            previous_operator.departments.filter(is_active=True)
+        ) if previous_operator else []
         close_dialog(dialog, topic=topic)
+        if previous_departments:
+            for department in previous_departments:
+                run_assignments(department=department)
+        else:
+            run_assignments()
         return JsonResponse({"ok": True, "dialog": serialize_dialog(dialog)})
     except OnlineChatApiError as exc:
         return _error(exc)
@@ -974,6 +999,8 @@ def operators_collection(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["PATCH"])
 @_chat_permissions(PERM_CC_ADMIN)
 def operator_detail(request: HttpRequest, item_id: str) -> HttpResponse:
+    from online_chat.routing_services import run_assignments, update_operator_presence
+
     item = get_object_or_404(OperatorProfile, pk=item_id)
     try:
         data = _json_body(request)
@@ -981,15 +1008,18 @@ def operator_detail(request: HttpRequest, item_id: str) -> HttpResponse:
             data = {**data, "display_name": data["name"]}
         if "username" in data and "external_id" not in data:
             data = {**data, "external_id": data["username"]}
-        for field in ("external_id", "display_name", "email", "role", "presence"):
+        presence_value = _str_field(data, "presence") if "presence" in data else ""
+        for field in ("external_id", "display_name", "email", "role"):
             if field in data:
                 setattr(item, field, _str_field(data, field))
-        if item.role not in OperatorProfile.Role.values or item.presence not in OperatorProfile.Presence.values:
+        if item.role not in OperatorProfile.Role.values:
             raise OnlineChatApiError("invalid role or presence")
+        capacity_changed = "max_active_dialogs" in data or "capacity" in data
         if "max_active_dialogs" in data:
             item.max_active_dialogs = _int_field(data, "max_active_dialogs")
         elif "capacity" in data:
             item.max_active_dialogs = _int_field(data, "capacity")
+        auto_assign_changed = "auto_assign" in data
         for field in ("auto_assign", "is_active"):
             if field in data:
                 setattr(item, field, _bool_field(data, field))
@@ -997,9 +1027,19 @@ def operator_detail(request: HttpRequest, item_id: str) -> HttpResponse:
         if "department_id" in data and "department_ids" not in data:
             data = {**data, "department_ids": [data["department_id"]] if data["department_id"] else []}
         _set_departments(item, data)
+        if presence_value:
+            item = update_operator_presence(item, presence_value)
+        elif (
+            (capacity_changed or auto_assign_changed)
+            and item.auto_assign
+            and item.presence == OperatorProfile.Presence.ONLINE
+            and item.is_active
+        ):
+            for department in item.departments.filter(is_active=True):
+                run_assignments(department=department)
         return JsonResponse({"ok": True, "operator": _operator_dict(item)})
-    except OnlineChatApiError as exc:
-        return _error(exc)
+    except (OnlineChatApiError, ValueError) as exc:
+        return _error(OnlineChatApiError(str(exc)))
 
 
 @csrf_exempt

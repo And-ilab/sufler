@@ -14,11 +14,23 @@ import {
   type Department,
   type EntityId,
   type RoutingRule,
+  type WidgetFormField,
   type WidgetPlacement,
 } from '../api/managementApi'
 import '../shell/Management.css'
 
 type Tab = 'operators' | 'departments' | 'placements' | 'channels' | 'routing' | 'bots' | 'analytics'
+
+type ConfirmRequest = {
+  title: string
+  description: string
+}
+
+type PerformFn = (
+  action: () => Promise<unknown>,
+  message: string,
+  confirm?: ConfirmRequest,
+) => Promise<boolean>
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'operators', label: 'Операторы' },
@@ -30,6 +42,19 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'analytics', label: 'Аналитика' },
 ]
 
+const POPULAR_FORM_FIELDS: WidgetFormField[] = [
+  { key: 'first_name', label: 'Имя', type: 'text', required: true },
+  { key: 'last_name', label: 'Фамилия', type: 'text', required: false },
+  { key: 'phone', label: 'Телефон', type: 'tel', required: true },
+  { key: 'email', label: 'Email', type: 'email', required: false },
+  { key: 'question', label: 'Тема обращения', type: 'text', required: true },
+  { key: 'account', label: 'Номер счёта или карты', type: 'text', required: false },
+  { key: 'city', label: 'Город', type: 'text', required: false },
+  { key: 'passport', label: 'Серия и номер паспорта', type: 'text', required: false },
+  { key: 'inn', label: 'УНП / ИНН', type: 'text', required: false },
+  { key: 'company', label: 'Организация', type: 'text', required: false },
+]
+
 function slugHint(value: string): string {
   const ascii = value
     .trim()
@@ -37,6 +62,19 @@ function slugHint(value: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
   return ascii || `item-${Date.now().toString(36)}`
+}
+
+/** «Шейпа Семен Игоревич» → «Шейпа С.И.» */
+function formatOperatorFio(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return ''
+  if (parts.length === 1) return parts[0]
+  const surname = parts[0]
+  const initials = parts
+    .slice(1)
+    .map((part) => `${part[0]?.toUpperCase() ?? ''}.`)
+    .join('')
+  return `${surname} ${initials}`.trim()
 }
 
 /** ARM presence labels; map to backend OperatorPresence on save. */
@@ -112,6 +150,12 @@ export function ChatAdminApp() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    title: string
+    description: string
+    action: () => Promise<unknown>
+    message: string
+  } | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -143,7 +187,7 @@ export function ChatAdminApp() {
     void refresh()
   }, [refresh])
 
-  const perform = async (action: () => Promise<unknown>, message: string) => {
+  const runAction = async (action: () => Promise<unknown>, message: string) => {
     setSaving(true)
     setError('')
     setSuccess('')
@@ -160,6 +204,19 @@ export function ChatAdminApp() {
     }
   }
 
+  const perform: PerformFn = async (action, message, confirm) => {
+    if (confirm) {
+      setPendingConfirm({
+        title: confirm.title,
+        description: confirm.description,
+        action,
+        message,
+      })
+      return false
+    }
+    return runAction(action, message)
+  }
+
   return (
     <main className="chat-management">
       <div className="chat-management__inner">
@@ -174,6 +231,35 @@ export function ChatAdminApp() {
         </div>
         {error && <p className="chat-management__error" role="alert">{error}</p>}
         {success && <p className="chat-management__success" role="status">{success}</p>}
+        {pendingConfirm ? (
+          <div className="chat-management__confirm" role="dialog" aria-modal="true" aria-labelledby="admin-confirm-title">
+            <div className="chat-management__confirm-card">
+              <h2 id="admin-confirm-title">{pendingConfirm.title}</h2>
+              <p>{pendingConfirm.description}</p>
+              <div className="chat-management__actions">
+                <button
+                  type="button"
+                  className="is-secondary"
+                  onClick={() => setPendingConfirm(null)}
+                  disabled={saving}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const current = pendingConfirm
+                    setPendingConfirm(null)
+                    void runAction(current.action, current.message)
+                  }}
+                  disabled={saving}
+                >
+                  Подтвердить
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         <div className="chat-management__tabs" role="tablist" aria-label="Настройки онлайн-чата">
           {tabs.map((item) => (
             <button
@@ -267,7 +353,7 @@ function AnalyticsTab() {
             value={period}
             onChange={(event) => setPeriod(event.target.value as 'day' | 'week' | 'month')}
           >
-            <option value="day">Сегодня / 1 день</option>
+            <option value="day">1 день</option>
             <option value="week">7 дней</option>
             <option value="month">30 дней</option>
           </select>
@@ -280,9 +366,9 @@ function AnalyticsTab() {
           ['Диалоги', kpis.dialogs ?? 0],
           ['Закрыто', kpis.closed ?? 0],
           ['В очереди', kpis.waiting ?? 0],
-          ['Resolution, %', kpis.resolution_rate ?? '—'],
-          ['Avg first response, сек', kpis.average_first_response_seconds ?? '—'],
-          ['CSAT', kpis.average_rating == null ? '—' : Number(kpis.average_rating).toFixed(2)],
+          ['Решено, %', kpis.resolution_rate ?? '—'],
+          ['Среднее время первого ответа, сек', kpis.average_first_response_seconds ?? '—'],
+          ['Оценка клиентов (CSAT)', kpis.average_rating == null ? '—' : Number(kpis.average_rating).toFixed(2)],
         ].map(([label, value]) => (
           <article className="chat-management__card chat-management__kpi" key={String(label)}>
             <span>{label}</span>
@@ -290,17 +376,13 @@ function AnalyticsTab() {
           </article>
         ))}
       </div>
-      <p className="chat-management__muted">
-        Данные из live API. Для прода достаточно настроить SMTP / MinIO / токены каналов в env —
-        код отчётности менять не нужно.
-      </p>
     </section>
   )
 }
 
 interface TabProps {
   disabled: boolean
-  perform: (action: () => Promise<unknown>, message: string) => Promise<boolean>
+  perform: PerformFn
 }
 
 function OperatorsTab({
@@ -309,28 +391,34 @@ function OperatorsTab({
   disabled,
   perform,
 }: TabProps & { items: ChatOperator[]; departments: Department[] }) {
-  const [name, setName] = useState('')
+  const [fullName, setFullName] = useState('')
   const [username, setUsername] = useState('')
   const [departmentId, setDepartmentId] = useState('')
   const [capacity, setCapacity] = useState(5)
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    const ok = await perform(
-      () => operatorsApi.create({
-        name,
-        username,
-        department_id: departmentId || null,
-        capacity,
-        presence: 'offline',
-        is_active: true,
-      }),
+    const name = formatOperatorFio(fullName)
+    if (!name) return
+    await perform(
+      async () => {
+        await operatorsApi.create({
+          name,
+          username,
+          department_id: departmentId || null,
+          capacity,
+          presence: 'offline',
+          is_active: true,
+        })
+        setFullName('')
+        setUsername('')
+      },
       'Оператор создан.',
+      {
+        title: 'Создать оператора?',
+        description: `Будет создан оператор «${name}» с лимитом ${capacity} диалогов.`,
+      },
     )
-    if (ok) {
-      setName('')
-      setUsername('')
-    }
   }
 
   return (
@@ -338,7 +426,14 @@ function OperatorsTab({
       <form className="chat-management__card" onSubmit={(event) => void submit(event)}>
         <h2>Новый оператор</h2>
         <div className="chat-management__form-grid">
-          <label>Имя<input required value={name} onChange={(event) => setName(event.target.value)} /></label>
+          <label className="is-wide">
+            ФИО
+            <input
+              required
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+            />
+          </label>
           <label>Логин<input required value={username} onChange={(event) => setUsername(event.target.value)} /></label>
           <label>
             Отдел
@@ -360,7 +455,7 @@ function OperatorsTab({
         <h2 id="operators-admin-heading">Операторы</h2>
         <div className="chat-management__table-wrap">
           <table>
-            <thead><tr><th>Имя</th><th>Отдел</th><th>Статус</th><th>Лимит</th><th>Активен</th></tr></thead>
+            <thead><tr><th>ФИО</th><th>Отдел</th><th>Статус</th><th>Лимит</th><th>Активен</th></tr></thead>
             <tbody>
               {items.map((item) => (
                 <tr key={item.id}>
@@ -371,10 +466,20 @@ function OperatorsTab({
                       aria-label={`Присутствие ${item.name}`}
                       value={presenceToUi(item.presence)}
                       disabled={disabled}
-                      onChange={(event) => void perform(
-                        () => operatorsApi.setPresence(item.id, presenceToApi(event.target.value)),
-                        `Статус ${item.name} обновлён.`,
-                      )}
+                      onChange={(event) => {
+                        const nextUi = event.target.value
+                        const label = ARM_PRESENCE_OPTIONS.find((option) => option.ui === nextUi)?.label ?? nextUi
+                        void perform(
+                          () => operatorsApi.setPresence(item.id, presenceToApi(nextUi)),
+                          `Статус ${item.name} обновлён.`,
+                          {
+                            title: 'Изменить статус оператора?',
+                            description: `Установить для «${item.name}» статус «${label}»?`,
+                          },
+                        )
+                        // Keep select visually stable until refresh applies.
+                        event.target.value = presenceToUi(item.presence)
+                      }}
                     >
                       {ARM_PRESENCE_OPTIONS.map((option) => (
                         <option key={option.ui} value={option.ui}>{option.label}</option>
@@ -388,13 +493,19 @@ function OperatorsTab({
                       min="1"
                       max="50"
                       defaultValue={item.capacity}
+                      key={`${item.id}-${item.capacity}`}
                       onBlur={(event) => {
-                        if (event.target.valueAsNumber !== item.capacity) {
-                          void perform(
-                            () => operatorsApi.update(item.id, { capacity: event.target.valueAsNumber }),
-                            `Лимит ${item.name} обновлён.`,
-                          )
-                        }
+                        const next = event.target.valueAsNumber
+                        if (Number.isNaN(next) || next === item.capacity) return
+                        void perform(
+                          () => operatorsApi.update(item.id, { capacity: next }),
+                          `Лимит ${item.name} обновлён.`,
+                          {
+                            title: 'Изменить лимит диалогов?',
+                            description: `Для «${item.name}» лимит будет изменён с ${item.capacity} на ${next}.`,
+                          },
+                        )
+                        event.target.value = String(item.capacity)
                       }}
                     />
                   </td>
@@ -408,6 +519,12 @@ function OperatorsTab({
                         onChange={() => void perform(
                           () => operatorsApi.update(item.id, { is_active: item.is_active === false }),
                           `Доступность ${item.name} обновлена.`,
+                          {
+                            title: item.is_active === false ? 'Активировать оператора?' : 'Деактивировать оператора?',
+                            description: item.is_active === false
+                              ? `Оператор «${item.name}» снова сможет получать диалоги.`
+                              : `Оператор «${item.name}» будет недоступен для назначения.`,
+                          },
                         )}
                       />
                     </label>
@@ -430,20 +547,24 @@ function DepartmentsTab({ items, disabled, perform }: TabProps & { items: Depart
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    const ok = await perform(
-      () => departmentsApi.create({
-        name,
-        code: code.trim() || slugHint(name),
-        description,
-        is_active: true,
-      }),
+    await perform(
+      async () => {
+        await departmentsApi.create({
+          name,
+          code: code.trim() || slugHint(name),
+          description,
+          is_active: true,
+        })
+        setName('')
+        setCode('')
+        setDescription('')
+      },
       'Отдел создан.',
+      {
+        title: 'Создать отдел?',
+        description: `Будет создан отдел «${name}».`,
+      },
     )
-    if (ok) {
-      setName('')
-      setCode('')
-      setDescription('')
-    }
   }
 
   return (
@@ -480,7 +601,14 @@ function DepartmentsTab({ items, disabled, perform }: TabProps & { items: Depart
                   onClick={() => {
                     const next = window.prompt('Новое название отдела', item.name)?.trim()
                     if (next && next !== item.name) {
-                      void perform(() => departmentsApi.update(item.id, { name: next }), 'Отдел обновлён.')
+                      void perform(
+                        () => departmentsApi.update(item.id, { name: next }),
+                        'Отдел обновлён.',
+                        {
+                          title: 'Переименовать отдел?',
+                          description: `«${item.name}» → «${next}».`,
+                        },
+                      )
                     }
                   }}
                 >
@@ -489,11 +617,14 @@ function DepartmentsTab({ items, disabled, perform }: TabProps & { items: Depart
                 <button
                   className="is-danger"
                   disabled={disabled}
-                  onClick={() => {
-                    if (window.confirm(`Удалить отдел «${item.name}»?`)) {
-                      void perform(() => departmentsApi.remove(item.id), 'Отдел удалён.')
-                    }
-                  }}
+                  onClick={() => void perform(
+                    () => departmentsApi.remove(item.id),
+                    'Отдел удалён.',
+                    {
+                      title: 'Удалить отдел?',
+                      description: `Отдел «${item.name}» будет удалён.`,
+                    },
+                  )}
                 >
                   Удалить
                 </button>
@@ -507,6 +638,89 @@ function DepartmentsTab({ items, disabled, perform }: TabProps & { items: Depart
   )
 }
 
+function FormFieldsPicker({
+  value,
+  onChange,
+}: {
+  value: WidgetFormField[]
+  onChange: (fields: WidgetFormField[]) => void
+}) {
+  const selectedKeys = new Set(value.map((field) => field.key))
+  const togglePopular = (field: WidgetFormField) => {
+    if (selectedKeys.has(field.key)) {
+      onChange(value.filter((item) => item.key !== field.key))
+      return
+    }
+    onChange([...value, { ...field }])
+  }
+  const setRequired = (key: string, required: boolean) => {
+    onChange(value.map((item) => (item.key === key ? { ...item, required } : item)))
+  }
+  const removeField = (key: string) => onChange(value.filter((item) => item.key !== key))
+
+  return (
+    <div className="chat-management__field-picker is-wide">
+      <div className="chat-management__field-picker-head">
+        <strong>Поля формы</strong>
+        <span>Выберите поля для формы входа в виджет</span>
+      </div>
+
+      <div className="chat-management__field-grid" role="group" aria-label="Доступные поля">
+        {POPULAR_FORM_FIELDS.map((field) => {
+          const checked = selectedKeys.has(field.key)
+          return (
+            <label
+              key={field.key}
+              className={`chat-management__field-option${checked ? ' is-checked' : ''}`}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => togglePopular(field)}
+              />
+              <span>{field.label}</span>
+            </label>
+          )
+        })}
+      </div>
+
+      <div className="chat-management__field-selected">
+        <div className="chat-management__field-selected-title">
+          Выбранные поля
+          <span>{value.length}</span>
+        </div>
+        {value.length ? (
+          <ul className="chat-management__selected-fields">
+            {value.map((field) => (
+              <li key={field.key}>
+                <span className="chat-management__selected-fields-label">{field.label}</span>
+                <label className="chat-management__required-toggle">
+                  <input
+                    type="checkbox"
+                    checked={field.required}
+                    onChange={(event) => setRequired(field.key, event.target.checked)}
+                  />
+                  <span>Обязательное</span>
+                </label>
+                <button
+                  type="button"
+                  className="chat-management__icon-x"
+                  aria-label={`Удалить поле «${field.label}»`}
+                  onClick={() => removeField(field.key)}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="chat-management__field-empty">Пока ничего не выбрано</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function PlacementsTab({
   items,
   departments,
@@ -516,21 +730,22 @@ function PlacementsTab({
   const [editingId, setEditingId] = useState<EntityId | null>(null)
   const [form, setForm] = useState<Partial<WidgetPlacement>>(emptyPlacement)
   const [domains, setDomains] = useState('')
-  const [fields, setFields] = useState('Имя:name:text, Телефон:phone:tel')
+  const [fields, setFields] = useState<WidgetFormField[]>([
+    POPULAR_FORM_FIELDS[0],
+    POPULAR_FORM_FIELDS[2],
+  ])
 
   const edit = (item: WidgetPlacement) => {
     setEditingId(item.id)
     setForm(item)
     setDomains((item.allowed_domains ?? []).join(', '))
-    setFields((item.form_fields ?? []).map((field) =>
-      `${field.label}:${field.key}:${field.type ?? 'text'}${field.required ? ':required' : ''}`,
-    ).join(', '))
+    setFields(item.form_fields?.length ? item.form_fields : [])
   }
   const reset = () => {
     setEditingId(null)
     setForm(emptyPlacement)
     setDomains('')
-    setFields('Имя:name:text, Телефон:phone:tel')
+    setFields([POPULAR_FORM_FIELDS[0], POPULAR_FORM_FIELDS[2]])
   }
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -538,16 +753,22 @@ function PlacementsTab({
       ...form,
       code: (form.code || '').trim() || slugHint(form.name || 'widget'),
       allowed_domains: domains.split(',').map((value) => value.trim()).filter(Boolean),
-      form_fields: fields.split(',').map((value) => {
-        const [label, key, type, required] = value.trim().split(':')
-        return { label, key, type: (type || 'text') as 'text' | 'tel' | 'email', required: required === 'required' }
-      }).filter((field) => field.label && field.key),
+      form_fields: fields,
     }
-    const ok = await perform(
-      () => editingId == null ? placementsApi.create(payload) : placementsApi.update(editingId, payload),
+    await perform(
+      async () => {
+        if (editingId == null) await placementsApi.create(payload)
+        else await placementsApi.update(editingId, payload)
+        reset()
+      },
       editingId == null ? 'Размещение создано.' : 'Размещение обновлено.',
+      {
+        title: editingId == null ? 'Создать размещение?' : 'Сохранить размещение?',
+        description: editingId == null
+          ? `Будет создано размещение «${form.name || ''}» с ${fields.length} полями формы.`
+          : `Изменения размещения «${form.name || ''}» будут сохранены.`,
+      },
     )
-    if (ok) reset()
   }
   const set = <K extends keyof WidgetPlacement>(key: K, value: WidgetPlacement[K]) =>
     setForm((current) => ({ ...current, [key]: value }))
@@ -583,14 +804,7 @@ function PlacementsTab({
             Акцент темы
             <input type="color" value={form.theme_accent ?? '#007A43'} onChange={(event) => set('theme_accent', event.target.value)} />
           </label>
-          <label className="is-wide">
-            Поля формы: подпись:ключ:тип[:required]
-            <input value={fields} onChange={(event) => setFields(event.target.value)} placeholder="Имя:name:text:required, Телефон:phone:tel" />
-          </label>
-          <label className="chat-management__check">
-            <input type="checkbox" checked={form.require_phone ?? false} onChange={(event) => set('require_phone', event.target.checked)} />
-            Телефон обязателен
-          </label>
+          <FormFieldsPicker value={fields} onChange={setFields} />
           <label className="chat-management__check">
             <input type="checkbox" checked={form.is_active !== false} onChange={(event) => set('is_active', event.target.checked)} />
             Размещение активно
@@ -629,11 +843,14 @@ function PlacementsTab({
                 <button
                   className="is-danger"
                   disabled={disabled}
-                  onClick={() => {
-                    if (window.confirm(`Удалить размещение «${item.name}»?`)) {
-                      void perform(() => placementsApi.remove(item.id), 'Размещение удалено.')
-                    }
-                  }}
+                  onClick={() => void perform(
+                    () => placementsApi.remove(item.id),
+                    'Размещение удалено.',
+                    {
+                      title: 'Удалить размещение?',
+                      description: `Размещение «${item.name}» будет удалено.`,
+                    },
+                  )}
                 >
                   Удалить
                 </button>
@@ -717,7 +934,10 @@ function ChannelsTab({ items, disabled, perform }: TabProps & { items: ChatChann
                   onClick={() => void perform(async () => {
                     if (!row.existing) return
                     await channelsApi.checkHealth(row.existing.id)
-                  }, `Проверка канала «${row.name}» выполнена.`)}
+                  }, `Проверка канала «${row.name}» выполнена.`, {
+                    title: 'Проверить соединение?',
+                    description: `Запустить проверку канала «${row.name}»?`,
+                  })}
                 >
                   Проверить соединение
                 </button>
@@ -735,7 +955,10 @@ function ChannelsTab({ items, disabled, perform }: TabProps & { items: ChatChann
                       is_active: true,
                       account: `channel-${row.kind}`,
                     })
-                  }, active ? `Канал «${row.name}» выключен.` : `Канал «${row.name}» включён.`)}
+                  }, active ? `Канал «${row.name}» выключен.` : `Канал «${row.name}» включён.`, {
+                    title: active ? 'Выключить канал?' : 'Включить канал?',
+                    description: `Канал «${row.name}» будет ${active ? 'выключен' : 'включён'}.`,
+                  })}
                 >
                   {active ? 'Выключить' : 'Включить'}
                 </button>
@@ -767,18 +990,24 @@ function RoutingTab({
       window.alert('Выберите отдел для правила маршрутизации.')
       return
     }
-    const ok = await perform(
-      () => routingRulesApi.create({
-        name,
-        priority,
-        department_id: departmentId,
-        channel_id: channelId || null,
-        max_load: maxLoad,
-        is_active: true,
-      }),
+    await perform(
+      async () => {
+        await routingRulesApi.create({
+          name,
+          priority,
+          department_id: departmentId,
+          channel_id: channelId || null,
+          max_load: maxLoad,
+          is_active: true,
+        })
+        setName('')
+      },
       'Правило создано.',
+      {
+        title: 'Создать правило?',
+        description: `Будет создано правило маршрутизации «${name}».`,
+      },
     )
-    if (ok) setName('')
   }
 
   return (
@@ -834,6 +1063,10 @@ function RoutingTab({
                   onClick={() => void perform(
                     () => routingRulesApi.update(item.id, { is_active: !item.is_active }),
                     'Правило обновлено.',
+                    {
+                      title: item.is_active ? 'Выключить правило?' : 'Включить правило?',
+                      description: `Правило «${item.name}» будет ${item.is_active ? 'выключено' : 'включено'}.`,
+                    },
                   )}
                 >
                   {item.is_active ? 'Выключить' : 'Включить'}
@@ -841,11 +1074,14 @@ function RoutingTab({
                 <button
                   className="is-danger"
                   disabled={disabled}
-                  onClick={() => {
-                    if (window.confirm(`Удалить правило «${item.name}»?`)) {
-                      void perform(() => routingRulesApi.remove(item.id), 'Правило удалено.')
-                    }
-                  }}
+                  onClick={() => void perform(
+                    () => routingRulesApi.remove(item.id),
+                    'Правило удалено.',
+                    {
+                      title: 'Удалить правило?',
+                      description: `Правило «${item.name}» будет удалено.`,
+                    },
+                  )}
                 >
                   Удалить
                 </button>
@@ -859,6 +1095,8 @@ function RoutingTab({
   )
 }
 
+type BotTriggerRow = { id: string; trigger: string; response: string }
+
 function BotsTab({
   items,
   departments,
@@ -869,30 +1107,38 @@ function BotsTab({
   const [departmentId, setDepartmentId] = useState('')
   const [welcome, setWelcome] = useState('Здравствуйте! Я виртуальный помощник банка.')
   const [handoff, setHandoff] = useState('Подключаю оператора. Пожалуйста, ожидайте.')
-  const [triggers, setTriggers] = useState('карт=Уточните, пожалуйста, вопрос по карте.; вклад=Какой вклад вас интересует?')
+  const [triggerRows, setTriggerRows] = useState<BotTriggerRow[]>([
+    { id: '1', trigger: 'карт', response: 'Уточните, пожалуйста, вопрос по карте.' },
+    { id: '2', trigger: 'вклад', response: 'Какой вклад вас интересует?' },
+  ])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     const triggerResponses = Object.fromEntries(
-      triggers.split(';').map((part) => part.trim()).filter(Boolean).map((part) => {
-        const index = part.indexOf('=')
-        return index < 0 ? [part, ''] : [part.slice(0, index).trim(), part.slice(index + 1).trim()]
-      }).filter(([trigger, response]) => trigger && response),
+      triggerRows
+        .map((row) => [row.trigger.trim(), row.response.trim()] as const)
+        .filter(([trigger, response]) => trigger && response),
     )
-    const ok = await perform(
-      () => botsApi.create({
-        name,
-        department_id: departmentId,
-        is_active: false,
-        welcome_message: welcome,
-        fallback_message: handoff,
-        handoff_message: handoff,
-        trigger_responses: triggerResponses,
-        max_bot_turns: 3,
-      }),
+    await perform(
+      async () => {
+        await botsApi.create({
+          name,
+          department_id: departmentId,
+          is_active: false,
+          welcome_message: welcome,
+          fallback_message: handoff,
+          handoff_message: handoff,
+          trigger_responses: triggerResponses,
+          max_bot_turns: 3,
+        })
+        setName('')
+      },
       'Бот создан.',
+      {
+        title: 'Создать бота?',
+        description: `Бот «${name}» будет создан выключенным с ${Object.keys(triggerResponses).length} ветками ответов.`,
+      },
     )
-    if (ok) setName('')
   }
 
   return (
@@ -910,10 +1156,56 @@ function BotsTab({
           </label>
           <label className="is-wide">Приветствие<textarea value={welcome} onChange={(event) => setWelcome(event.target.value)} /></label>
           <label className="is-wide">Передача оператору<textarea value={handoff} onChange={(event) => setHandoff(event.target.value)} /></label>
-          <label className="is-wide">
-            Ответы: ключ=ответ; ключ=ответ
-            <textarea value={triggers} onChange={(event) => setTriggers(event.target.value)} />
-          </label>
+          <div className="chat-management__field-picker is-wide">
+            <div className="chat-management__field-picker-head">
+              <strong>Автоответы</strong>
+              <span>Ключевые слова и текст ответа бота</span>
+            </div>
+            <ul className="chat-management__trigger-list">
+              {triggerRows.map((row) => (
+                <li key={row.id}>
+                  <label>
+                    Ключ
+                    <input
+                      value={row.trigger}
+                      placeholder="карт"
+                      onChange={(event) => setTriggerRows((current) => current.map((item) => (
+                        item.id === row.id ? { ...item, trigger: event.target.value } : item
+                      )))}
+                    />
+                  </label>
+                  <label>
+                    Ответ
+                    <input
+                      value={row.response}
+                      placeholder="Уточните вопрос…"
+                      onChange={(event) => setTriggerRows((current) => current.map((item) => (
+                        item.id === row.id ? { ...item, response: event.target.value } : item
+                      )))}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="chat-management__icon-x"
+                    aria-label="Удалить автоответ"
+                    onClick={() => setTriggerRows((current) => current.filter((item) => item.id !== row.id))}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              className="is-secondary"
+              onClick={() => setTriggerRows((current) => [
+                ...current,
+                { id: `${Date.now()}`, trigger: '', response: '' },
+              ])}
+            >
+              Добавить ответ
+            </button>
+          </div>
         </div>
         <p className="chat-management__muted">Новый бот создаётся выключенным. Включите его после проверки сценариев.</p>
         <div className="chat-management__actions">
@@ -941,6 +1233,10 @@ function BotsTab({
                   onClick={() => void perform(
                     () => botsApi.update(item.id, { is_active: !item.is_active }),
                     'Статус бота обновлён.',
+                    {
+                      title: item.is_active ? 'Выключить бота?' : 'Включить бота?',
+                      description: `Бот «${item.name}» будет ${item.is_active ? 'выключен' : 'включён'}.`,
+                    },
                   )}
                 >
                   {item.is_active ? 'Выключить' : 'Включить'}
@@ -948,11 +1244,14 @@ function BotsTab({
                 <button
                   className="is-danger"
                   disabled={disabled}
-                  onClick={() => {
-                    if (window.confirm(`Удалить бота «${item.name}»?`)) {
-                      void perform(() => botsApi.remove(item.id), 'Бот удалён.')
-                    }
-                  }}
+                  onClick={() => void perform(
+                    () => botsApi.remove(item.id),
+                    'Бот удалён.',
+                    {
+                      title: 'Удалить бота?',
+                      description: `Бот «${item.name}» будет удалён без возможности восстановления.`,
+                    },
+                  )}
                 >
                   Удалить
                 </button>

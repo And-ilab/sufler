@@ -30,6 +30,7 @@ import { OperatorPicker } from './online-chat/OperatorPicker'
 import { ChatSimulatorApp } from './online-chat/simulator/ChatSimulatorApp'
 import { ChatPlatformShell } from './online-chat/shell/ChatPlatformShell'
 import { SupervisorApp } from './online-chat/supervisor/SupervisorApp'
+import { ArmMenuHost } from './online-chat/arm/ArmMenuHost'
 import type { ThemeKind } from './online-chat/arm/theme'
 import {
   Button,
@@ -204,7 +205,12 @@ function App() {
           ? 'supervisor' as const
           : 'operator' as const
     const armNavLabel = canOperateArm || simOperate ? 'Чаты' : 'Операторы'
-    const workingAsOperator = simOperate || (canOperateArm && !forcedView)
+
+    const operateHref = simOperate
+      ? `/online-chat?mode=operate&operator=${encodeURIComponent(operatorFromQuery)}`
+      : forcedView && operatorFromQuery
+        ? `/online-chat?mode=view&operator=${encodeURIComponent(operatorFromQuery)}`
+        : '/online-chat'
 
     const shellProps = {
       currentPath: route,
@@ -218,19 +224,21 @@ function App() {
         : forcedView && operatorFromQuery
           ? `${viewerTitle} · режим просмотра`
           : viewerTitle,
-      showArm: canViewArm || simOperate || showSimulator,
-      showSupervisor: canSupervisor,
-      showAdmin: canAdmin,
-      showSimulator,
-      armNavLabel,
+      // In simulator operate mode the shell must look like a pure operator session.
+      showArm: true,
+      showSupervisor: simOperate ? false : canSupervisor,
+      showAdmin: simOperate ? false : canAdmin,
+      showSimulator: simOperate ? false : showSimulator,
+      armNavLabel: simOperate ? 'Чаты' : armNavLabel,
+      armHref: operateHref,
       themeKind: chatThemeKind,
       onToggleTheme: () =>
         setChatThemeKind((kind) => (kind === 'light' ? 'dark' : 'light')),
-      showMenuButton: route === '/online-chat' && (workingAsOperator || forcedView),
+      // Hamburger is part of АРМ for every role on /online-chat (picker + operate + view).
+      showMenuButton: route === '/online-chat',
       menuOpen: armMenuOpen,
       onMenuToggle: () => setArmMenuOpen((open) => !open),
     }
-
     if (isSupervisorRoute) {
       return (
         <ChatPlatformShell {...shellProps} showMenuButton={false}>
@@ -255,8 +263,16 @@ function App() {
 
     if (forcedView && !operatorFromQuery) {
       return (
-        <ChatPlatformShell {...shellProps} showMenuButton={false}>
-          <OperatorPicker allowTransfer={allowTransferView} />
+        <ChatPlatformShell {...shellProps}>
+          <ArmMenuHost
+            open={armMenuOpen}
+            onOpenChange={setArmMenuOpen}
+            armRole={armRole}
+            menuContext="picker"
+            themeKind={chatThemeKind}
+          >
+            <OperatorPicker allowTransfer={allowTransferView} />
+          </ArmMenuHost>
         </ChatPlatformShell>
       )
     }
@@ -272,7 +288,6 @@ function App() {
           armRole={armRole}
           viewOnly={forcedView}
           allowTransferInView={forcedView && allowTransferView}
-          portalRoles={roles}
         />
       </ChatPlatformShell>
     )

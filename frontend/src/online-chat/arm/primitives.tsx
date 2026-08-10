@@ -222,17 +222,20 @@ export function Select({
   value,
   onChange,
   options,
+  disabled,
   style,
 }: {
   value: string
   onChange: (value: string) => void
   options: { value: string; label: string }[]
+  disabled?: boolean
   style?: CSSProperties
 }) {
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
       style={{
         width: '100%',
         padding: '6px 8px',
@@ -242,6 +245,8 @@ export function Select({
         color: 'var(--arm-t-primary)',
         fontFamily: 'inherit',
         fontSize: 13,
+        opacity: disabled ? 0.55 : 1,
+        cursor: disabled ? 'not-allowed' : undefined,
         ...style,
       }}
     >

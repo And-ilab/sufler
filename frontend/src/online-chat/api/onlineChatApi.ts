@@ -302,14 +302,16 @@ export async function uploadOperatorAttachment(
   dialogId: string,
   file: File,
   operatorName = '',
+  text = '',
 ): Promise<OnlineChatMessage> {
   const form = new FormData()
   form.append('file', file)
   form.append('speaker', 'operator')
   form.append('operator_name', operatorName)
+  if (text.trim()) form.append('text', text.trim())
   const response = await fetch(
     `/api/v1/online-chat/dialogs/${dialogId}/attachments/`,
-    { method: 'POST', body: form },
+    { method: 'POST', body: form, credentials: 'include' },
   )
   const body = await parseJson<{ ok: boolean; message: OnlineChatMessage }>(response)
   return body.message
@@ -317,6 +319,40 @@ export async function uploadOperatorAttachment(
 
 export function attachmentDownloadUrl(dialogId: string, messageId: string): string {
   return `/api/v1/online-chat/dialogs/${dialogId}/attachments/${messageId}/`
+}
+
+export function canDownloadAttachment(message: Pick<
+  OnlineChatMessage,
+  'attachment_key' | 'attachment_scan_status' | 'is_deleted' | 'attachment_name'
+>): boolean {
+  if (message.is_deleted || !message.attachment_name) return false
+  if (!message.attachment_key) return false
+  const status = message.attachment_scan_status || 'not_required'
+  return status === 'clean' || status === 'not_required'
+}
+
+/** Fetch attachment with credentials and trigger browser download. */
+export async function downloadAttachment(
+  dialogId: string,
+  messageId: string,
+  filename: string,
+): Promise<void> {
+  const response = await fetch(attachmentDownloadUrl(dialogId, messageId), {
+    credentials: 'include',
+  })
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({})) as { detail?: string }
+    throw new Error(detail.detail || `HTTP ${response.status}`)
+  }
+  const blob = await response.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = filename || 'attachment'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(objectUrl)
 }
 
 export async function fetchClientHistory(params: {

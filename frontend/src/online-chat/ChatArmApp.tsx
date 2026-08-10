@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import {
   ArmOperatorView,
   CLOSE_TOPICS,
@@ -22,7 +22,23 @@ export interface ChatArmAppProps {
   armRole?: 'operator' | 'supervisor' | 'admin'
   viewOnly?: boolean
   allowTransferInView?: boolean
-  portalRoles?: readonly string[]
+}
+
+function mapApiPresence(presence: string): OperatorPresence | null {
+  const supported = new Set<OperatorPresence>([
+    'online',
+    'break',
+    'lunch',
+    'training',
+    'meeting',
+    'offline',
+  ])
+  if (supported.has(presence as OperatorPresence)) {
+    return presence as OperatorPresence
+  }
+  if (presence === 'tech_issue') return 'tech_break'
+  if (presence === 'busy') return 'offline_queue'
+  return null
 }
 
 /** Emerald ARM: light mockup by default, optional dark toggle. */
@@ -35,7 +51,6 @@ export function ChatArmApp({
   armRole = 'operator',
   viewOnly = false,
   allowTransferInView = false,
-  portalRoles = [],
 }: ChatArmAppProps) {
   const t = themeKind === 'light' ? ARM_THEME_LIGHT : ARM_THEME_DARK
   const scheme = useMemo(() => getSchemePalette(t, 'belarusbank_emerald'), [t])
@@ -52,28 +67,24 @@ export function ChatArmApp({
     if (viewOnly) setViewMode('colleague')
   }, [viewOnly])
 
-  useEffect(() => {
+  const syncOperatorProfile = useCallback(() => {
     if (viewOnly) return
     void operatorsApi.list().then((operators) => {
       const profile = operators.find((item) => item.name === operatorName)
       if (!profile) return
-      const supported = new Set<OperatorPresence>([
-        'online',
-        'break',
-        'lunch',
-        'training',
-        'meeting',
-        'offline',
-      ])
-      if (supported.has(profile.presence as OperatorPresence)) {
-        setPresence(profile.presence as OperatorPresence)
-      } else if (profile.presence === 'tech_issue') {
-        setPresence('tech_break')
-      } else if (profile.presence === 'busy') {
-        setPresence('offline_queue')
+      const mapped = mapApiPresence(profile.presence)
+      if (mapped) {
+        setPresence((prev) => (prev === mapped ? prev : mapped))
       }
     }).catch(() => undefined)
   }, [operatorName, viewOnly])
+
+  useEffect(() => {
+    syncOperatorProfile()
+    if (viewOnly) return
+    const timer = window.setInterval(syncOperatorProfile, 2500)
+    return () => window.clearInterval(timer)
+  }, [syncOperatorProfile, viewOnly])
 
   const persistPresence = (next: OperatorPresence) => {
     if (viewOnly) return
@@ -163,7 +174,6 @@ export function ChatArmApp({
           armRole={armRole}
           viewOnly={viewOnly}
           allowTransferInView={allowTransferInView}
-          portalRoles={portalRoles}
         />
       </div>
     </main>

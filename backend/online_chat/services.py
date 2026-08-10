@@ -496,15 +496,19 @@ def append_message(
 
 def edit_message(message: DialogMessage, *, text: str) -> DialogMessage:
     cleaned = text.strip()
-    if not cleaned:
+    # Attachment messages may keep an empty caption; file itself is unchanged.
+    if not cleaned and not message.attachment_key:
         raise ValueError("text must be non-empty")
     if message.is_deleted:
         raise ValueError("message is deleted")
     if message.speaker == DialogMessage.Speaker.SYSTEM:
         raise ValueError("system messages cannot be edited")
+    if not cleaned and message.attachment_name:
+        cleaned = f"Файл: {message.attachment_name}"
     message.text = cleaned
     message.edited_at = timezone.now()
     # Keep receipt_status as-is (edit does not revoke delivery/read).
+    # Attachment fields are intentionally preserved on text-only edits.
     message.save(update_fields=["text", "edited_at"])
     if message.speaker == DialogMessage.Speaker.CLIENT:
         dialog = message.dialog

@@ -13,6 +13,8 @@ interface ChatPlatformShellProps {
   showSimulator?: boolean
   /** Nav label for /online-chat: «Чаты» (operator) or «Операторы» (admin/supervisor). */
   armNavLabel?: string
+  /** Keep simulator operate session when clicking brand / «Чаты». */
+  armHref?: string
   themeKind?: ThemeKind
   onToggleTheme?: () => void
   showMenuButton?: boolean
@@ -30,6 +32,7 @@ export function ChatPlatformShell({
   showAdmin = false,
   showSimulator = false,
   armNavLabel = 'Чаты',
+  armHref = '/online-chat',
   themeKind = 'light',
   onToggleTheme,
   showMenuButton = false,
@@ -37,7 +40,7 @@ export function ChatPlatformShell({
   onMenuToggle,
 }: ChatPlatformShellProps) {
   const routes = [
-    { href: '/online-chat', label: armNavLabel, access: 'arm' as const },
+    { href: armHref, label: armNavLabel, access: 'arm' as const },
     { href: '/online-chat/supervisor', label: 'Супервизор', access: 'supervisor' as const },
     { href: '/online-chat/admin', label: 'Управление', access: 'admin' as const },
     {
@@ -93,7 +96,7 @@ export function ChatPlatformShell({
               <span aria-hidden="true" />
             </button>
           )}
-          <a className="chat-platform-shell__brand" href="/online-chat" aria-label="Онлайн-чат — главная">
+          <a className="chat-platform-shell__brand" href={armHref} aria-label="Онлайн-чат — главная">
             <span className="chat-platform-shell__mark" aria-hidden="true">ББ</span>
             <span>
               <strong>Онлайн-чат</strong>
@@ -122,10 +125,12 @@ export function ChatPlatformShell({
         </div>
         <nav className="chat-platform-shell__nav" aria-label="Разделы онлайн-чата">
           {routes.filter(({ access }) => visible(access)).map((route) => {
-            const active = currentPath === route.href
+            const active = route.access === 'arm'
+              ? currentPath === '/online-chat'
+              : currentPath === route.href
             return (
               <a
-                key={route.href}
+                key={`${route.access}:${route.href}`}
                 href={route.href}
                 className={[
                   active ? 'is-active' : '',

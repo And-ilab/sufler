@@ -244,6 +244,14 @@
         WP.accentMuted +
         ';padding-left:8px;margin-bottom:6px;line-height:1.35;',
       'max-height:2.7em;overflow:hidden;text-overflow:ellipsis;}',
+      '.bubble-file{display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:6px 10px;border-radius:8px;',
+      'border:1px solid ' +
+        WP.accentMuted +
+        ';background:rgba(0,122,67,0.08);color:' +
+        WP.accent +
+        ';font-size:12px;font-weight:600;text-decoration:none;cursor:pointer;}',
+      '.bubble-file:hover{text-decoration:underline;}',
+      '.bubble-file--disabled{opacity:.65;cursor:default;text-decoration:none;}',
       '.bubble-time{font-size:10px;margin-top:6px;text-align:right;display:flex;justify-content:flex-end;align-items:center;gap:2px;}',
       '.bubble--client .bubble-time{color:' + WP.accentMuted + ';}',
       '.bubble--operator .bubble-time{color:' + WP.textTertiary + ';}',
@@ -267,8 +275,17 @@
         WP.clientBubbleBorder +
         ';background:' +
         WP.composerBg +
-        ';display:flex;gap:8px;align-items:center;}',
+        ';display:flex;flex-wrap:wrap;gap:8px;align-items:center;}',
       '.composer[hidden]{display:none!important;}',
+      '.composer-file{display:none;width:100%;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;border:1px solid ' +
+        WP.accentMuted +
+        ';background:rgba(0,122,67,0.06);font-size:12px;color:' +
+        WP.accent +
+        ';}',
+      '.composer-file.is-visible{display:flex;}',
+      '.composer-file button{border:none;background:transparent;color:' +
+        WP.textTertiary +
+        ';font-size:16px;line-height:1;cursor:pointer;padding:0 2px;}',
       '.icon-btn{width:32px;height:32px;border:1px solid ' +
         WP.stroke +
         ';border-radius:6px;background:' +
@@ -430,6 +447,10 @@
       '</div>' +
       '<div class="messages" data-testid="widget-messages"></div>' +
       '<div class="composer">' +
+      '<div class="composer-file" data-pending-file hidden>' +
+      '<span data-pending-file-name></span>' +
+      '<button type="button" aria-label="Убрать файл" data-action="clear-file">×</button>' +
+      '</div>' +
       '<input type="file" hidden data-file-input aria-hidden="true" tabindex="-1" />' +
       '<button type="button" class="icon-btn" title="' +
       STR.attach +
@@ -511,6 +532,8 @@
     var messagesEl = root.querySelector('[data-testid="widget-messages"]');
     var inputEl = root.querySelector('[data-testid="widget-input"]');
     var fileInputEl = root.querySelector('[data-file-input]');
+    var pendingFileEl = root.querySelector('[data-pending-file]');
+    var pendingFileNameEl = root.querySelector('[data-pending-file-name]');
     var fabBadgeEl = root.querySelector('.fab-badge');
     var nameEl = root.querySelector('[data-testid="widget-name"]');
     var lastNameEl = root.querySelector('[data-testid="widget-last-name"]');
@@ -551,6 +574,7 @@
       typingDebounceTimer: null,
       typingActive: false,
       wsPingTimer: null,
+      pendingFile: null,
     };
 
     if (
@@ -837,15 +861,57 @@
       );
     }
 
+    function attachmentDownloadUrl(dialogId, messageId) {
+      return apiUrl(
+        '/api/v1/online-chat/dialogs/' + dialogId + '/attachments/' + messageId + '/',
+      );
+    }
+
+    function canDownloadMessageAttachment(message) {
+      if (!message || message.is_deleted || !message.attachment_name) return false;
+      if (!message.attachment_key) return false;
+      var status = message.attachment_scan_status || 'not_required';
+      return status === 'clean' || status === 'not_required';
+    }
+
+    function captionForMessage(text, attachmentName) {
+      if (!attachmentName) return text || '';
+      var fileLabel = 'Файл: ' + attachmentName;
+      if (!text || text === fileLabel) return '';
+      return text;
+    }
+
+    function downloadAttachmentBlob(dialogId, messageId, filename) {
+      return fetch(attachmentDownloadUrl(dialogId, messageId), {
+        credentials: 'include',
+      }).then(function (response) {
+        if (!response.ok) throw new Error('download_failed');
+        return response.blob().then(function (blob) {
+          var objectUrl = URL.createObjectURL(blob);
+          var link = document.createElement('a');
+          link.href = objectUrl;
+          link.download = filename || 'attachment';
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(objectUrl);
+        });
+      });
+    }
+
     function addBubble(speaker, text, label, initials, time, options) {
       options = options || {};
       var messageId = options.id || '';
       var receiptStatus = options.receiptStatus || '';
+      var attachmentName = options.attachmentName || '';
+      var attachmentDownloadable = !!options.attachmentDownloadable;
+      var displayText = captionForMessage(text, attachmentName);
       state.messages.push({
         speaker: speaker,
         text: text,
         id: messageId,
         receiptStatus: receiptStatus,
+        attachmentName: attachmentName,
       });
       var isClient = speaker === 'client';
       var row = document.createElement('div');
@@ -873,6 +939,29 @@
         ? '<div class="bubble-quote">' + escapeHtml(quotedText) + '</div>'
         : '';
 
+      var fileBlock = '';
+      if (attachmentName) {
+        if (attachmentDownloadable && messageId && state.dialogId) {
+          fileBlock =
+            '<button type="button" class="bubble-file" data-attachment-download="' +
+            escapeHtml(messageId) +
+            '" data-attachment-name="' +
+            escapeHtml(attachmentName) +
+            '">📎 Скачать: ' +
+            escapeHtml(attachmentName) +
+            '</button>';
+        } else {
+          fileBlock =
+            '<span class="bubble-file bubble-file--disabled">📎 ' +
+            escapeHtml(attachmentName) +
+            '</span>';
+        }
+      }
+
+      var textBlock = displayText
+        ? '<div data-bubble-text>' + escapeHtml(displayText) + '</div>'
+        : '<div data-bubble-text></div>';
+
       var bubble =
         '<div class="bubble bubble--' +
         (isClient ? 'client' : 'operator') +
@@ -881,16 +970,34 @@
         escapeHtml(label || (isClient ? STR.you : state.operatorShort)) +
         '</div>' +
         quoteBlock +
-        '<div data-bubble-text>' +
-        escapeHtml(text) +
-        '</div>' +
+        textBlock +
+        fileBlock +
         timeBlock +
         '</div>';
 
       row.innerHTML = isClient ? bubble + avatarHtml : avatarHtml + bubble;
+      var downloadBtn = row.querySelector('[data-attachment-download]');
+      if (downloadBtn) {
+        downloadBtn.addEventListener('click', function () {
+          var id = downloadBtn.getAttribute('data-attachment-download');
+          var name = downloadBtn.getAttribute('data-attachment-name') || 'attachment';
+          if (!id || !state.dialogId) return;
+          downloadAttachmentBlob(state.dialogId, id, name).catch(function () {
+            addSystem('Не удалось скачать файл.');
+          });
+        });
+      }
       messagesEl.appendChild(row);
       messagesEl.scrollTop = messagesEl.scrollHeight;
       return row;
+    }
+
+    function attachmentOptionsFromMessage(message) {
+      if (!message || !message.attachment_name) return {};
+      return {
+        attachmentName: message.attachment_name,
+        attachmentDownloadable: canDownloadMessageAttachment(message),
+      };
     }
 
     function setMessageReceipt(messageId, status) {
@@ -1066,11 +1173,14 @@
           message.speaker === 'bot' ? 'Виртуальный помощник' : state.operatorShort,
           message.speaker === 'bot' ? 'Б' : state.operatorInitials,
           formatTime(new Date(message.created_at || Date.now())),
-          {
-            id: message.id,
-            receiptStatus: message.receipt_status,
-            quotedText: message.quoted_text,
-          },
+          Object.assign(
+            {
+              id: message.id,
+              receiptStatus: message.receipt_status,
+              quotedText: message.quoted_text,
+            },
+            attachmentOptionsFromMessage(message),
+          ),
         );
         if (!state.open) {
           state.unreadCount += 1;
@@ -1338,33 +1448,99 @@
         .catch(function () {});
     }
 
+    function renderPendingFile() {
+      if (!pendingFileEl || !pendingFileNameEl) return;
+      if (state.pendingFile) {
+        pendingFileNameEl.textContent = '📎 ' + state.pendingFile.name;
+        pendingFileEl.classList.add('is-visible');
+        pendingFileEl.removeAttribute('hidden');
+      } else {
+        pendingFileNameEl.textContent = '';
+        pendingFileEl.classList.remove('is-visible');
+        pendingFileEl.setAttribute('hidden', '');
+      }
+    }
+
+    function clearPendingFile() {
+      state.pendingFile = null;
+      if (fileInputEl) fileInputEl.value = '';
+      renderPendingFile();
+    }
+
+    function queueAttachment(file) {
+      if (!file || state.closed || state.view !== 'chat' || !state.dialogId) return;
+      state.pendingFile = file;
+      renderPendingFile();
+    }
+
     function sendFromComposer() {
       if (state.closed || state.view !== 'chat') return;
       var text = (inputEl.value || '').trim();
-      if (!text) return;
+      var file = state.pendingFile;
+      if (!text && !file) return;
       inputEl.value = '';
       sendTypingStop();
       setWaitingHint(false);
-      var row = addBubble(
-        'client',
-        text,
-        STR.you,
-        state.clientInitials,
-        formatTime(new Date()),
-        { receiptStatus: 'delivered' },
-      );
       if (!state.operatorConnected) setWaitingHint(true);
-      postDialogMessage(text, row);
-    }
 
-    function sendAttachment(file) {
-      if (!file || state.closed || state.view !== 'chat' || !state.dialogId) return;
-      var name = String(file.name || '').trim();
-      if (!name) return;
-      var text = 'Файл: ' + name;
-      sendTypingStop();
-      setWaitingHint(false);
-      var row = addBubble(
+      if (file) {
+        var optimisticText = text || ('Файл: ' + file.name);
+        var row = addBubble(
+          'client',
+          optimisticText,
+          STR.you,
+          state.clientInitials,
+          formatTime(new Date()),
+          {
+            receiptStatus: 'delivered',
+            attachmentName: file.name,
+            attachmentDownloadable: false,
+          },
+        );
+        var form = new FormData();
+        form.append('file', file);
+        form.append('speaker', 'client');
+        if (text) form.append('text', text);
+        clearPendingFile();
+        fetch(
+          apiUrl(
+            '/api/v1/online-chat/dialogs/' +
+              state.dialogId +
+              '/attachments/',
+          ),
+          { method: 'POST', body: form, credentials: 'include' },
+        )
+          .then(function (response) {
+            return response.json().then(function (body) {
+              if (!response.ok || !body.message) {
+                throw new Error((body && body.detail) || 'upload_failed');
+              }
+              rememberMessageId(body.message.id);
+              if (row) row.remove();
+              addBubble(
+                'client',
+                body.message.text || optimisticText,
+                STR.you,
+                state.clientInitials,
+                formatTime(new Date(body.message.created_at || Date.now())),
+                Object.assign(
+                  {
+                    id: body.message.id,
+                    receiptStatus: body.message.receipt_status || 'delivered',
+                  },
+                  attachmentOptionsFromMessage(body.message),
+                ),
+              );
+            });
+          })
+          .catch(function () {
+            if (row) row.remove();
+            addSystem('Не удалось загрузить файл. Проверьте тип и размер.');
+          });
+        return;
+      }
+
+      var textRow = addBubble(
         'client',
         text,
         STR.you,
@@ -1372,37 +1548,7 @@
         formatTime(new Date()),
         { receiptStatus: 'delivered' },
       );
-      if (!state.operatorConnected) setWaitingHint(true);
-      var form = new FormData();
-      form.append('file', file);
-      form.append('speaker', 'client');
-      fetch(
-        apiUrl(
-          '/api/v1/online-chat/dialogs/' +
-            state.dialogId +
-            '/attachments/',
-        ),
-        { method: 'POST', body: form },
-      )
-        .then(function (response) {
-          return response.json().then(function (body) {
-            if (!response.ok || !body.message) {
-              throw new Error((body && body.detail) || 'upload_failed');
-            }
-            rememberMessageId(body.message.id);
-            if (row) {
-              row.setAttribute('data-message-id', body.message.id);
-              setMessageReceipt(
-                body.message.id,
-                body.message.receipt_status || 'delivered',
-              );
-            }
-          });
-        })
-        .catch(function () {
-          if (row) row.remove();
-          addSystem('Не удалось загрузить файл. Проверьте тип и размер.');
-        });
+      postDialogMessage(text, textRow);
     }
 
     function clearFieldErrors() {
@@ -1505,6 +1651,10 @@
         if (fileInputEl) fileInputEl.click();
         return;
       }
+      if (action === 'clear-file') {
+        clearPendingFile();
+        return;
+      }
       if (action === 'rate') {
         state.rating = Number(actionBtn.getAttribute('data-rating') || 0);
         state.hoverRating = 0;
@@ -1554,7 +1704,7 @@
     if (fileInputEl) {
       fileInputEl.addEventListener('change', function () {
         var file = fileInputEl.files && fileInputEl.files[0];
-        if (file) sendAttachment(file);
+        if (file) queueAttachment(file);
         fileInputEl.value = '';
       });
     }
@@ -1600,10 +1750,13 @@
                   STR.you,
                   state.clientInitials,
                   formatTime(new Date(message.created_at || Date.now())),
-                  {
-                    id: message.id,
-                    receiptStatus: message.receipt_status || 'delivered',
-                  },
+                  Object.assign(
+                    {
+                      id: message.id,
+                      receiptStatus: message.receipt_status || 'delivered',
+                    },
+                    attachmentOptionsFromMessage(message),
+                  ),
                 );
                 return;
               }
@@ -1619,11 +1772,14 @@
                     : state.operatorShort,
                   message.speaker === 'bot' ? 'Б' : state.operatorInitials,
                   formatTime(new Date(message.created_at || Date.now())),
-                  {
-                    id: message.id,
-                    receiptStatus: message.receipt_status,
-                    quotedText: message.quoted_text,
-                  },
+                  Object.assign(
+                    {
+                      id: message.id,
+                      receiptStatus: message.receipt_status,
+                      quotedText: message.quoted_text,
+                    },
+                    attachmentOptionsFromMessage(message),
+                  ),
                 );
               }
             });
