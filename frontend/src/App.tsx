@@ -270,6 +270,7 @@ function App() {
             armRole={armRole}
             menuContext="picker"
             themeKind={chatThemeKind}
+            operatorName={viewerName}
           >
             <OperatorPicker allowTransfer={allowTransferView} />
           </ArmMenuHost>

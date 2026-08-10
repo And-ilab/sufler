@@ -17,7 +17,6 @@ import {
   markDialogRead,
   maskPhone,
   onlineChatArmWsUrl,
-  REPLY_TEMPLATES,
   sendOperatorMessage,
   slaToneFromSeconds,
   transferDialogRemote,
@@ -28,7 +27,11 @@ import {
   type ReceiptStatus,
   type SlaTone,
 } from '../api/onlineChatApi'
-import { operatorsApi, type ChatOperator } from '../api/managementApi'
+import {
+  getInternalUnreadCount,
+  operatorsApi,
+  type ChatOperator,
+} from '../api/managementApi'
 import {
   Button,
   Callout,
@@ -48,6 +51,8 @@ import {
   Text,
   TextArea,
 } from './primitives'
+import { ArmModulesHost, isArmWorkspaceModule, loadReplyTemplates } from './modules'
+import type { ArmModuleId } from './modules'
 
 const CANVAS_MOCKUP_VERSION = 'v1.4.74'
 
@@ -228,7 +233,7 @@ function OperatorStatusPill({
   );
 }
 type ArmView = "active" | "colleague";
-type ArmStatsTab =
+export type ArmStatsTab =
   | "dialogs"
   | "history"
   | "stats"
@@ -2652,6 +2657,7 @@ export function ArmOverlayMenu({
   activeId,
   onSelect,
   onClose,
+  badges,
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
@@ -2661,6 +2667,7 @@ export function ArmOverlayMenu({
   activeId: ArmStatsTab;
   onSelect: (id: ArmStatsTab) => void;
   onClose: () => void;
+  badges?: Partial<Record<ArmStatsTab, number>>;
 }): JSX.Element {
   const items = armMenuItemsForRole(armRole, menuContext);
   return (
@@ -2759,6 +2766,7 @@ export function ArmOverlayMenu({
         >
           {items.map((item) => {
             const active = activeId === item.id;
+            const badge = badges?.[item.id] ?? 0;
             return (
               <button
                 key={item.id}
@@ -2782,7 +2790,39 @@ export function ArmOverlayMenu({
                   transition: "background 0.15s ease, border-color 0.15s ease",
                 }}
               >
-                <span style={{ fontSize: 14, fontWeight: 700 }}>{item.label}</span>
+                <span
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    width: "100%",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span>{item.label}</span>
+                  {badge > 0 ? (
+                    <span
+                      aria-label={`Непрочитано: ${badge}`}
+                      style={{
+                        minWidth: 20,
+                        height: 20,
+                        padding: "0 6px",
+                        borderRadius: 999,
+                        background: scheme.badge,
+                        color: "#fff",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        display: "inline-grid",
+                        placeItems: "center",
+                        lineHeight: 1,
+                      }}
+                    >
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  ) : null}
+                </span>
                 <span style={{ fontSize: 11, color: t.text.secondary, lineHeight: 1.35 }}>{item.hint}</span>
               </button>
             );
@@ -2862,6 +2902,7 @@ export function ArmOperatorView({
   const [clientDraft, setClientDraft] = useState("");
   const [quoteMessage, setQuoteMessage] = useState<OnlineChatMessage | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [composerTemplates, setComposerTemplates] = useState(() => loadReplyTemplates());
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [transferOperatorName, setTransferOperatorName] = useState("");
   const [editMessageTarget, setEditMessageTarget] = useState<OnlineChatMessage | null>(null);
@@ -3010,8 +3051,16 @@ export function ArmOperatorView({
               messages?: OnlineChatMessage[];
               speaker?: string;
               text?: string;
+              unread_count?: number;
+              recipient_name?: string;
+              recipient_id?: string;
             };
           };
+          if (data.type === "internal.message.created" || data.type === "internal.messages.read") {
+            void getInternalUnreadCount(operatorName)
+              .then((result) => setInternalUnread(result.unread_count))
+              .catch(() => undefined);
+          }
           const dialogId = data.payload?.dialog_id;
           if (data.type === "typing.start") {
             if (
@@ -3092,7 +3141,7 @@ export function ArmOperatorView({
       window.clearInterval(timer);
       socket?.close();
     };
-  }, [refreshLiveQueues]);
+  }, [refreshLiveQueues, operatorName]);
 
   const liveMode = queuesReady;
 
@@ -3268,6 +3317,7 @@ export function ArmOperatorView({
     [onStatsDrawerOpenChange],
   );
   const [statsTab, setStatsTab] = useState<ArmStatsTab>("dialogs");
+  const [internalUnread, setInternalUnread] = useState(0);
 
   useEffect(() => {
     if (canvasBuild !== CANVAS_MOCKUP_VERSION) {
@@ -3276,6 +3326,23 @@ export function ArmOperatorView({
       setStatsTab("dialogs");
     }
   }, [canvasBuild, setCanvasBuild, setStatsDrawerOpen, setStatsTab]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const pollUnread = () => {
+      void getInternalUnreadCount(operatorName)
+        .then((result) => {
+          if (!cancelled) setInternalUnread(result.unread_count);
+        })
+        .catch(() => undefined);
+    };
+    pollUnread();
+    const timer = window.setInterval(pollUnread, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [operatorName]);
 
   useEffect(() => {
     const allowed = armMenuItemsForRole(armRole, menuContext).some((item) => item.id === statsTab);
@@ -3735,17 +3802,30 @@ export function ArmOperatorView({
           armRole={armRole}
           menuContext={menuContext}
           activeId={statsTab}
+          badges={{ internal: internalUnread }}
           onSelect={(id) => {
             if (id === "employees") {
               window.location.assign("/online-chat");
               return;
             }
             setStatsTab(id);
-            setComposerNotice(`Раздел «${ARM_MENU_ITEMS.find((item) => item.id === id)?.label ?? id}» пока недоступен.`);
             setStatsDrawerOpen(false);
           }}
           onClose={() => setStatsDrawerOpen(false)}
         />
+        {isArmWorkspaceModule(statsTab) ? (
+          <ArmModulesHost
+            tab={statsTab as ArmModuleId}
+            t={t}
+            scheme={scheme}
+            operatorName={operatorName}
+            armRole={armRole}
+            onBack={() => setStatsTab("dialogs")}
+            onNavigate={(id) => setStatsTab(id as ArmStatsTab)}
+            onUnreadChange={setInternalUnread}
+          />
+        ) : (
+        <>
         {/* Queues */}
         {leftPanelCollapsed ? (
           <div
@@ -4237,7 +4317,10 @@ export function ArmOperatorView({
               <Button
                 variant={showTemplates ? "primary" : "secondary"}
                 disabled={composerLocked}
-                onClick={() => setShowTemplates((open) => !open)}
+                onClick={() => {
+                  setComposerTemplates(loadReplyTemplates());
+                  setShowTemplates((open) => !open);
+                }}
               >
                 Шаблоны
               </Button>
@@ -4277,7 +4360,7 @@ export function ArmOperatorView({
                         Шаблоны ответов
                       </Text>
                       <Text style={{ fontSize: 11, color: t.text.tertiary, marginTop: 2 }}>
-                        Вставка в поле ответа одним кликом
+                        Вставка в поле ответа · конструктор в меню АРМ
                       </Text>
                     </div>
                     <Button
@@ -4290,13 +4373,16 @@ export function ArmOperatorView({
                     </Button>
                   </div>
                   <Stack gap={4}>
-                    {REPLY_TEMPLATES.map((template, index) => (
+                    {composerTemplates.map((template, index) => (
                       <button
-                        key={template}
+                        key={template.id}
                         type="button"
                         role="option"
                         onClick={() => {
-                          onReplyChange(template);
+                          const text = template.body
+                            .replaceAll("{{client_name}}", active?.name ?? "клиент")
+                            .replaceAll("{{operator_name}}", operatorName);
+                          onReplyChange(text);
                           setShowTemplates(false);
                         }}
                         style={{
@@ -4342,7 +4428,13 @@ export function ArmOperatorView({
                         >
                           {index + 1}
                         </span>
-                        <span style={{ minWidth: 0 }}>{template}</span>
+                        <span style={{ minWidth: 0 }}>
+                          <span style={{ fontWeight: 600, display: "block", marginBottom: 2 }}>
+                            {template.favorite ? "★ " : ""}
+                            {template.title}
+                          </span>
+                          {template.body}
+                        </span>
                       </button>
                     ))}
                   </Stack>
@@ -4598,8 +4690,11 @@ export function ArmOperatorView({
           </div>
           </div>
         </div>
+        </>
+        )}
       </div>
 
+      {!isArmWorkspaceModule(statsTab) ? (
       <div
         style={{
           padding: "6px 16px",
@@ -4612,6 +4707,7 @@ export function ArmOperatorView({
       >
         Ctrl+Enter — отправить · Ctrl+K — шаблоны · F2 — следующий диалог
       </div>
+      ) : null}
 
       {closeDialogConfirmOpen ? (
         <ConfirmDialog

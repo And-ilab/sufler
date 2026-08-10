@@ -15,6 +15,7 @@ export type OnlineChatDialog = {
   placement: string
   channel: string
   status: DialogStatus
+  outcome?: string
   initiated_by?: 'client' | 'operator'
   client_first_name: string
   client_last_name: string

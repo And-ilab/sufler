@@ -141,9 +141,23 @@ export interface AnalyticsResponse {
 export interface InternalMessage {
   id: EntityId
   text: string
+  sender_id?: EntityId
+  sender_name?: string
+  recipient_id?: EntityId
+  recipient_name?: string
   sender?: string
   recipient?: string
+  dialog_id?: EntityId | null
+  read_at?: string | null
   created_at?: string
+}
+
+export interface InternalMessagesResponse {
+  ok: boolean
+  items: InternalMessage[]
+  count: number
+  unread_count?: number
+  operator_id?: string | null
 }
 
 export interface SeedRequest {
@@ -254,15 +268,53 @@ export async function getAnalytics(period: 'day' | 'week' | 'month'): Promise<An
   return request<AnalyticsResponse>(`analytics/?period=${period}`)
 }
 
-export async function listInternalMessages(): Promise<InternalMessage[]> {
-  return listFrom<InternalMessage>(await request<unknown>('internal-messages/'))
+export async function listInternalMessages(params?: {
+  operatorId?: EntityId
+  operatorName?: string
+  peerId?: EntityId
+}): Promise<InternalMessagesResponse> {
+  const query = new URLSearchParams()
+  if (params?.operatorId) query.set('operator_id', String(params.operatorId))
+  if (params?.operatorName) query.set('operator_name', params.operatorName)
+  if (params?.peerId) query.set('peer_id', String(params.peerId))
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  return request<InternalMessagesResponse>(`internal-messages/${suffix}`)
 }
 
-export async function sendInternalMessage(payload: Partial<InternalMessage>): Promise<InternalMessage> {
+export async function sendInternalMessage(payload: {
+  text: string
+  sender_id?: EntityId
+  sender_name?: string
+  recipient_id?: EntityId
+  recipient_name?: string
+  dialog_id?: EntityId
+}): Promise<InternalMessage> {
   return itemFrom<InternalMessage>(
     await request<unknown>('internal-messages/', { method: 'POST', ...json(payload) }),
     'message',
   )
+}
+
+export async function markInternalMessagesRead(payload: {
+  operator_id?: EntityId
+  operator_name?: string
+  peer_id?: EntityId
+}): Promise<{ ok: boolean; updated: number; unread_count: number }> {
+  return request<{ ok: boolean; updated: number; unread_count: number }>(
+    'internal-messages/read/',
+    { method: 'POST', ...json(payload) },
+  )
+}
+
+export async function getInternalUnreadCount(operatorName: string): Promise<{
+  unread_count: number
+  operator_id: string | null
+}> {
+  const body = await listInternalMessages({ operatorName })
+  return {
+    unread_count: body.unread_count ?? 0,
+    operator_id: body.operator_id ?? null,
+  }
 }
 
 export async function runRouting(): Promise<JsonObject> {

@@ -45,9 +45,11 @@ from online_chat.routing_services import (
     update_operator_presence,
 )
 from online_chat.services import (
+    ARM_GROUP,
     accept_dialog,
     append_message,
     block_dialog,
+    broadcast,
     close_dialog,
     create_dialog_with_message,
     delete_message,
@@ -1434,38 +1436,157 @@ def client_history(request: HttpRequest) -> HttpResponse:
     )
 
 
+def _serialize_internal_message(item: InternalMessage) -> dict[str, Any]:
+    return {
+        "id": str(item.id),
+        "sender_id": str(item.sender_id),
+        "sender_name": item.sender.display_name,
+        "recipient_id": str(item.recipient_id),
+        "recipient_name": item.recipient.display_name,
+        "dialog_id": str(item.dialog_id) if item.dialog_id else None,
+        "text": item.text,
+        "read_at": item.read_at.isoformat() if item.read_at else None,
+        "created_at": item.created_at.isoformat(),
+    }
+
+
+def _resolve_operator_profile(
+    data: Mapping[str, Any],
+    *,
+    id_key: str,
+    name_key: str,
+) -> OperatorProfile:
+    operator_id = data.get(id_key)
+    if operator_id:
+        return get_object_or_404(OperatorProfile, pk=operator_id)
+    name = _str_field(data, name_key)
+    if not name:
+        raise OnlineChatApiError(f"{id_key} or {name_key} is required")
+    profile = OperatorProfile.objects.filter(display_name=name, is_active=True).first()
+    if profile:
+        return profile
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-").lower() or "operator"
+    return OperatorProfile.objects.create(
+        external_id=f"arm-{slug}-{uuid.uuid4().hex[:8]}",
+        display_name=name,
+        presence=OperatorProfile.Presence.ONLINE,
+        role=OperatorProfile.Role.OPERATOR,
+        is_active=True,
+    )
+
+
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
 @_chat_permissions(PERM_SUFLER_CHAT, PERM_CC_ADMIN)
 def internal_messages_collection(request: HttpRequest) -> HttpResponse:
     if request.method == "GET":
         qs = InternalMessage.objects.select_related("sender", "recipient")
-        if request.GET.get("operator_id"):
-            operator_id = request.GET["operator_id"]
+        operator_id = (request.GET.get("operator_id") or "").strip()
+        peer_id = (request.GET.get("peer_id") or "").strip()
+        operator_name = (request.GET.get("operator_name") or "").strip()
+        if operator_name and not operator_id:
+            profile = OperatorProfile.objects.filter(
+                display_name=operator_name, is_active=True
+            ).first()
+            if profile:
+                operator_id = str(profile.id)
+        # Scope to an operator when name/id was provided (avoid leaking all threads).
+        if (operator_name or request.GET.get("operator_id")) and not operator_id:
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "items": [],
+                    "count": 0,
+                    "unread_count": 0,
+                    "operator_id": None,
+                }
+            )
+        if operator_id:
             qs = qs.filter(Q(sender_id=operator_id) | Q(recipient_id=operator_id))
-        items = [{
-            "id": str(item.id), "sender_id": str(item.sender_id),
-            "sender_name": item.sender.display_name, "recipient_id": str(item.recipient_id),
-            "recipient_name": item.recipient.display_name,
-            "dialog_id": str(item.dialog_id) if item.dialog_id else None, "text": item.text,
-            "read_at": item.read_at.isoformat() if item.read_at else None,
-            "created_at": item.created_at.isoformat(),
-        } for item in qs[:500]]
-        return JsonResponse({"ok": True, "items": items, "count": len(items)})
+        if peer_id and operator_id:
+            qs = qs.filter(
+                (Q(sender_id=operator_id) & Q(recipient_id=peer_id))
+                | (Q(sender_id=peer_id) & Q(recipient_id=operator_id))
+            )
+        elif peer_id:
+            qs = qs.filter(Q(sender_id=peer_id) | Q(recipient_id=peer_id))
+        # Chronological for chat UI (model default is newest-first).
+        items = [
+            _serialize_internal_message(item)
+            for item in qs.order_by("created_at")[:500]
+        ]
+        unread_count = 0
+        if operator_id:
+            unread_count = InternalMessage.objects.filter(
+                recipient_id=operator_id, read_at__isnull=True
+            ).count()
+        return JsonResponse(
+            {
+                "ok": True,
+                "items": items,
+                "count": len(items),
+                "unread_count": unread_count,
+                "operator_id": operator_id or None,
+            }
+        )
     try:
         data = _json_body(request)
         text = _str_field(data, "text")
         if not text:
             raise OnlineChatApiError("text is required")
+        sender = _resolve_operator_profile(data, id_key="sender_id", name_key="sender_name")
+        recipient = _resolve_operator_profile(
+            data, id_key="recipient_id", name_key="recipient_name"
+        )
+        if sender.id == recipient.id:
+            raise OnlineChatApiError("cannot send message to yourself")
         item = InternalMessage.objects.create(
-            sender=get_object_or_404(OperatorProfile, pk=data.get("sender_id")),
-            recipient=get_object_or_404(OperatorProfile, pk=data.get("recipient_id")),
+            sender=sender,
+            recipient=recipient,
             dialog=(
                 get_object_or_404(Dialog, pk=data["dialog_id"]) if data.get("dialog_id") else None
             ),
             text=text,
         )
-        return JsonResponse({"ok": True, "message": {"id": str(item.id), "text": item.text}}, status=201)
+        payload = _serialize_internal_message(item)
+        broadcast(ARM_GROUP, "internal.message.created", payload)
+        return JsonResponse({"ok": True, "message": payload}, status=201)
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@_chat_permissions(PERM_SUFLER_CHAT, PERM_CC_ADMIN)
+def internal_messages_mark_read(request: HttpRequest) -> HttpResponse:
+    try:
+        from django.utils import timezone
+
+        data = _json_body(request)
+        recipient = _resolve_operator_profile(
+            data, id_key="operator_id", name_key="operator_name"
+        )
+        qs = InternalMessage.objects.filter(recipient=recipient, read_at__isnull=True)
+        peer_id = data.get("peer_id")
+        if peer_id:
+            qs = qs.filter(sender_id=peer_id)
+        updated = qs.update(read_at=timezone.now())
+        unread_count = InternalMessage.objects.filter(
+            recipient=recipient, read_at__isnull=True
+        ).count()
+        broadcast(
+            ARM_GROUP,
+            "internal.messages.read",
+            {
+                "operator_id": str(recipient.id),
+                "peer_id": str(peer_id) if peer_id else None,
+                "updated": updated,
+                "unread_count": unread_count,
+            },
+        )
+        return JsonResponse(
+            {"ok": True, "updated": updated, "unread_count": unread_count}
+        )
     except OnlineChatApiError as exc:
         return _error(exc)
 
