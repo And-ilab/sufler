@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import {
   ArmOperatorView,
   CLOSE_TOPICS,
@@ -6,28 +6,79 @@ import {
   type OperatorPresence,
 } from './arm/ArmOperatorView'
 import { ARM_THEME_DARK, ARM_THEME_LIGHT, type ThemeKind } from './arm/theme'
+import {
+  operatorsApi,
+  type OperatorPresence as PersistedPresence,
+} from './api/managementApi'
 import './ChatArmApp.css'
 
 export interface ChatArmAppProps {
   operatorName?: string
   demoMode?: boolean
   initialPresence?: OperatorPresence
+  themeKind?: ThemeKind
+  statsDrawerOpen?: boolean
+  onStatsDrawerOpenChange?: (open: boolean) => void
 }
 
 /** Emerald ARM: light mockup by default, optional dark toggle. */
 export function ChatArmApp({
   initialPresence = 'online',
+  operatorName = 'Иванов И.И.',
+  themeKind = 'light',
+  statsDrawerOpen,
+  onStatsDrawerOpenChange,
 }: ChatArmAppProps) {
-  const [themeKind, setThemeKind] = useState<ThemeKind>('light')
   const t = themeKind === 'light' ? ARM_THEME_LIGHT : ARM_THEME_DARK
   const scheme = useMemo(() => getSchemePalette(t, 'belarusbank_emerald'), [t])
 
   const [selectedQueue, setSelectedQueue] = useState('1')
   const [reply, setReply] = useState('')
+  const [suflerSuggestionText, setSuflerSuggestionText] = useState('')
   const [toast, setToast] = useState<string | null>(null)
   const [presence, setPresence] = useState<OperatorPresence>(initialPresence)
   const [viewMode, setViewMode] = useState<'active' | 'colleague'>('active')
   const [closeTopic, setCloseTopic] = useState<string>(CLOSE_TOPICS[0])
+
+  useEffect(() => {
+    void operatorsApi.list().then((operators) => {
+      const profile = operators.find((item) => item.name === operatorName)
+      if (!profile) return
+      const supported = new Set<OperatorPresence>([
+        'online',
+        'break',
+        'lunch',
+        'training',
+        'meeting',
+        'offline',
+      ])
+      if (supported.has(profile.presence as OperatorPresence)) {
+        setPresence(profile.presence as OperatorPresence)
+      } else if (profile.presence === 'tech_issue') {
+        setPresence('tech_break')
+      } else if (profile.presence === 'busy') {
+        setPresence('offline_queue')
+      }
+    }).catch(() => undefined)
+  }, [operatorName])
+
+  const persistPresence = (next: OperatorPresence) => {
+    setPresence(next)
+    const mapped: PersistedPresence =
+      next === 'tech_break'
+        ? 'tech_issue'
+        : next === 'offline_queue'
+          ? 'busy'
+          : next === 'invisible'
+            ? 'offline'
+            : next
+    void operatorsApi.list()
+      .then((operators) => {
+        const profile = operators.find((item) => item.name === operatorName)
+        return profile ? operatorsApi.setPresence(profile.id, mapped) : undefined
+      })
+      .catch(() => setToast('Статус сохранён только локально: профиль оператора не найден.'))
+  }
 
   const cssVars = {
     '--arm-accent': scheme.accent,
@@ -74,22 +125,27 @@ export function ChatArmApp({
           selectedQueue={selectedQueue}
           onSelectQueue={setSelectedQueue}
           reply={reply}
-          onReplyChange={setReply}
+          suflerSuggestionText={suflerSuggestionText}
+          onReplyChange={(value) => {
+            setReply(value)
+            if (!value) setSuflerSuggestionText('')
+          }}
           onInsertSufler={(answerText) => {
             setReply(answerText)
+            setSuflerSuggestionText(answerText)
             setToast('Подсказка суфлёра вставлена в черновик ответа.')
           }}
           toast={toast}
           onClearToast={() => setToast(null)}
           presence={presence}
-          onPresenceChange={setPresence}
+          onPresenceChange={persistPresence}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           closeTopic={closeTopic}
           onCloseTopicChange={setCloseTopic}
-          onToggleTheme={() =>
-            setThemeKind((kind) => (kind === 'light' ? 'dark' : 'light'))
-          }
+          operatorName={operatorName}
+          statsDrawerOpen={statsDrawerOpen}
+          onStatsDrawerOpenChange={onStatsDrawerOpenChange}
         />
       </div>
     </main>

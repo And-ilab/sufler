@@ -8,10 +8,7 @@ import {
   type ToolId,
   type ToolRunState,
 } from './types'
-import {
-  ensureDevSession,
-  resetDevSessionCache,
-} from '../auth/ensureDevSession'
+import { ensureDevSession } from '../auth/ensureDevSession'
 import {
   fetchAssistantKnowledgeBases,
   type AssistantKbOption,

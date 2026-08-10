@@ -1,14 +1,20 @@
-"""Mock Telegram / Viber channel webhooks (FR-CC-09 / UC-A5)."""
+"""Inbound adapters for widget, messengers, social networks, and API."""
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import uuid
 from typing import Any, Mapping
 
-from django.http import HttpRequest, JsonResponse
+from django.conf import settings
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+
+from online_chat.models import Dialog, DialogMessage
+from online_chat.services import append_message, create_dialog_with_message
 
 # In-memory inbox for local demos / CHAT-T-12 style checks.
 _INBOX: list[dict[str, Any]] = []
@@ -43,8 +49,47 @@ def _store(
     text: str,
     raw: Mapping[str, Any],
 ) -> dict[str, Any]:
+    existing = (
+        Dialog.objects.filter(
+            channel=channel,
+            client_external_id=external_user_id,
+            status__in=(Dialog.Status.WAITING, Dialog.Status.ACTIVE),
+        )
+        .order_by("-updated_at")
+        .first()
+    )
+    external_message_id = str(
+        raw.get("update_id")
+        or raw.get("message_token")
+        or raw.get("event_id")
+        or ""
+    )
+    if existing:
+        message = append_message(
+            existing,
+            speaker=DialogMessage.Speaker.CLIENT,
+            text=text,
+            external_message_id=external_message_id,
+        )
+        dialog = existing
+    else:
+        dialog, message = create_dialog_with_message(
+            text=text,
+            channel=channel,
+            widget_id="",
+            placement=channel,
+            client_first_name=str(raw.get("client_name") or channel.title()),
+            client_external_id=external_user_id,
+            entry_url=str(raw.get("page_url") or ""),
+            locale=str(raw.get("locale") or "ru"),
+        )
+        if external_message_id:
+            message.external_message_id = external_message_id
+            message.save(update_fields=["external_message_id"])
     event = {
         "id": str(uuid.uuid4()),
+        "dialog_id": str(dialog.id),
+        "message_id": str(message.id),
         "channel": channel,
         "external_user_id": external_user_id,
         "text": text,
@@ -121,6 +166,66 @@ def handle_viber_event(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_vk_event(payload: Mapping[str, Any]) -> dict[str, Any]:
+    event_type = str(payload.get("type") or "")
+    if event_type != "message_new":
+        return {"ok": True, "ignored": True, "type": event_type}
+    obj = payload.get("object") or {}
+    message = obj.get("message") if isinstance(obj, Mapping) else {}
+    if not isinstance(message, Mapping):
+        raise ChannelWebhookError("vk object.message is required")
+    text = str(message.get("text") or "").strip()
+    user_id = str(message.get("peer_id") or message.get("from_id") or "")
+    if not text or not user_id:
+        raise ChannelWebhookError("vk message text and sender are required")
+    event = _store(
+        channel="vk",
+        external_user_id=user_id,
+        text=text,
+        placement="vk",
+        raw={**dict(payload), "event_id": payload.get("event_id")},
+    )
+    return {"ok": True, "channel": "vk", "event": event, "routed_to": "arm_queue"}
+
+
+def handle_ok_event(payload: Mapping[str, Any]) -> dict[str, Any]:
+    message = payload.get("message") or payload.get("object") or payload
+    if not isinstance(message, Mapping):
+        raise ChannelWebhookError("ok message object is required")
+    text = str(message.get("text") or message.get("message") or "").strip()
+    user_id = str(
+        message.get("sender_id")
+        or message.get("user_id")
+        or message.get("from")
+        or ""
+    )
+    if not text or not user_id:
+        raise ChannelWebhookError("ok message text and sender are required")
+    event = _store(
+        channel="ok",
+        external_user_id=user_id,
+        text=text,
+        placement="ok",
+        raw=dict(payload),
+    )
+    return {"ok": True, "channel": "ok", "event": event, "routed_to": "arm_queue"}
+
+
+def handle_api_event(payload: Mapping[str, Any]) -> dict[str, Any]:
+    text = str(payload.get("text") or "").strip()
+    client_id = str(payload.get("client_external_id") or payload.get("client_id") or "")
+    if not text or not client_id:
+        raise ChannelWebhookError("text and client_external_id are required")
+    event = _store(
+        channel="api",
+        external_user_id=client_id,
+        text=text,
+        placement=str(payload.get("placement") or "api"),
+        raw=dict(payload),
+    )
+    return {"ok": True, "channel": "api", "event": event, "routed_to": "arm_queue"}
+
+
 def handle_widget_message(
     widget_id: str,
     payload: Mapping[str, Any],
@@ -131,9 +236,14 @@ def handle_widget_message(
     if not widget_id.strip():
         raise ChannelWebhookError("widget_id is required")
     placement = str(payload.get("placement") or "website")
+    external_user_id = str(
+        payload.get("client_external_id")
+        or payload.get("session_id")
+        or uuid.uuid4()
+    )
     event = _store(
         channel="widget",
-        external_user_id=widget_id,
+        external_user_id=external_user_id,
         text=text.strip(),
         raw={**dict(payload), "widget_id": widget_id, "placement": placement},
     )
@@ -172,6 +282,57 @@ def telegram_webhook(request: HttpRequest) -> JsonResponse:
 def viber_webhook(request: HttpRequest) -> JsonResponse:
     try:
         return JsonResponse(handle_viber_event(_json_body(request)))
+    except ChannelWebhookError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def vk_webhook(request: HttpRequest) -> HttpResponse:
+    try:
+        payload = _json_body(request)
+        expected_secret = getattr(settings, "VK_WEBHOOK_SECRET", "")
+        if expected_secret and not hmac.compare_digest(
+            str(payload.get("secret") or ""),
+            expected_secret,
+        ):
+            return JsonResponse({"ok": False, "detail": "invalid secret"}, status=403)
+        if payload.get("type") == "confirmation":
+            confirmation = getattr(settings, "VK_CONFIRMATION_CODE", "")
+            return HttpResponse(confirmation or "ok", content_type="text/plain")
+        return JsonResponse(handle_vk_event(payload))
+    except ChannelWebhookError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def ok_webhook(request: HttpRequest) -> JsonResponse:
+    expected_secret = getattr(settings, "OK_WEBHOOK_SECRET", "")
+    supplied_secret = request.headers.get("X-Webhook-Secret", "")
+    if expected_secret and not hmac.compare_digest(supplied_secret, expected_secret):
+        return JsonResponse({"ok": False, "detail": "invalid secret"}, status=403)
+    try:
+        return JsonResponse(handle_ok_event(_json_body(request)))
+    except ChannelWebhookError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_webhook(request: HttpRequest) -> JsonResponse:
+    secret = getattr(settings, "ONLINE_CHAT_API_CHANNEL_SIGNING_SECRET", "")
+    signature = request.headers.get("X-Online-Chat-Signature", "")
+    if secret:
+        expected = hmac.new(
+            secret.encode(),
+            request.body,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            return JsonResponse({"ok": False, "detail": "invalid signature"}, status=403)
+    try:
+        return JsonResponse(handle_api_event(_json_body(request)))
     except ChannelWebhookError as exc:
         return _error(exc)
 

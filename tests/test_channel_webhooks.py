@@ -16,6 +16,7 @@ django.setup()
 from django.test import Client, TestCase  # noqa: E402
 
 from integrations.channels.webhooks import reset_inbox  # noqa: E402
+from online_chat.models import Dialog  # noqa: E402
 
 
 class ChannelWebhooksTest(TestCase):
@@ -92,3 +93,62 @@ class ChannelWebhooksTest(TestCase):
         inbox = self.client.get("/api/v1/channels/inbox/")
         self.assertEqual(inbox.status_code, 200)
         self.assertGreaterEqual(inbox.json()["count"], 1)
+
+    def test_vk_webhook_routes_message_to_dialog(self):
+        response = self.client.post(
+            "/api/v1/channels/vk/webhook/",
+            data=json.dumps(
+                {
+                    "type": "message_new",
+                    "event_id": "vk-event-1",
+                    "object": {
+                        "message": {
+                            "peer_id": 777,
+                            "text": "Вопрос из VK",
+                        }
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            Dialog.objects.filter(channel="vk", client_external_id="777").exists()
+        )
+
+    def test_ok_webhook_routes_message_to_dialog(self):
+        response = self.client.post(
+            "/api/v1/channels/ok/webhook/",
+            data=json.dumps(
+                {
+                    "message": {
+                        "sender_id": "ok-42",
+                        "text": "Вопрос из OK",
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            Dialog.objects.filter(channel="ok", client_external_id="ok-42").exists()
+        )
+
+    def test_signed_api_webhook_routes_message_to_dialog(self):
+        response = self.client.post(
+            "/api/v1/channels/api/webhook/",
+            data=json.dumps(
+                {
+                    "client_external_id": "partner-client-1",
+                    "text": "Вопрос из API",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            Dialog.objects.filter(
+                channel="api",
+                client_external_id="partner-client-1",
+            ).exists()
+        )

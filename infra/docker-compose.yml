@@ -115,6 +115,29 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ONLINE_CHAT_BUCKET: ${MINIO_ONLINE_CHAT_BUCKET:-sufler-online-chat}
+      ONLINE_CHAT_OBJECT_STORE_BACKEND: ${ONLINE_CHAT_OBJECT_STORE_BACKEND:-auto}
+      ONLINE_CHAT_MAX_UPLOAD_BYTES: ${ONLINE_CHAT_MAX_UPLOAD_BYTES:-10485760}
+      ONLINE_CHAT_ALLOWED_UPLOAD_TYPES: ${ONLINE_CHAT_ALLOWED_UPLOAD_TYPES:-image/jpeg,image/png,application/pdf,text/plain}
+      ONLINE_CHAT_CHANNEL_HTTP_TIMEOUT_SECONDS: ${ONLINE_CHAT_CHANNEL_HTTP_TIMEOUT_SECONDS:-10}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      VIBER_AUTH_TOKEN: ${VIBER_AUTH_TOKEN:-}
+      VK_ACCESS_TOKEN: ${VK_ACCESS_TOKEN:-}
+      VK_WEBHOOK_SECRET: ${VK_WEBHOOK_SECRET:-}
+      VK_CONFIRMATION_CODE: ${VK_CONFIRMATION_CODE:-}
+      OK_ACCESS_TOKEN: ${OK_ACCESS_TOKEN:-}
+      OK_WEBHOOK_SECRET: ${OK_WEBHOOK_SECRET:-}
+      ONLINE_CHAT_API_CHANNEL_SIGNING_SECRET: ${ONLINE_CHAT_API_CHANNEL_SIGNING_SECRET:-}
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.smtp.EmailBackend}
+      EMAIL_HOST: ${EMAIL_HOST:-mailpit}
+      EMAIL_PORT: ${EMAIL_PORT:-1025}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-false}
+      EMAIL_USE_SSL: ${EMAIL_USE_SSL:-false}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-online-chat@belarusbank.by}
+      ONLINE_CHAT_FROM_EMAIL: ${ONLINE_CHAT_FROM_EMAIL:-online-chat@belarusbank.by}
     command:
       - sh
       - -c
@@ -122,7 +145,9 @@ services:
     ports:
       - "${BACKEND_PORT_HOST:-8001}:8000"
     volumes:
+      - ../backend:/app
       - audit_data:/var/log/sufler
+      - mail_data:/app/var/mail
     depends_on:
       postgres:
         condition: service_healthy
@@ -130,6 +155,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     healthcheck:
       test:
         [
@@ -142,6 +169,22 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_UI_PORT_HOST:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT_HOST:-1025}:1025"
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8025/api/v1/info"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   celery-worker:
     build:
@@ -201,6 +244,7 @@ services:
       MINIO_ENDPOINT: http://minio:9000
     command: celery -A sufler worker --loglevel=info --hostname=worker@%h
     volumes:
+      - ../backend:/app
       - audit_data:/var/log/sufler
     depends_on:
       postgres:
@@ -222,6 +266,36 @@ services:
       retries: 5
       start_period: 30s
 
+  celery-beat:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      AUTH_BACKEND: ${AUTH_BACKEND:-${AUTH_MODE:-mock_ldap}}
+      AUTH_MODE: ${AUTH_MODE:-mock_ldap}
+      POSTGRES_DB: ${POSTGRES_DB:-sufler}
+      POSTGRES_USER: ${POSTGRES_USER:-sufler}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      ONLINE_CHAT_LOST_TIMEOUT_SECONDS: ${ONLINE_CHAT_LOST_TIMEOUT_SECONDS:-600}
+    command: celery -A sufler beat --loglevel=info
+    volumes:
+      - ../backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
   frontend:
     build:
       context: ../frontend
@@ -229,7 +303,7 @@ services:
     restart: unless-stopped
     environment:
       VITE_API_PROXY_TARGET: http://backend:8000
-      VITE_DEV_RBAC_ROLES: ${VITE_DEV_RBAC_ROLES:-contact_center_telephony_operator,ai_hub_admin}
+      VITE_DEV_RBAC_ROLES: ${VITE_DEV_RBAC_ROLES:-contact_center_online_chat_operator,contact_center_supervisor,contact_center_module_administrator,ai_hub_admin}
       # Must match AUTH_MOCK_LDAP_DEFAULT_PASSWORD so Admin/KB DEV auto-login works in browser
       VITE_DEV_AUTH_USER: ${VITE_DEV_AUTH_USER:-dev-role-01}
       VITE_DEV_AUTH_PASSWORD: ${AUTH_MOCK_LDAP_DEFAULT_PASSWORD:-dev-only-password}
@@ -251,4 +325,5 @@ volumes:
   redis_data:
   minio_data:
   audit_data:
+  mail_data:
   frontend_node_modules:

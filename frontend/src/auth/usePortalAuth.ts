@@ -14,14 +14,22 @@ export interface PortalAuthState {
   tabs: string[]
 }
 
+const DEFAULT_DEV_ROLES = [
+  'software_administrator',
+  'contact_center_analyst',
+  'contact_center_online_chat_operator',
+  'contact_center_module_administrator',
+]
+
 function devRoles(): string[] {
-  if (!import.meta.env.DEV) {
+  if (!import.meta.env.DEV && import.meta.env.VITE_SUFLER_DEMO !== '1') {
     return []
   }
-  return String(import.meta.env.VITE_DEV_RBAC_ROLES ?? '')
+  const configured = String(import.meta.env.VITE_DEV_RBAC_ROLES ?? '')
     .split(',')
     .map((role) => role.trim())
     .filter(Boolean)
+  return configured.length ? configured : DEFAULT_DEV_ROLES
 }
 
 export function usePortalAuth(): PortalAuthState {

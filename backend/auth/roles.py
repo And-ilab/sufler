@@ -105,9 +105,10 @@ ROLE_DEFINITIONS = (
                 PERM_CC_ADMIN,
                 PERM_RBAC_ADMIN,
                 PERM_INTEGRATIONS_ADMIN,
+                PERM_CC_REPORTS,
             }
         ),
-        ("hub", "contact_center", "chat_queues", "rbac", "integrations"),
+        ("hub", "contact_center", "chat_queues", "rbac", "integrations", "cc_reports"),
         "BB_CC_Module_Admin",
     ),
     _role(
