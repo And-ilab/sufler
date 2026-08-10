@@ -1,10 +1,9 @@
-import { StatusBadge, Button } from '../../components'
-import { AsrQaScreen } from './AsrQaScreen'
 import { CcReportsScreen } from './CcReportsScreen'
-import './AsrQa.css'
-import './CcReports.css'
+import { LiveOpsScreen } from './LiveOpsScreen'
+import { AsrQaScreen } from './AsrQaScreen'
+import './ReportsTheme.css'
 
-export type ReportsSection = 'overview' | 'asr-qa'
+export type ReportsSection = 'overview' | 'live' | 'builder' | 'asr-qa'
 
 interface AiHubReportsAppProps {
   username?: string
@@ -14,61 +13,97 @@ interface AiHubReportsAppProps {
 function resolveSection(pathname: string, explicit?: ReportsSection): ReportsSection {
   if (explicit) return explicit
   if (pathname.includes('/asr')) return 'asr-qa'
+  if (pathname.includes('/live')) return 'live'
+  if (pathname.includes('/builder')) return 'builder'
   return 'overview'
 }
 
+const TABS: { id: ReportsSection; label: string; path: string; subtitle: string; title: string }[] = [
+  {
+    id: 'overview',
+    label: 'Аналитика',
+    path: '/ai-hub/reports',
+    title: 'Модуль «Отчётность» · аналитика КЦ',
+    subtitle: 'Таблица / круговая / столбчатая · экспорт xlsx/pdf',
+  },
+  {
+    id: 'live',
+    label: 'Оперативная панель',
+    path: '/ai-hub/reports/live',
+    title: 'Оперативная панель',
+    subtitle: 'Показатели в реальном времени',
+  },
+  {
+    id: 'builder',
+    label: 'Конструктор',
+    path: '/ai-hub/reports/builder',
+    title: 'Модуль «Отчётность» · аналитика КЦ',
+    subtitle: 'Конструктор отчётов · шаблоны и показатели',
+  },
+  {
+    id: 'asr-qa',
+    label: 'Записи разговоров',
+    path: '/ai-hub/reports/asr',
+    title: 'Записи разговоров',
+    subtitle: 'Каталог записей и транскриптов',
+  },
+]
+
 export function AiHubReportsApp({
-  username = '',
   section,
 }: AiHubReportsAppProps) {
   const active = resolveSection(window.location.pathname, section)
-  const isOverview = active === 'overview'
+  const tab = TABS.find((item) => item.id === active) || TABS[0]
 
   const go = (next: ReportsSection) => {
-    const path = next === 'asr-qa' ? '/ai-hub/reports/asr' : '/ai-hub/reports'
-    window.history.pushState({}, '', path)
-    window.location.assign(path)
+    const target = TABS.find((item) => item.id === next) || TABS[0]
+    window.location.assign(target.path)
   }
 
   return (
-    <main className="asr-qa-app" data-testid="reports-app">
-      <header className="asr-qa-app__header">
-        <div>
-          <p className="app-eyebrow">Отчётность · КЦ · II.6</p>
-          <h1>{isOverview ? 'Отчёты Контакт-центра' : 'QA записей ASR'}</h1>
-          <p className="app-muted">
-            {isOverview
-              ? 'FR-RPT-CC — таблицы аналитики, фильтры периода, экспорт CSV/XLSX и графики качества ASR.'
-              : 'FR-ASR-10 / UC-REP-CC-02 — каталог записей, аудио+транскрипт и учебные примеры.'}
-            {username ? ` Аналитик: ${username}.` : ''}
-          </p>
-        </div>
-        <div className="asr-qa-app__actions">
-          <StatusBadge status="info">cc.reports.view</StatusBadge>
-          <Button variant="ghost" onClick={() => window.location.assign('/')}>
-            На портал
-          </Button>
-        </div>
-      </header>
+    <main className="rpt-app" data-testid="reports-app" data-scheme="belarusbank_emerald">
+      <div className="rpt-frame">
+        <header className="rpt-header">
+          <div>
+            <h1>{tab.title}</h1>
+            <p className="rpt-header__sub">{tab.subtitle}</p>
+          </div>
+          <div className="rpt-header__actions">
+            <button
+              type="button"
+              className="rpt-btn"
+              onClick={() => window.location.assign('/online-chat')}
+            >
+              АРМ чата
+            </button>
+            <button
+              type="button"
+              className="rpt-btn"
+              onClick={() => window.location.assign('/')}
+            >
+              На портал
+            </button>
+          </div>
+        </header>
 
-      <nav className="asr-qa-app__tabs" aria-label="Разделы отчётности">
-        <button
-          type="button"
-          className={`asr-qa-app__tab${isOverview ? ' is-active' : ''}`}
-          onClick={() => go('overview')}
-        >
-          Аналитика КЦ
-        </button>
-        <button
-          type="button"
-          className={`asr-qa-app__tab${!isOverview ? ' is-active' : ''}`}
-          onClick={() => go('asr-qa')}
-        >
-          QA ASR
-        </button>
-      </nav>
+        <nav className="rpt-tabs" aria-label="Разделы">
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`rpt-tab${active === item.id ? ' is-active' : ''}`}
+              onClick={() => go(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
 
-      {isOverview ? <CcReportsScreen /> : <AsrQaScreen />}
+        {active === 'overview' ? <CcReportsScreen initialPanel="reports" /> : null}
+        {active === 'builder' ? <CcReportsScreen initialPanel="builder" /> : null}
+        {active === 'live' ? <LiveOpsScreen /> : null}
+        {active === 'asr-qa' ? <AsrQaScreen /> : null}
+      </div>
     </main>
   )
 }

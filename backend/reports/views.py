@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
-from typing import Mapping
+from functools import wraps
+from typing import Any, Callable, Mapping
 
+from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
 
-from auth.decorators import require_permissions
-from auth.roles import PERM_CC_REPORTS
+from auth.decorators import permission_denied_response
+from auth.roles import PERM_CC_REPORTS, has_permission
 from reports.asr_qa import (
     AsrQaError,
     build_silence_wav,
@@ -28,7 +30,34 @@ from reports.cc_analytics import (
     export_filename,
     parse_analytics_filters,
 )
+from reports.cc_catalog import (
+    build_report_payload,
+    list_builder_templates,
+    preview_builder,
+)
+from reports.cc_live import build_live_dashboard
+from reports.cc_pdf import build_pdf_export
 from reports.models import AsrDialogueSession
+
+View = Callable[..., HttpResponse]
+
+
+def require_cc_reports(view: View) -> View:
+    """PERM_CC_REPORTS; in DEBUG open the module for local SPA without RBAC friction."""
+
+    @wraps(view)
+    def wrapped(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
+        if has_permission(request.user, PERM_CC_REPORTS):
+            return view(request, *args, **kwargs)
+        if settings.DEBUG:
+            return view(request, *args, **kwargs)
+        return permission_denied_response(
+            request,
+            required=(PERM_CC_REPORTS,),
+            force_json=True,
+        )
+
+    return wrapped
 
 
 def _cc_validation_error(exc: CcAnalyticsError) -> JsonResponse:
@@ -52,7 +81,7 @@ def _validation_error(exc: AsrQaError) -> JsonResponse:
 
 
 @require_http_methods(["GET"])
-@require_permissions(PERM_CC_REPORTS, api=True)
+@require_cc_reports
 def asr_sessions(request: HttpRequest) -> JsonResponse:
     try:
         filters = parse_filters(request.GET)
@@ -69,7 +98,7 @@ def asr_sessions(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["GET"])
-@require_permissions(PERM_CC_REPORTS, api=True)
+@require_cc_reports
 def asr_session_detail(request: HttpRequest, session_id: int) -> JsonResponse:
     try:
         return JsonResponse(get_session(session_id))
@@ -78,7 +107,7 @@ def asr_session_detail(request: HttpRequest, session_id: int) -> JsonResponse:
 
 
 @require_http_methods(["GET"])
-@require_permissions(PERM_CC_REPORTS, api=True)
+@require_cc_reports
 def asr_session_audio(request: HttpRequest, session_id: int) -> HttpResponse:
     try:
         session = AsrDialogueSession.objects.get(pk=session_id)
@@ -103,7 +132,7 @@ def asr_session_audio(request: HttpRequest, session_id: int) -> HttpResponse:
 
 
 @require_http_methods(["POST"])
-@require_permissions(PERM_CC_REPORTS, api=True)
+@require_cc_reports
 def asr_utterance_annotation(
     request: HttpRequest,
     session_id: int,
@@ -119,7 +148,9 @@ def asr_utterance_annotation(
             session_id,
             utterance_id,
             training_candidate=bool(body.get("training_candidate")),
-            username=request.user.get_username(),
+            username=request.user.get_username()
+            if getattr(request.user, "is_authenticated", False)
+            else "demo",
         )
     except json.JSONDecodeError:
         return _validation_error(AsrQaError("Request body must be valid JSON"))
@@ -131,7 +162,7 @@ def asr_utterance_annotation(
 
 
 @require_http_methods(["POST"])
-@require_permissions(PERM_CC_REPORTS, api=True)
+@require_cc_reports
 def asr_seed_demo(request: HttpRequest) -> JsonResponse:
     """Seed deterministic demo catalogue (local/acceptance)."""
     force = False
@@ -146,9 +177,9 @@ def asr_seed_demo(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["GET"])
-@require_permissions(PERM_CC_REPORTS, api=True)
+@require_cc_reports
 def cc_analytics(request: HttpRequest) -> JsonResponse:
-    """FR-RPT-CC stub dashboard: tables + ASR quality series."""
+    """FR-RPT-CC dashboard: tables + ASR quality series."""
     try:
         filters = parse_analytics_filters(request.GET)
         payload = build_analytics(filters)
@@ -158,9 +189,9 @@ def cc_analytics(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["GET"])
-@require_permissions(PERM_CC_REPORTS, api=True)
+@require_cc_reports
 def cc_export(request: HttpRequest) -> HttpResponse:
-    """CSV / XLSX export for CC analytics (FR-RPT-CC / FR-ASR-19)."""
+    """CSV / XLSX / PDF export for CC analytics."""
     try:
         filters = parse_analytics_filters(request.GET)
         analytics = build_analytics(filters)
@@ -171,6 +202,9 @@ def cc_export(request: HttpRequest) -> HttpResponse:
                 "application/vnd.openxmlformats-officedocument."
                 "spreadsheetml.sheet"
             )
+        elif export_format == "pdf":
+            payload = build_pdf_export(analytics)
+            content_type = "application/pdf"
         else:
             payload = build_csv_export(analytics)
             content_type = "text/csv; charset=utf-8"
@@ -181,3 +215,41 @@ def cc_export(request: HttpRequest) -> HttpResponse:
     response = HttpResponse(payload, content_type=content_type)
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
+
+@require_http_methods(["GET"])
+@require_cc_reports
+def cc_live(request: HttpRequest) -> JsonResponse:
+    return JsonResponse(build_live_dashboard())
+
+
+@require_http_methods(["GET"])
+@require_cc_reports
+def cc_report_catalog(request: HttpRequest) -> JsonResponse:
+    try:
+        return JsonResponse(build_report_payload(request.GET))
+    except CcAnalyticsError as exc:
+        return _cc_validation_error(exc)
+
+
+@require_http_methods(["GET"])
+@require_cc_reports
+def cc_builder_templates(request: HttpRequest) -> JsonResponse:
+    return JsonResponse(list_builder_templates())
+
+
+@require_http_methods(["POST"])
+@require_cc_reports
+def cc_builder_preview(request: HttpRequest) -> JsonResponse:
+    try:
+        body = json.loads(request.body or b"{}")
+        if not isinstance(body, Mapping):
+            raise CcAnalyticsError("Request body must be a JSON object")
+    except (json.JSONDecodeError, CcAnalyticsError) as exc:
+        return JsonResponse(
+            {"error": "validation_error", "details": {"request": [str(exc)]}},
+            status=400,
+        )
+    return JsonResponse(preview_builder(dict(body)))
+
+

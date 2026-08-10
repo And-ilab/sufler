@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { usePortalAuth } from './auth/usePortalAuth'
 import { AiHubAdminApp } from './ai-hub/admin/AiHubAdminApp'
 import { isAdminCenterRole } from './ai-hub/admin/adminNav'
@@ -10,6 +11,15 @@ import { AssistantWindowApp } from './assistant/AssistantWindowApp'
 import { SuflerPhoneApp } from './sufler/SuflerPhoneApp'
 import { ChatArmApp } from './online-chat/ChatArmApp'
 import { canAccessOnlineChatArm } from './online-chat/chatArmAccess'
+import { ChatAdminApp } from './online-chat/admin/ChatAdminApp'
+import {
+  canAccessOnlineChatAdmin,
+  canAccessOnlineChatSupervisor,
+} from './online-chat/managementAccess'
+import { ChatSimulatorApp } from './online-chat/simulator/ChatSimulatorApp'
+import { ChatPlatformShell } from './online-chat/shell/ChatPlatformShell'
+import { SupervisorApp } from './online-chat/supervisor/SupervisorApp'
+import type { ThemeKind } from './online-chat/arm/theme'
 import {
   Button,
   Card,
@@ -20,6 +30,31 @@ import {
   type LauncherModule,
 } from './components'
 import './App.css'
+
+function jobTitleFromRoles(roles: readonly string[]): string {
+  if (
+    roles.includes('contact_center_module_administrator')
+    || roles.includes('software_administrator')
+  ) {
+    return 'Администратор модуля КЦ'
+  }
+  if (roles.includes('contact_center_supervisor')) {
+    return 'Супервизор КЦ'
+  }
+  if (roles.includes('contact_center_analyst')) {
+    return 'Аналитик КЦ'
+  }
+  if (roles.includes('contact_center_online_chat_operator')) {
+    return 'Оператор онлайн-чата'
+  }
+  return 'Сотрудник КЦ'
+}
+
+function employeeDisplayName(username: string | null | undefined, operatorFromQuery?: string | null) {
+  if (operatorFromQuery?.trim()) return operatorFromQuery.trim()
+  if (username && username !== 'Development user') return username
+  return 'Иванов И.И.'
+}
 
 function StandaloneModule({
   module,
@@ -67,6 +102,8 @@ function StandaloneModule({
 function App() {
   const auth = usePortalAuth()
   const route = window.location.pathname.replace(/\/+$/, '') || '/'
+  const [chatThemeKind, setChatThemeKind] = useState<ThemeKind>('light')
+  const [armMenuOpen, setArmMenuOpen] = useState(false)
 
   if (auth.status === 'loading') {
     return (
@@ -87,23 +124,80 @@ function App() {
   }
 
   if (route === '/online-chat' || route.startsWith('/online-chat/')) {
-    if (!canAccessOnlineChatArm(auth.roles)) {
+    const isSupervisorRoute = route === '/online-chat/supervisor'
+    const isAdminRoute = route === '/online-chat/admin'
+    const isSimulatorRoute = route === '/online-chat/simulator'
+    const allowed = isSupervisorRoute
+      ? canAccessOnlineChatSupervisor(auth.roles)
+      : isAdminRoute
+        ? canAccessOnlineChatAdmin(auth.roles)
+        : isSimulatorRoute
+          ? import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'
+          : route === '/online-chat' && canAccessOnlineChatArm(auth.roles)
+
+    if (!allowed) {
       return (
         <main className="standalone-module standalone-module--denied">
           <Card>
             <StatusBadge status="danger">403</StatusBadge>
-            <h1>Нет доступа к АРМ онлайн-чата</h1>
-            <p>Требуется роль оператора онлайн-чата Контакт-центра.</p>
+            <h1>Нет доступа к разделу онлайн-чата</h1>
+            <p>Для выбранного маршрута требуется соответствующая роль Контакт-центра.</p>
             <Button onClick={() => window.location.assign('/')}>Вернуться на портал</Button>
           </Card>
         </main>
       )
     }
+
+    const operatorFromQuery = new URLSearchParams(window.location.search).get('operator')?.trim()
+    const operatorName = employeeDisplayName(auth.username, operatorFromQuery)
+    const shellProps = {
+      currentPath: route,
+      displayName: operatorName,
+      jobTitle: operatorFromQuery
+        ? 'Оператор онлайн-чата'
+        : jobTitleFromRoles(auth.roles),
+      showSupervisor: canAccessOnlineChatSupervisor(auth.roles),
+      showAdmin: canAccessOnlineChatAdmin(auth.roles),
+      showSimulator: import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1',
+      themeKind: chatThemeKind,
+      onToggleTheme: () =>
+        setChatThemeKind((kind) => (kind === 'light' ? 'dark' : 'light')),
+      showMenuButton: route === '/online-chat',
+      menuOpen: armMenuOpen,
+      onMenuToggle: () => setArmMenuOpen((open) => !open),
+    }
+
+    if (isSupervisorRoute) {
+      return (
+        <ChatPlatformShell {...shellProps} showMenuButton={false}>
+          <SupervisorApp demoMode={import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'} />
+        </ChatPlatformShell>
+      )
+    }
+    if (isAdminRoute) {
+      return (
+        <ChatPlatformShell {...shellProps} showMenuButton={false}>
+          <ChatAdminApp />
+        </ChatPlatformShell>
+      )
+    }
+    if (isSimulatorRoute) {
+      return (
+        <ChatPlatformShell {...shellProps} showMenuButton={false}>
+          <ChatSimulatorApp />
+        </ChatPlatformShell>
+      )
+    }
     return (
-      <ChatArmApp
-        demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
-        operatorName={auth.username ?? 'Оператор КЦ'}
-      />
+      <ChatPlatformShell {...shellProps}>
+        <ChatArmApp
+          demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
+          operatorName={operatorName}
+          themeKind={chatThemeKind}
+          statsDrawerOpen={armMenuOpen}
+          onStatsDrawerOpenChange={setArmMenuOpen}
+        />
+      </ChatPlatformShell>
     )
   }
 
@@ -179,8 +273,13 @@ function App() {
         </main>
       )
     }
-    const section =
-      route.includes('/asr') ? 'asr-qa' as const : 'overview' as const
+    const section = route.includes('/asr')
+      ? 'asr-qa' as const
+      : route.includes('/live')
+        ? 'live' as const
+        : route.includes('/builder')
+          ? 'builder' as const
+          : 'overview' as const
     return (
       <AiHubReportsApp
         username={auth.username ?? undefined}
@@ -199,19 +298,30 @@ function App() {
       {canAccessCcReports(auth.roles) && (
         <div className="portal-route__reports-entry">
           <Card>
-            <StatusBadge status="info">Отчётность · II.6</StatusBadge>
-            <h2>Отчёты Контакт-центра</h2>
+            <h2>Отчётность</h2>
             <p className="app-muted">
-              Таблицы FR-RPT-CC, фильтры периода, экспорт CSV/XLSX и графики качества ASR.
+              Аналитика, оперативная панель, конструктор отчётов и записи разговоров.
             </p>
             <Button onClick={() => window.location.assign('/ai-hub/reports')}>
               Открыть отчёты
             </Button>
             <Button
               variant="ghost"
+              onClick={() => window.location.assign('/ai-hub/reports/live')}
+            >
+              Оперативная панель
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => window.location.assign('/ai-hub/reports/builder')}
+            >
+              Конструктор
+            </Button>
+            <Button
+              variant="ghost"
               onClick={() => window.location.assign('/ai-hub/reports/asr')}
             >
-              QA ASR
+              Записи разговоров
             </Button>
           </Card>
         </div>

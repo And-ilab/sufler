@@ -1,14 +1,110 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.utils import timezone
 
-from online_chat.models import Dialog, DialogMessage
+from audit.events import (
+    CATEGORY_DATA_SECURITY,
+    ONLINE_CHAT_CLIENT_BLOCKED,
+    ONLINE_CHAT_CLIENT_UNBLOCKED,
+    RESULT_SUCCESS,
+)
+from audit.schema import AuditSubject
+from audit.service import emit
+from online_chat.mail import send_dialog_transcript
+from online_chat.models import (
+    BotConfiguration,
+    ClientBlock,
+    Dialog,
+    DialogFeedback,
+    DialogMessage,
+    DialogTranscriptEmail,
+    OperatorProfile,
+    normalize_phone,
+)
+from online_chat.routing_services import (
+    accept_waiting_dialog,
+    auto_assign_dialog,
+    department_queue_is_full,
+    record_event,
+    select_department,
+    transfer_to_operator,
+)
+
+logger = logging.getLogger(__name__)
 
 ARM_GROUP = "online_chat_arm"
+
+
+def _active_bot(dialog: Dialog) -> BotConfiguration | None:
+    if not dialog.department_id:
+        return None
+    return (
+        BotConfiguration.objects.filter(
+            department_id=dialog.department_id,
+            is_active=True,
+        )
+        .order_by("created_at")
+        .first()
+    )
+
+
+def _create_bot_message(dialog: Dialog, text: str) -> DialogMessage:
+    message = DialogMessage.objects.create(
+        dialog=dialog,
+        speaker=DialogMessage.Speaker.BOT,
+        text=text,
+        receipt_status=DialogMessage.ReceiptStatus.DELIVERED,
+    )
+    payload = serialize_message(message)
+    broadcast(dialog_group(str(dialog.id)), "message.created", payload)
+    broadcast(ARM_GROUP, "message.created", payload)
+    return message
+
+
+def _handle_bot_turn(dialog: Dialog, client_text: str) -> None:
+    bot = _active_bot(dialog)
+    if not bot or not dialog.bot_active:
+        return
+    normalized = client_text.casefold()
+    response = ""
+    if isinstance(bot.trigger_responses, dict):
+        for trigger, candidate in bot.trigger_responses.items():
+            if str(trigger).casefold() in normalized:
+                response = str(candidate)
+                break
+    dialog.bot_turns += 1
+    should_handoff = not response or dialog.bot_turns >= bot.max_bot_turns
+    if should_handoff:
+        dialog.bot_active = False
+        dialog.routing_reason = f"bot_handoff:{bot.name}"
+        dialog.save(
+            update_fields=[
+                "bot_active",
+                "bot_turns",
+                "routing_reason",
+                "updated_at",
+            ]
+        )
+        _create_bot_message(
+            dialog,
+            bot.handoff_message or bot.fallback_message,
+        )
+        auto_assign_dialog(dialog)
+        record_event(dialog, "bot_handoff", actor_name=bot.name)
+        return
+    dialog.save(update_fields=["bot_turns", "updated_at"])
+    _create_bot_message(dialog, response)
+    record_event(
+        dialog,
+        "bot_replied",
+        actor_name=bot.name,
+        payload={"turn": dialog.bot_turns},
+    )
 
 
 def dialog_group(dialog_id: str) -> str:
@@ -20,32 +116,155 @@ def serialize_message(message: DialogMessage) -> dict[str, Any]:
         "id": str(message.id),
         "dialog_id": str(message.dialog_id),
         "speaker": message.speaker,
-        "text": message.text,
+        "text": message.display_text(),
+        "raw_text": "" if message.is_deleted else message.text,
+        "receipt_status": message.receipt_status,
+        "reply_to_id": str(message.reply_to_id) if message.reply_to_id else None,
+        "quoted_text": message.quoted_text,
+        "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+        "is_deleted": message.is_deleted,
+        "attachment_name": message.attachment_name,
+        "attachment_key": message.attachment_key,
+        "attachment_content_type": message.attachment_content_type,
+        "attachment_size": message.attachment_size,
+        "attachment_scan_status": message.attachment_scan_status,
+        "external_message_id": message.external_message_id,
+        "channel_delivery_status": message.channel_delivery_status,
+        "channel_delivery_error": message.channel_delivery_error,
+        "response_origin": message.response_origin,
         "created_at": message.created_at.isoformat(),
     }
 
 
+def serialize_feedback(feedback: DialogFeedback) -> dict[str, Any]:
+    return {
+        "id": str(feedback.id),
+        "dialog_id": str(feedback.dialog_id),
+        "rating": feedback.rating,
+        "comment": feedback.comment,
+        "created_at": feedback.created_at.isoformat(),
+    }
+
+
+def serialize_transcript_email(record: DialogTranscriptEmail) -> dict[str, Any]:
+    return {
+        "id": str(record.id),
+        "dialog_id": str(record.dialog_id),
+        "email": record.email,
+        "status": record.status,
+        "error_detail": record.error_detail,
+        "created_at": record.created_at.isoformat(),
+        "sent_at": record.sent_at.isoformat() if record.sent_at else None,
+    }
+
+
+def serialize_client_block(block: ClientBlock) -> dict[str, Any]:
+    return {
+        "id": str(block.id),
+        "phone": block.phone,
+        "phone_normalized": block.phone_normalized,
+        "reason": block.reason,
+        "blocked_by": block.blocked_by,
+        "dialog_id": str(block.dialog_id) if block.dialog_id else None,
+        "is_active": block.is_active,
+        "created_at": block.created_at.isoformat(),
+        "lifted_at": block.lifted_at.isoformat() if block.lifted_at else None,
+    }
+
+
+def _last_human_message(dialog: Dialog) -> DialogMessage | None:
+    return (
+        dialog.messages.filter(
+            is_deleted=False,
+            speaker__in=(
+                DialogMessage.Speaker.CLIENT,
+                DialogMessage.Speaker.OPERATOR,
+            ),
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def dialog_needs_reply(dialog: Dialog) -> bool:
+    """True when the last human message is from the client (operator must answer)."""
+    if dialog.status in {Dialog.Status.CLOSED, Dialog.Status.BLOCKED}:
+        return False
+    last = _last_human_message(dialog)
+    return last is not None and last.speaker == DialogMessage.Speaker.CLIENT
+
+
+def _wait_seconds(dialog: Dialog) -> int:
+    """SLA wait while a client message awaits operator reply; 0 after operator answers.
+
+    TZ: timer from last unanswered client message; resets when operator works/replies.
+    Unassigned queue: from client message time. After accept of that same message:
+    anchor moves to accepted_at (SLA reset on take). New client messages after accept
+    restart the timer from their created_at.
+    """
+    if dialog.status in {Dialog.Status.CLOSED, Dialog.Status.BLOCKED}:
+        return 0
+    if not dialog_needs_reply(dialog):
+        return 0
+    last_client = (
+        dialog.messages.filter(
+            speaker=DialogMessage.Speaker.CLIENT,
+            is_deleted=False,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if last_client is None:
+        return 0
+    anchor = last_client.created_at
+    if dialog.accepted_at and last_client.created_at <= dialog.accepted_at:
+        anchor = dialog.accepted_at
+    return max(0, int((timezone.now() - anchor).total_seconds()))
+
+
 def serialize_dialog(dialog: Dialog, *, include_messages: bool = False) -> dict[str, Any]:
+    needs_reply = dialog_needs_reply(dialog)
     payload: dict[str, Any] = {
         "id": str(dialog.id),
+        "ref_code": dialog.ref_code(),
         "widget_id": dialog.widget_id,
         "placement": dialog.placement,
         "channel": dialog.channel,
         "status": dialog.status,
+        "initiated_by": dialog.initiated_by,
         "client_first_name": dialog.client_first_name,
         "client_last_name": dialog.client_last_name,
         "client_phone": dialog.client_phone,
+        "client_external_id": dialog.client_external_id,
+        "entry_url": dialog.entry_url,
+        "locale": dialog.locale,
         "client_name": dialog.client_display_name(),
+        "client_online": dialog.client_online,
         "operator_name": dialog.operator_name,
+        "operator_id": str(dialog.operator_id) if dialog.operator_id else None,
+        "department_id": str(dialog.department_id) if dialog.department_id else None,
+        "department_name": dialog.department.name if dialog.department_id else None,
+        "routing_reason": dialog.routing_reason,
+        "outcome": dialog.outcome,
         "preview": dialog.preview,
+        "close_topic": dialog.close_topic,
         "created_at": dialog.created_at.isoformat(),
         "updated_at": dialog.updated_at.isoformat(),
         "accepted_at": dialog.accepted_at.isoformat() if dialog.accepted_at else None,
         "closed_at": dialog.closed_at.isoformat() if dialog.closed_at else None,
-        "wait_seconds": max(
-            0,
-            int((timezone.now() - dialog.created_at).total_seconds()),
+        "last_client_message_at": (
+            dialog.last_client_message_at.isoformat() if dialog.last_client_message_at else None
         ),
+        "first_response_at": (
+            dialog.first_response_at.isoformat() if dialog.first_response_at else None
+        ),
+        "sla_deadline_at": dialog.sla_deadline_at.isoformat() if dialog.sla_deadline_at else None,
+        "client_last_seen_at": (
+            dialog.client_last_seen_at.isoformat() if dialog.client_last_seen_at else None
+        ),
+        "needs_reply": needs_reply,
+        "wait_seconds": _wait_seconds(dialog),
+        "has_feedback": DialogFeedback.objects.filter(dialog_id=dialog.id).exists(),
     }
     if include_messages:
         payload["messages"] = [
@@ -64,6 +283,33 @@ def broadcast(group: str, event_type: str, payload: dict[str, Any]) -> None:
     )
 
 
+def is_phone_blocked(phone: str) -> ClientBlock | None:
+    normalized = normalize_phone(phone)
+    if not normalized:
+        return None
+    return (
+        ClientBlock.objects.filter(phone_normalized=normalized, is_active=True)
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def _emit_block_audit(*, event_type: str, description: str, details: dict[str, Any]) -> None:
+    try:
+        emit(
+            category=CATEGORY_DATA_SECURITY,
+            event_type=event_type,
+            result=RESULT_SUCCESS,
+            subject=AuditSubject(user_login="online-chat", roles=("operator",)),
+            module="online_chat",
+            description=description,
+            severity="warning",
+            details=details,
+        )
+    except Exception:  # noqa: BLE001 — audit must not break chat
+        logger.exception("online_chat audit emit failed")
+
+
 def create_dialog_with_message(
     *,
     text: str,
@@ -72,29 +318,98 @@ def create_dialog_with_message(
     client_first_name: str = "",
     client_last_name: str = "",
     client_phone: str = "",
+    client_external_id: str = "",
+    entry_url: str = "",
+    locale: str = "ru",
     channel: str = "widget",
+    initiated_by: str = Dialog.InitiatedBy.CLIENT,
+    operator_name: str = "",
 ) -> tuple[Dialog, DialogMessage]:
+    if is_phone_blocked(client_phone):
+        raise PermissionError("client is blocked")
+
     preview = text.strip()[:500]
+    status = Dialog.Status.WAITING
+    if initiated_by == Dialog.InitiatedBy.OPERATOR and operator_name.strip():
+        status = Dialog.Status.ACTIVE
+
+    department, placement_config, routing_reason = select_department(
+        widget_id=widget_id,
+        channel=channel,
+        context={"placement": placement},
+    )
+    queue_full = department_queue_is_full(department)
+    if queue_full:
+        routing_reason = f"{routing_reason};queue_full"
+    bot = (
+        BotConfiguration.objects.filter(department=department, is_active=True)
+        .order_by("created_at")
+        .first()
+        if department
+        else None
+    )
+    now = timezone.now()
     dialog = Dialog.objects.create(
         widget_id=widget_id,
         placement=placement,
         channel=channel,
-        status=Dialog.Status.WAITING,
+        status=status,
+        initiated_by=initiated_by,
         client_first_name=client_first_name.strip(),
         client_last_name=client_last_name.strip(),
         client_phone=client_phone.strip(),
+        client_external_id=client_external_id.strip(),
+        entry_url=entry_url.strip(),
+        locale=locale.strip() or "ru",
+        operator_name=operator_name.strip(),
         preview=preview,
+        department=department,
+        routing_reason=routing_reason,
+        bot_active=bool(bot) and not queue_full,
+        client_online=initiated_by == Dialog.InitiatedBy.CLIENT,
+        client_last_seen_at=now if initiated_by == Dialog.InitiatedBy.CLIENT else None,
+        last_client_message_at=now if initiated_by == Dialog.InitiatedBy.CLIENT else None,
+        accepted_at=now if status == Dialog.Status.ACTIVE else None,
     )
+    speaker = (
+        DialogMessage.Speaker.OPERATOR
+        if initiated_by == Dialog.InitiatedBy.OPERATOR
+        else DialogMessage.Speaker.CLIENT
+    )
+    delivery_status = DialogMessage.ChannelDeliveryStatus.NOT_REQUIRED
+    if speaker == DialogMessage.Speaker.OPERATOR and dialog.channel != "widget":
+        delivery_status = DialogMessage.ChannelDeliveryStatus.PENDING
     message = DialogMessage.objects.create(
         dialog=dialog,
-        speaker=DialogMessage.Speaker.CLIENT,
+        speaker=speaker,
         text=text.strip(),
+        channel_delivery_status=delivery_status,
     )
+    if bot and bot.welcome_message:
+        _create_bot_message(dialog, bot.welcome_message)
+    record_event(
+        dialog,
+        "created",
+        actor_name=operator_name if initiated_by == Dialog.InitiatedBy.OPERATOR else "client",
+        payload={
+            "widget_id": widget_id,
+            "placement_id": str(placement_config.id) if placement_config else None,
+            "routing_reason": routing_reason,
+        },
+    )
+    if status == Dialog.Status.WAITING and not dialog.bot_active and not queue_full:
+        assigned = auto_assign_dialog(dialog)
+        if assigned:
+            dialog = assigned
     dialog_payload = serialize_dialog(dialog)
     message_payload = serialize_message(message)
     broadcast(ARM_GROUP, "dialog.created", dialog_payload)
     broadcast(dialog_group(str(dialog.id)), "message.created", message_payload)
     broadcast(ARM_GROUP, "message.created", message_payload)
+    if delivery_status == DialogMessage.ChannelDeliveryStatus.PENDING:
+        from online_chat.tasks import deliver_channel_message
+
+        deliver_channel_message.delay(str(message.id))
     return dialog, message
 
 
@@ -103,30 +418,141 @@ def append_message(
     *,
     speaker: str,
     text: str,
+    reply_to: DialogMessage | None = None,
+    attachment_name: str = "",
+    attachment_key: str = "",
+    attachment_content_type: str = "",
+    attachment_size: int = 0,
+    attachment_scan_status: str = "not_required",
+    external_message_id: str = "",
+    response_origin: str = "",
+    sufler_suggestion_text: str = "",
 ) -> DialogMessage:
     cleaned = text.strip()
+    quoted = ""
+    if reply_to is not None:
+        quoted = (reply_to.display_text() or "")[:500]
+    if attachment_name and not cleaned:
+        cleaned = f"Файл: {attachment_name}"
+    receipt = DialogMessage.ReceiptStatus.DELIVERED
+    delivery_status = DialogMessage.ChannelDeliveryStatus.NOT_REQUIRED
+    if speaker == DialogMessage.Speaker.OPERATOR and dialog.channel != "widget":
+        delivery_status = DialogMessage.ChannelDeliveryStatus.PENDING
     message = DialogMessage.objects.create(
         dialog=dialog,
         speaker=speaker,
         text=cleaned,
+        reply_to=reply_to,
+        quoted_text=quoted,
+        attachment_name=attachment_name.strip(),
+        attachment_key=attachment_key,
+        attachment_content_type=attachment_content_type,
+        attachment_size=max(0, attachment_size),
+        attachment_scan_status=attachment_scan_status,
+        external_message_id=external_message_id.strip(),
+        response_origin=response_origin.strip(),
+        sufler_suggestion_text=sufler_suggestion_text,
+        channel_delivery_status=delivery_status,
+        receipt_status=receipt,
     )
-    update_fields = ["updated_at"]
+    update_fields = ["updated_at", "preview"]
+    dialog.preview = cleaned[:500]
     if speaker == DialogMessage.Speaker.CLIENT:
-        dialog.preview = cleaned[:500]
-        update_fields.append("preview")
+        dialog.client_online = True
+        dialog.client_last_seen_at = timezone.now()
+        dialog.last_client_message_at = timezone.now()
+        update_fields.extend(["client_online", "client_last_seen_at", "last_client_message_at"])
+    elif speaker == DialogMessage.Speaker.OPERATOR and dialog.first_response_at is None:
+        dialog.first_response_at = timezone.now()
+        update_fields.append("first_response_at")
     dialog.save(update_fields=update_fields)
     payload = serialize_message(message)
     broadcast(dialog_group(str(dialog.id)), "message.created", payload)
     broadcast(ARM_GROUP, "message.created", payload)
+    # Backup path: client widget also POSTs /read/; if it was online but flag lagged,
+    # still notify ARM when marks arrive later.
+    if (
+        speaker == DialogMessage.Speaker.OPERATOR
+        and receipt == DialogMessage.ReceiptStatus.READ
+    ):
+        broadcast(
+            ARM_GROUP,
+            "messages.read",
+            {
+                "dialog_id": str(dialog.id),
+                "reader": DialogMessage.Speaker.CLIENT,
+                "message_ids": [str(message.id)],
+                "messages": [payload],
+            },
+        )
+    if delivery_status == DialogMessage.ChannelDeliveryStatus.PENDING:
+        from online_chat.tasks import deliver_channel_message
+
+        deliver_channel_message.delay(str(message.id))
+    if speaker == DialogMessage.Speaker.CLIENT and dialog.bot_active:
+        _handle_bot_turn(dialog, cleaned)
+    return message
+
+
+def edit_message(message: DialogMessage, *, text: str) -> DialogMessage:
+    cleaned = text.strip()
+    if not cleaned:
+        raise ValueError("text must be non-empty")
+    if message.is_deleted:
+        raise ValueError("message is deleted")
+    if message.speaker == DialogMessage.Speaker.SYSTEM:
+        raise ValueError("system messages cannot be edited")
+    message.text = cleaned
+    message.edited_at = timezone.now()
+    # Keep receipt_status as-is (edit does not revoke delivery/read).
+    message.save(update_fields=["text", "edited_at"])
+    if message.speaker == DialogMessage.Speaker.CLIENT:
+        dialog = message.dialog
+        dialog.preview = cleaned[:500]
+        dialog.save(update_fields=["preview", "updated_at"])
+    elif message.speaker == DialogMessage.Speaker.OPERATOR:
+        message.dialog.save(update_fields=["updated_at"])
+    payload = serialize_message(message)
+    broadcast(dialog_group(str(message.dialog_id)), "message.updated", payload)
+    broadcast(ARM_GROUP, "message.updated", payload)
+    return message
+
+
+def delete_message(message: DialogMessage) -> DialogMessage:
+    if message.speaker == DialogMessage.Speaker.SYSTEM:
+        raise ValueError("system messages cannot be deleted")
+    message.is_deleted = True
+    message.text = ""
+    message.edited_at = timezone.now()
+    message.save(update_fields=["is_deleted", "text", "edited_at"])
+    dialog = message.dialog
+    last = _last_human_message(dialog)
+    if last is not None:
+        dialog.preview = last.display_text()[:500]
+    else:
+        dialog.preview = "—"
+    dialog.save(update_fields=["preview", "updated_at"])
+    payload = serialize_message(message)
+    broadcast(dialog_group(str(message.dialog_id)), "message.updated", payload)
+    broadcast(ARM_GROUP, "message.updated", payload)
     return message
 
 
 def accept_dialog(dialog: Dialog, operator_name: str) -> Dialog:
-    dialog.mark_accepted(operator_name)
+    operator = OperatorProfile.objects.filter(
+        display_name=operator_name,
+        is_active=True,
+    ).first()
+    dialog = accept_waiting_dialog(
+        dialog.pk,
+        operator=operator,
+        operator_name=operator_name,
+    )
     system = DialogMessage.objects.create(
         dialog=dialog,
         speaker=DialogMessage.Speaker.SYSTEM,
         text=f"{operator_name} подключился к диалогу",
+        receipt_status=DialogMessage.ReceiptStatus.READ,
     )
     dialog_payload = serialize_dialog(dialog)
     broadcast(ARM_GROUP, "dialog.updated", dialog_payload)
@@ -141,17 +567,198 @@ def accept_dialog(dialog: Dialog, operator_name: str) -> Dialog:
     return dialog
 
 
-def close_dialog(dialog: Dialog) -> Dialog:
-    dialog.mark_closed()
+def transfer_dialog(
+    dialog: Dialog,
+    *,
+    to_operator_name: str,
+    from_operator_name: str = "",
+) -> Dialog:
+    target = to_operator_name.strip()
+    if not target:
+        raise ValueError("to_operator_name is required")
+    previous = dialog.operator_name or from_operator_name or "оператор"
+    dialog = transfer_to_operator(dialog, operator_name=target)
+    system = DialogMessage.objects.create(
+        dialog=dialog,
+        speaker=DialogMessage.Speaker.SYSTEM,
+        text=f"Диалог переведён: {previous} → {target}",
+        receipt_status=DialogMessage.ReceiptStatus.READ,
+    )
     payload = serialize_dialog(dialog)
     broadcast(ARM_GROUP, "dialog.updated", payload)
-    broadcast(dialog_group(str(dialog.id)), "dialog.closed", payload)
+    broadcast(
+        dialog_group(str(dialog.id)),
+        "dialog.transferred",
+        {
+            **payload,
+            "system_message": serialize_message(system),
+            "from_operator_name": previous,
+            "to_operator_name": target,
+        },
+    )
     return dialog
 
 
-def block_dialog(dialog: Dialog) -> Dialog:
+def close_dialog(dialog: Dialog, *, topic: str) -> Dialog:
+    dialog.mark_closed(topic)
+    record_event(dialog, "closed", actor_name=dialog.operator_name, payload={"topic": topic})
+    system = DialogMessage.objects.create(
+        dialog=dialog,
+        speaker=DialogMessage.Speaker.SYSTEM,
+        text="Диалог завершён",
+        receipt_status=DialogMessage.ReceiptStatus.READ,
+    )
+    payload = serialize_dialog(dialog)
+    broadcast(ARM_GROUP, "dialog.updated", payload)
+    broadcast(
+        dialog_group(str(dialog.id)),
+        "dialog.closed",
+        {
+            **payload,
+            "system_message": serialize_message(system),
+            "farewell_message": "Спасибо за обращение! Диалог завершён.",
+        },
+    )
+    return dialog
+
+
+def mark_dialog_messages_read(
+    dialog: Dialog,
+    *,
+    reader: str,
+) -> list[DialogMessage]:
+    """Mark the other party's unread messages as read (1✓ → 2✓)."""
+    if reader == DialogMessage.Speaker.CLIENT:
+        target_speaker = DialogMessage.Speaker.OPERATOR
+    elif reader == DialogMessage.Speaker.OPERATOR:
+        target_speaker = DialogMessage.Speaker.CLIENT
+    else:
+        return []
+
+    qs = dialog.messages.filter(
+        speaker=target_speaker,
+        receipt_status=DialogMessage.ReceiptStatus.DELIVERED,
+        is_deleted=False,
+    )
+    message_ids = list(qs.values_list("id", flat=True))
+    if not message_ids:
+        return []
+    qs.update(receipt_status=DialogMessage.ReceiptStatus.READ)
+    updated = list(dialog.messages.filter(id__in=message_ids))
+    payload = {
+        "dialog_id": str(dialog.id),
+        "reader": reader,
+        "message_ids": [str(item.id) for item in updated],
+        "messages": [serialize_message(item) for item in updated],
+    }
+    broadcast(dialog_group(str(dialog.id)), "messages.read", payload)
+    broadcast(ARM_GROUP, "messages.read", payload)
+    return updated
+
+
+def set_client_presence(dialog: Dialog, *, online: bool) -> Dialog:
+    dialog.client_online = online
+    dialog.client_last_seen_at = timezone.now()
+    if not online and dialog.status not in {Dialog.Status.CLOSED, Dialog.Status.BLOCKED}:
+        dialog.outcome = Dialog.Outcome.OFFLINE
+    elif online and dialog.outcome == Dialog.Outcome.OFFLINE:
+        dialog.outcome = ""
+    dialog.save(
+        update_fields=[
+            "client_online",
+            "client_last_seen_at",
+            "outcome",
+            "updated_at",
+        ]
+    )
+    payload = serialize_dialog(dialog)
+    broadcast(ARM_GROUP, "dialog.updated", payload)
+    broadcast(dialog_group(str(dialog.id)), "client.presence", payload)
+    return dialog
+
+
+def block_dialog(
+    dialog: Dialog,
+    *,
+    blocked_by: str = "",
+    reason: str = "",
+) -> tuple[Dialog, ClientBlock | None]:
+    phone = dialog.client_phone
+    block: ClientBlock | None = None
+    normalized = normalize_phone(phone)
+    if normalized:
+        block = ClientBlock.objects.create(
+            phone=phone,
+            phone_normalized=normalized,
+            reason=reason.strip() or "Заблокирован оператором в онлайн-чате",
+            blocked_by=blocked_by.strip() or dialog.operator_name or "operator",
+            dialog=dialog,
+            is_active=True,
+        )
+        _emit_block_audit(
+            event_type=ONLINE_CHAT_CLIENT_BLOCKED,
+            description=f"Client blocked in online chat ({normalized})",
+            details={
+                "dialog_id": str(dialog.id),
+                "phone_normalized": normalized,
+                "blocked_by": block.blocked_by,
+                "reason": block.reason,
+            },
+        )
+
     dialog.mark_blocked()
+    record_event(dialog, "blocked", actor_name=blocked_by, payload={"reason": reason})
+    system = DialogMessage.objects.create(
+        dialog=dialog,
+        speaker=DialogMessage.Speaker.SYSTEM,
+        text="Клиент заблокирован. Диалог завершён.",
+        receipt_status=DialogMessage.ReceiptStatus.READ,
+    )
     payload = serialize_dialog(dialog)
     broadcast(ARM_GROUP, "dialog.updated", payload)
-    broadcast(dialog_group(str(dialog.id)), "dialog.blocked", payload)
-    return dialog
+    broadcast(
+        dialog_group(str(dialog.id)),
+        "dialog.blocked",
+        {
+            **payload,
+            "system_message": serialize_message(system),
+            "farewell_message": "Обращение недоступно. При необходимости обратитесь в отделение банка.",
+        },
+    )
+    return dialog, block
+
+
+def unblock_client(block: ClientBlock, *, lifted_by: str = "") -> ClientBlock:
+    block.is_active = False
+    block.lifted_at = timezone.now()
+    block.save(update_fields=["is_active", "lifted_at"])
+    _emit_block_audit(
+        event_type=ONLINE_CHAT_CLIENT_UNBLOCKED,
+        description=f"Client unblocked in online chat ({block.phone_normalized})",
+        details={
+            "block_id": str(block.id),
+            "phone_normalized": block.phone_normalized,
+            "lifted_by": lifted_by or "admin",
+        },
+    )
+    return block
+
+
+def save_feedback(
+    dialog: Dialog,
+    *,
+    rating: int,
+    comment: str = "",
+) -> DialogFeedback:
+    feedback, _created = DialogFeedback.objects.update_or_create(
+        dialog=dialog,
+        defaults={
+            "rating": rating,
+            "comment": comment.strip(),
+        },
+    )
+    return feedback
+
+
+def request_transcript_email(dialog: Dialog, *, email: str) -> DialogTranscriptEmail:
+    return send_dialog_transcript(dialog, email=email)
