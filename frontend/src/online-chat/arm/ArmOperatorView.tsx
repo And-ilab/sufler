@@ -247,12 +247,6 @@ type ArmRole = "operator" | "supervisor" | "admin";
 /** Context for ARM side-menu RBAC: picker vs observation vs live operate. */
 export type ArmMenuContext = "picker" | "view" | "operate";
 
-const ARM_ROLE_LABELS: Record<ArmRole, string> = {
-  operator: "Оператор КЦ",
-  supervisor: "Супервизор",
-  admin: "Администратор",
-};
-
 /**
  * Side-menu modules by role + context.
  * Admin gets dialogs/history only while observing an operator ARM (view).

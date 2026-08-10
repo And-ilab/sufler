@@ -6,7 +6,7 @@ import {
   useState,
   type MouseEvent,
 } from 'react'
-import { ensureDevSession } from '../../auth/ensureDevSession'
+import { ensureDevSession, resetDevSessionCache } from '../../auth/ensureDevSession'
 import { Button, Card, StatusBadge } from '../../components'
 import {
   ModelParamsScreen,

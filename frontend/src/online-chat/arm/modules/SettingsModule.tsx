@@ -55,13 +55,11 @@ export function SettingsModule({ t, scheme, armRole, onBack }: ArmModuleProps) {
       <div style={{ padding: 16, maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <Section t={t} title="Уведомления">
           <Toggle
-            t={t}
             label="Звук нового сообщения клиента"
             checked={settings.soundEnabled}
             onChange={(v) => patch('soundEnabled', v)}
           />
           <Toggle
-            t={t}
             label="Desktop-уведомления браузера"
             checked={settings.desktopNotify}
             onChange={(v) => {
@@ -75,25 +73,21 @@ export function SettingsModule({ t, scheme, armRole, onBack }: ArmModuleProps) {
 
         <Section t={t} title="Очередь и диалоги">
           <Toggle
-            t={t}
             label="Компактные карточки очереди"
             checked={settings.compactQueue}
             onChange={(v) => patch('compactQueue', v)}
           />
           <Toggle
-            t={t}
             label="Автораскрывать summary клиента"
             checked={settings.autoExpandSummary}
             onChange={(v) => patch('autoExpandSummary', v)}
           />
           <Toggle
-            t={t}
             label="Показывать секцию «Диалоги коллег» в очереди"
             checked={settings.showColleagueSection}
             onChange={(v) => patch('showColleagueSection', v)}
           />
           <Toggle
-            t={t}
             label="Enter отправляет ответ клиенту (Shift+Enter — новая строка)"
             checked={settings.enterToSend}
             onChange={(v) => patch('enterToSend', v)}
@@ -168,12 +162,10 @@ function Section({
 }
 
 function Toggle({
-  t,
   label,
   checked,
   onChange,
 }: {
-  t: ArmModuleProps['t']
   label: string
   checked: boolean
   onChange: (value: boolean) => void
