@@ -118,9 +118,9 @@ export function ChatSimulatorApp() {
           </a>
         </div>
         <p className="chat-management__notice">
-          1) Создайте сценарий → 2) Откройте окна операторов и клиентов → 3) Пишите с обеих сторон.
-          Не открывайте двух участников в одной вкладке. Виджет использует placement
-          {' '}<code>site-belarusbank</code>.
+          1) Создайте сценарий → 2) Откройте оператора (режим работы, не просмотр) и виджеты клиентов → 3) Пишите с обеих сторон.
+          При автоназначении часть диалогов сразу уходит операторам (лимит нагрузки), остальные — в «Общую очередь».
+          Не открывайте двух участников в одной вкладке. Виджет: <code>site-belarusbank</code>.
         </p>
         {error && <p className="chat-management__error" role="alert">{error}</p>}
         {notice && <p className="chat-management__success" role="status">{notice}</p>}
@@ -227,7 +227,9 @@ export function ChatSimulatorApp() {
                     className="is-secondary"
                     type="button"
                     onClick={() => openMany(
-                      operatorNames.map((name) => `/online-chat?operator=${encodeURIComponent(name)}`),
+                      operatorNames.map(
+                        (name) => `/online-chat?mode=operate&operator=${encodeURIComponent(name)}`,
+                      ),
                       6,
                     )}
                   >
@@ -239,7 +241,7 @@ export function ChatSimulatorApp() {
                     <li key={name}>
                       <a
                         className="chat-button is-secondary"
-                        href={`/online-chat?operator=${encodeURIComponent(name)}`}
+                        href={`/online-chat?mode=operate&operator=${encodeURIComponent(name)}`}
                         target="_blank"
                         rel="noreferrer"
                       >

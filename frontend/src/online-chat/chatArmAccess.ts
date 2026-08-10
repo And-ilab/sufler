@@ -6,7 +6,6 @@ const ONLINE_CHAT_ARM_VIEW_ROLES = new Set([
   'contact_center_online_chat_operator',
   'contact_center_module_administrator',
   'contact_center_supervisor',
-  'contact_center_analyst',
   'software_administrator',
 ])
 

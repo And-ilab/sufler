@@ -1,7 +1,6 @@
-/** Operational panel — supervisor / analyst only (not module admin). */
+/** Operational panel — project supervisor role (I.4.2), not analyst (§2.4 п.7 = reports). */
 const ONLINE_CHAT_SUPERVISOR_ROLES = new Set([
   'contact_center_supervisor',
-  'contact_center_analyst',
 ])
 
 const ONLINE_CHAT_ADMIN_ROLES = new Set([

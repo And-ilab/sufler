@@ -24,8 +24,8 @@ function presenceLabel(presence: string): string {
 }
 
 export function OperatorPicker({
-  title = 'Просмотр АРМ оператора',
-  subtitle = 'Выберите оператора. Режим только для просмотра диалогов — без действий от его лица.',
+  title = 'Выберите оператора',
+  subtitle = '',
   allowTransfer = false,
 }: OperatorPickerProps) {
   const [items, setItems] = useState<ChatOperator[]>([])
@@ -70,7 +70,7 @@ export function OperatorPicker({
         <div className="chat-management__heading">
           <div>
             <h1>{title}</h1>
-            <p className="chat-management__muted">{subtitle}</p>
+            {subtitle ? <p className="chat-management__muted">{subtitle}</p> : null}
           </div>
         </div>
 
@@ -80,7 +80,7 @@ export function OperatorPicker({
           <h2 id="operator-pick-heading">Операторы</h2>
           {loading && <p className="chat-management__muted">Загружаем список…</p>}
           {!loading && items.length === 0 && (
-            <div className="chat-management__empty">Операторы не найдены. Запустите seed или создайте профили в Управлении.</div>
+            <div className="chat-management__empty">Операторы не найдены. Запустите симулятор</div>
           )}
           <ul className="chat-management__list">
             {items.map((operator) => (

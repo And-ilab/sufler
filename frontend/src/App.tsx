@@ -67,7 +67,6 @@ const ONLINE_CHAT_UI_ROLES = new Set([
   'contact_center_online_chat_operator',
   'contact_center_supervisor',
   'contact_center_module_administrator',
-  'contact_center_analyst',
   'software_administrator',
 ])
 
@@ -166,13 +165,14 @@ function App() {
     const canSupervisor = canAccessOnlineChatSupervisor(roles)
     const canAdmin = canAccessOnlineChatAdmin(roles)
     const showSimulator = import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'
+    const simOperatePreview = params.get('mode') === 'operate' && Boolean(params.get('operator')?.trim())
     const allowed = isSupervisorRoute
       ? canSupervisor
       : isAdminRoute
         ? canAdmin
         : isSimulatorRoute
           ? showSimulator
-          : route === '/online-chat' && canViewArm
+          : route === '/online-chat' && (canViewArm || simOperatePreview || showSimulator)
 
     if (!allowed) {
       return (
@@ -188,32 +188,45 @@ function App() {
     }
 
     const operatorFromQuery = params.get('operator')?.trim() || ''
-    const forcedView = params.get('mode') === 'view' || (!canOperateArm && canViewArm)
+    /** Simulator / multi-window: work as this operator (writable), not observation. */
+    const simOperate = params.get('mode') === 'operate' && Boolean(operatorFromQuery)
+    const forcedView = !simOperate && (
+      params.get('mode') === 'view' || (!canOperateArm && canViewArm)
+    )
     const allowTransferView = canTransferInOnlineChatView(roles)
     const viewerName = employeeDisplayName(auth.username, roles)
     const viewerTitle = jobTitleFromRoles(roles)
-    const armRole = canAdmin
-      ? 'admin' as const
-      : canSupervisor
-        ? 'supervisor' as const
-        : 'operator' as const
+    const armRole = simOperate
+      ? 'operator' as const
+      : canAdmin
+        ? 'admin' as const
+        : canSupervisor
+          ? 'supervisor' as const
+          : 'operator' as const
+    const armNavLabel = canOperateArm || simOperate ? 'Чаты' : 'Операторы'
+    const workingAsOperator = simOperate || (canOperateArm && !forcedView)
 
     const shellProps = {
       currentPath: route,
-      displayName: forcedView && operatorFromQuery
-        ? `Просмотр · ${operatorFromQuery}`
-        : viewerName,
-      jobTitle: forcedView && operatorFromQuery
-        ? `${viewerTitle} · режим просмотра`
-        : viewerTitle,
-      showArm: canViewArm,
+      displayName: simOperate
+        ? operatorFromQuery
+        : forcedView && operatorFromQuery
+          ? `Просмотр · ${operatorFromQuery}`
+          : viewerName,
+      jobTitle: simOperate
+        ? 'Оператор онлайн-чата · симулятор'
+        : forcedView && operatorFromQuery
+          ? `${viewerTitle} · режим просмотра`
+          : viewerTitle,
+      showArm: canViewArm || simOperate || showSimulator,
       showSupervisor: canSupervisor,
       showAdmin: canAdmin,
       showSimulator,
+      armNavLabel,
       themeKind: chatThemeKind,
       onToggleTheme: () =>
         setChatThemeKind((kind) => (kind === 'light' ? 'dark' : 'light')),
-      showMenuButton: route === '/online-chat' && canOperateArm && !forcedView,
+      showMenuButton: route === '/online-chat' && (workingAsOperator || forcedView),
       menuOpen: armMenuOpen,
       onMenuToggle: () => setArmMenuOpen((open) => !open),
     }
@@ -252,13 +265,14 @@ function App() {
       <ChatPlatformShell {...shellProps}>
         <ChatArmApp
           demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
-          operatorName={forcedView ? operatorFromQuery : viewerName}
+          operatorName={simOperate || forcedView ? operatorFromQuery : viewerName}
           themeKind={chatThemeKind}
           statsDrawerOpen={armMenuOpen}
           onStatsDrawerOpenChange={setArmMenuOpen}
           armRole={armRole}
           viewOnly={forcedView}
           allowTransferInView={forcedView && allowTransferView}
+          portalRoles={roles}
         />
       </ChatPlatformShell>
     )

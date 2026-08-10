@@ -11,24 +11,14 @@ interface ChatPlatformShellProps {
   showSupervisor?: boolean
   showAdmin?: boolean
   showSimulator?: boolean
+  /** Nav label for /online-chat: «Чаты» (operator) or «Операторы» (admin/supervisor). */
+  armNavLabel?: string
   themeKind?: ThemeKind
   onToggleTheme?: () => void
   showMenuButton?: boolean
   menuOpen?: boolean
   onMenuToggle?: () => void
 }
-
-const routes = [
-  { href: '/online-chat', label: 'АРМ оператора', access: 'arm' as const },
-  { href: '/online-chat/supervisor', label: 'Супервизор', access: 'supervisor' as const },
-  { href: '/online-chat/admin', label: 'Управление', access: 'admin' as const },
-  {
-    href: '/online-chat/simulator',
-    label: 'Симулятор',
-    access: 'simulator' as const,
-    testOnly: true,
-  },
-]
 
 export function ChatPlatformShell({
   children,
@@ -39,12 +29,24 @@ export function ChatPlatformShell({
   showSupervisor = false,
   showAdmin = false,
   showSimulator = false,
+  armNavLabel = 'Чаты',
   themeKind = 'light',
   onToggleTheme,
   showMenuButton = false,
   menuOpen = false,
   onMenuToggle,
 }: ChatPlatformShellProps) {
+  const routes = [
+    { href: '/online-chat', label: armNavLabel, access: 'arm' as const },
+    { href: '/online-chat/supervisor', label: 'Супервизор', access: 'supervisor' as const },
+    { href: '/online-chat/admin', label: 'Управление', access: 'admin' as const },
+    {
+      href: '/online-chat/simulator',
+      label: 'Симулятор',
+      access: 'simulator' as const,
+      testOnly: true,
+    },
+  ]
   const t = themeKind === 'light' ? ARM_THEME_LIGHT : ARM_THEME_DARK
   const style = {
     '--arm-accent': t.accent.primary,

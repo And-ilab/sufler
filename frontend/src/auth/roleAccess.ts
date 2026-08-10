@@ -37,12 +37,12 @@ const SUFLER_ROLES = new Set([
   'llm_knowledge_base_administrator',
 ])
 
+/** Online-chat ops UI — not analyst (reports only per §2.4 п.7 / II.6). */
 const ONLINE_CHAT_ROLES = new Set([
   'software_administrator',
   'contact_center_module_administrator',
   'contact_center_online_chat_operator',
   'contact_center_supervisor',
-  'contact_center_analyst',
 ])
 
 /** Open Ассистент window (write or read-only per canWriteAssistantChat). */

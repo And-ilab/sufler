@@ -22,6 +22,7 @@ export interface ChatArmAppProps {
   armRole?: 'operator' | 'supervisor' | 'admin'
   viewOnly?: boolean
   allowTransferInView?: boolean
+  portalRoles?: readonly string[]
 }
 
 /** Emerald ARM: light mockup by default, optional dark toggle. */
@@ -34,6 +35,7 @@ export function ChatArmApp({
   armRole = 'operator',
   viewOnly = false,
   allowTransferInView = false,
+  portalRoles = [],
 }: ChatArmAppProps) {
   const t = themeKind === 'light' ? ARM_THEME_LIGHT : ARM_THEME_DARK
   const scheme = useMemo(() => getSchemePalette(t, 'belarusbank_emerald'), [t])
@@ -161,6 +163,7 @@ export function ChatArmApp({
           armRole={armRole}
           viewOnly={viewOnly}
           allowTransferInView={allowTransferInView}
+          portalRoles={portalRoles}
         />
       </div>
     </main>

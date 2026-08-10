@@ -29,6 +29,7 @@ import {
   type SlaTone,
 } from '../api/onlineChatApi'
 import { operatorsApi } from '../api/managementApi'
+import { getAllowedLauncherModules } from '../../auth/roleAccess'
 import {
   Button,
   Callout,
@@ -107,77 +108,77 @@ function operatorStatusShade(
     ? {
         available: {
           inactive: { background: "#eef3f0", color: "#4a6354", border: "#c5d4cb", borderLeft: "#7a9a86" },
-          active: { background: "#dce8e1", color: "#2f4a3a", border: "#9eb5a7", borderLeft: "#5f7f6c" },
+          active: { background: "#1B8F4A", color: "#FFFFFF", border: "#146C38", borderLeft: "#0F5A2E" },
         },
         invisible: {
           inactive: { background: "#f1f0f3", color: "#5c5666", border: "#d0ccd6", borderLeft: "#8a8396" },
-          active: { background: "#e4e1e9", color: "#3f3a4a", border: "#b8b2c2", borderLeft: "#6e677c" },
+          active: { background: "#6B7280", color: "#FFFFFF", border: "#4B5563", borderLeft: "#374151" },
         },
         break: {
           inactive: { background: "#f5f2eb", color: "#6b5f45", border: "#ddd4c2", borderLeft: "#a8946e" },
-          active: { background: "#ebe4d6", color: "#4a412f", border: "#c9b896", borderLeft: "#8a7752" },
+          active: { background: "#D97706", color: "#FFFFFF", border: "#B45309", borderLeft: "#92400E" },
         },
         tech_break: {
           inactive: { background: "#f4efec", color: "#6b564c", border: "#dccfc7", borderLeft: "#a88878" },
-          active: { background: "#e9dfd9", color: "#4a3a33", border: "#c9b2a6", borderLeft: "#8a6b5c" },
+          active: { background: "#C2410C", color: "#FFFFFF", border: "#9A3412", borderLeft: "#7C2D12" },
         },
         lunch: {
           inactive: { background: "#f5f3e9", color: "#6a6348", border: "#ddd7c0", borderLeft: "#a89c6e" },
-          active: { background: "#ebe6d4", color: "#4a442f", border: "#c9c096", borderLeft: "#8a8052" },
+          active: { background: "#CA8A04", color: "#FFFFFF", border: "#A16207", borderLeft: "#854D0E" },
         },
         training: {
           inactive: { background: "#eef2f2", color: "#4d5f5e", border: "#c8d2d1", borderLeft: "#7a9290" },
-          active: { background: "#dfe8e7", color: "#334241", border: "#a8b8b6", borderLeft: "#5f7775" },
+          active: { background: "#0F766E", color: "#FFFFFF", border: "#0D5C56", borderLeft: "#115E59" },
         },
         meeting: {
           inactive: { background: "#eef0f4", color: "#4f5666", border: "#c9ced8", borderLeft: "#7d8699" },
-          active: { background: "#e0e4ec", color: "#353b4a", border: "#adb4c2", borderLeft: "#626b80" },
+          active: { background: "#4F46E5", color: "#FFFFFF", border: "#4338CA", borderLeft: "#3730A3" },
         },
         offline_queue: {
           inactive: { background: "#eef2f5", color: "#4d5a66", border: "#c8d2da", borderLeft: "#7a8c9a" },
-          active: { background: "#dfe6ec", color: "#333e4a", border: "#a8b6c2", borderLeft: "#5f7180" },
+          active: { background: "#2563EB", color: "#FFFFFF", border: "#1D4ED8", borderLeft: "#1E40AF" },
         },
         offline: {
           inactive: { background: "#f1f2f3", color: "#5a6066", border: "#d0d3d6", borderLeft: "#8a9096" },
-          active: { background: "#e4e6e8", color: "#3d4248", border: "#b8bdc2", borderLeft: "#6e747a" },
+          active: { background: "#4B5563", color: "#FFFFFF", border: "#374151", borderLeft: "#1F2937" },
         },
       }
     : {
         available: {
           inactive: { background: "#2a3530", color: "#9aafa3", border: "#3d4a43", borderLeft: "#6a8074" },
-          active: { background: "#354038", color: "#c5d4cb", border: "#4d5c54", borderLeft: "#84998c" },
+          active: { background: "#2E9E68", color: "#FFFFFF", border: "#52B896", borderLeft: "#6FD4A0" },
         },
         invisible: {
           inactive: { background: "#302e34", color: "#a39eab", border: "#45424c", borderLeft: "#7a7484" },
-          active: { background: "#3b3842", color: "#cdc8d4", border: "#565260", borderLeft: "#908a9a" },
+          active: { background: "#6B7280", color: "#FFFFFF", border: "#9CA3AF", borderLeft: "#D1D5DB" },
         },
         break: {
           inactive: { background: "#342f28", color: "#b0a48e", border: "#4a4338", borderLeft: "#85765c" },
-          active: { background: "#403a30", color: "#d4c9b4", border: "#5c5344", borderLeft: "#9a8a6e" },
+          active: { background: "#D97706", color: "#FFFFFF", border: "#FBBF24", borderLeft: "#FCD34D" },
         },
         tech_break: {
           inactive: { background: "#342c28", color: "#b09a8e", border: "#4a3e38", borderLeft: "#85705c" },
-          active: { background: "#403632", color: "#d4bfb4", border: "#5c4a44", borderLeft: "#9a7e6e" },
+          active: { background: "#EA580C", color: "#FFFFFF", border: "#FB923C", borderLeft: "#FDBA74" },
         },
         lunch: {
           inactive: { background: "#343228", color: "#b0aa8e", border: "#4a4738", borderLeft: "#857f5c" },
-          active: { background: "#403e30", color: "#d4ceb4", border: "#5c5844", borderLeft: "#9a946e" },
+          active: { background: "#CA8A04", color: "#1A1A1A", border: "#FBBF24", borderLeft: "#FDE68A" },
         },
         training: {
           inactive: { background: "#2a3232", color: "#9aabaa", border: "#3d4848", borderLeft: "#6a807e" },
-          active: { background: "#353f3e", color: "#c5d4d3", border: "#4d5c5a", borderLeft: "#849997" },
+          active: { background: "#0D9488", color: "#FFFFFF", border: "#2DD4BF", borderLeft: "#5EEAD4" },
         },
         meeting: {
           inactive: { background: "#2c2f36", color: "#9aa0ab", border: "#40444c", borderLeft: "#6e7484" },
-          active: { background: "#383c46", color: "#c5cad4", border: "#505560", borderLeft: "#868c9a" },
+          active: { background: "#6366F1", color: "#FFFFFF", border: "#818CF8", borderLeft: "#A5B4FC" },
         },
         offline_queue: {
           inactive: { background: "#2a3036", color: "#9aa4ab", border: "#3d464c", borderLeft: "#6a7884" },
-          active: { background: "#353c44", color: "#c5ced4", border: "#4d5860", borderLeft: "#84909a" },
+          active: { background: "#3B82F6", color: "#FFFFFF", border: "#60A5FA", borderLeft: "#93C5FD" },
         },
         offline: {
           inactive: { background: "#2e3032", color: "#9aa0a3", border: "#434648", borderLeft: "#72787a" },
-          active: { background: "#3a3c3e", color: "#c5c9cb", border: "#54585a", borderLeft: "#888e90" },
+          active: { background: "#6B7280", color: "#FFFFFF", border: "#9CA3AF", borderLeft: "#D1D5DB" },
         },
       };
   return map[key];
@@ -245,16 +246,22 @@ const ARM_ROLE_LABELS: Record<ArmRole, string> = {
   admin: "Администратор",
 };
 
-/** Overlay menu stubs aligned with TZ II.5 / АРМ (no real navigation yet). */
+/** Overlay menu stubs aligned with TZ II.5 / АРМ (colleagues hidden for admin — II.5.4). */
 const ARM_MENU_ITEMS: { id: ArmStatsTab; label: string; hint: string; roles: ArmRole[] }[] = [
   { id: "dialogs", label: "Диалоги", hint: "Очереди и активная переписка", roles: ["operator", "supervisor", "admin"] },
   { id: "history", label: "История обращений", hint: "Единая история клиента", roles: ["operator", "supervisor", "admin"] },
-  { id: "stats", label: "Статистика смены", hint: "Личные показатели оператора", roles: ["operator", "supervisor", "admin"] },
-  { id: "colleagues", label: "Диалоги коллег", hint: "Просмотр без ответа", roles: ["operator", "supervisor", "admin"] },
-  { id: "internal", label: "Внутренний чат", hint: "Переписка между операторами", roles: ["operator", "supervisor", "admin"] },
+  { id: "stats", label: "Статистика смены", hint: "Личные показатели оператора", roles: ["operator", "supervisor"] },
+  { id: "colleagues", label: "Диалоги коллег", hint: "Просмотр без ответа", roles: ["operator", "supervisor"] },
+  { id: "internal", label: "Внутренний чат", hint: "Переписка между операторами", roles: ["operator", "supervisor"] },
   { id: "templates", label: "Шаблоны ответов", hint: "Быстрые заготовки", roles: ["operator", "supervisor", "admin"] },
   { id: "settings", label: "Настройки АРМ", hint: "Тема, уведомления, звук", roles: ["operator", "supervisor", "admin"] },
   { id: "help", label: "Справка", hint: "Краткая инструкция по АРМ", roles: ["operator", "supervisor", "admin"] },
+];
+
+const PORTAL_MODULE_LINKS: { id: "sufler" | "assistant" | "online_chat"; label: string; href: string }[] = [
+  { id: "sufler", label: "Суфлёр", href: "/sufler" },
+  { id: "assistant", label: "Ассистент", href: "/assistant" },
+  { id: "online_chat", label: "Онлайн-чат", href: "/online-chat" },
 ];
 
 function armMenuItemsForRole(role: ArmRole) {
@@ -2522,6 +2529,7 @@ function ArmOverlayMenu({
   activeId,
   onSelect,
   onClose,
+  portalRoles = [],
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
@@ -2530,8 +2538,11 @@ function ArmOverlayMenu({
   activeId: ArmStatsTab;
   onSelect: (id: ArmStatsTab) => void;
   onClose: () => void;
+  portalRoles?: readonly string[];
 }): JSX.Element {
   const items = armMenuItemsForRole(armRole);
+  const allowedModules = new Set(getAllowedLauncherModules(portalRoles));
+  const moduleLinks = PORTAL_MODULE_LINKS.filter((item) => allowedModules.has(item.id));
   return (
     <div
       aria-hidden={!open}
@@ -2625,6 +2636,39 @@ function ArmOverlayMenu({
             minHeight: 0,
           }}
         >
+          {moduleLinks.length > 0 ? (
+            <div style={{ marginBottom: 4 }}>
+              <Text style={{ display: "block", fontSize: 11, color: t.text.tertiary, margin: "0 0 8px 4px" }}>
+                Модули
+              </Text>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {moduleLinks.map((module) => (
+                  <a
+                    key={module.id}
+                    href={module.href}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      padding: "12px 14px",
+                      border: `1px solid ${t.stroke.secondary}`,
+                      borderRadius: 10,
+                      background: t.bg.editor,
+                      color: t.text.primary,
+                      textDecoration: "none",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {module.label}
+                  </a>
+                ))}
+              </div>
+              <Text style={{ display: "block", fontSize: 11, color: t.text.tertiary, margin: "14px 0 8px 4px" }}>
+                Разделы АРМ
+              </Text>
+            </div>
+          ) : null}
           {items.map((item) => {
             const active = activeId === item.id;
             return (
@@ -2684,6 +2728,7 @@ export function ArmOperatorView({
   armRole: armRoleProp = "operator",
   viewOnly = false,
   allowTransferInView = false,
+  portalRoles = [],
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
@@ -2708,6 +2753,7 @@ export function ArmOperatorView({
   armRole?: ArmRole;
   viewOnly?: boolean;
   allowTransferInView?: boolean;
+  portalRoles?: readonly string[];
 }): JSX.Element {
   const operatorInitials = initialsFromDisplayName(operatorName);
   const armRole: ArmRole = viewOnly && armRoleProp === "admin" ? "supervisor" : armRoleProp;
@@ -2769,20 +2815,18 @@ export function ArmOperatorView({
         listDialogs("active", { client_online: false }),
       ]);
 
-      // Общая очередь — неназначенные (status=waiting).
-      const sharedOnline = waiting.filter((dialog) => dialog.client_online !== false);
+      // Общая очередь — все неназначенные (waiting), и для оператора, и в режиме просмотра.
       setLiveShared(
-        sharedOnline.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
+        waiting.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
       );
 
       if (viewOnly) {
-        // Observation mode: only the selected operator's active dialogs (read-only).
+        // Observation: shared queue stays visible; selected operator's dialogs in colleagues.
         const observed = activeDialogs.filter(
           (dialog) => dialog.operator_name === operatorName,
         );
         setLiveWaiting([]);
         setLiveMine([]);
-        setLiveShared([]);
         setLiveColleagues(
           observed.map((dialog, index) => ({
             ...dialogToQueueItem(dialog, { active: index === 0 }),
@@ -3551,6 +3595,7 @@ export function ArmOperatorView({
           open={statsDrawerOpen}
           armRole={armRole}
           activeId={statsTab}
+          portalRoles={portalRoles}
           onSelect={(id) => {
             setStatsTab(id);
             setComposerNotice(`Раздел «${ARM_MENU_ITEMS.find((item) => item.id === id)?.label ?? id}» пока недоступен.`);
