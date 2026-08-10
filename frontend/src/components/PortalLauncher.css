@@ -322,6 +322,10 @@
   background: var(--color-secondary);
 }
 
+.portal-launcher__glyph--online_chat {
+  background: #0a6b3c;
+}
+
 .portal-module-window {
   position: absolute;
   bottom: 92px;

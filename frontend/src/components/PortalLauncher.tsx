@@ -38,11 +38,13 @@ export interface PortalLauncherProps {
 const MODULE_LABELS: Record<LauncherModule, string> = {
   sufler: 'Суфлёр',
   assistant: 'Ассистент',
+  online_chat: 'Онлайн-чат',
 }
 
 const MODULE_GLYPH: Record<LauncherModule, string> = {
   sufler: 'S',
   assistant: 'A',
+  online_chat: 'C',
 }
 
 function ModuleGlyph({ module }: { module: LauncherModule }) {
@@ -342,6 +344,11 @@ export function PortalLauncher({
   )
 
   const openModule = (module: LauncherModule) => {
+    if (module === 'online_chat') {
+      window.location.assign('/online-chat')
+      onOpenModule?.(module)
+      return
+    }
     setOpenWindows((current) => new Set(current).add(module))
     setMenuOpen(false)
     onOpenModule?.(module)

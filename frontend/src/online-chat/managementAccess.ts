@@ -17,3 +17,9 @@ export function canAccessOnlineChatSupervisor(roles: readonly string[]): boolean
 export function canAccessOnlineChatAdmin(roles: readonly string[]): boolean {
   return roles.some((role) => ONLINE_CHAT_ADMIN_ROLES.has(role))
 }
+
+/** Supervisor may transfer in view mode; admin observation stays read-only. */
+export function canTransferInOnlineChatView(roles: readonly string[]): boolean {
+  if (canAccessOnlineChatAdmin(roles)) return false
+  return canAccessOnlineChatSupervisor(roles)
+}

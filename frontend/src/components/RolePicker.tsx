@@ -19,13 +19,14 @@ export interface RolePickerProps {
 const MODULE_BADGE: Record<LauncherModule, string> = {
   sufler: 'Суфлёр',
   assistant: 'Ассистент',
+  online_chat: 'Онлайн-чат',
 }
 
 export function RolePicker({
   selectedCode = null,
   onSelect,
   title = 'Выбор тестовой роли',
-  subtitle = 'Матрица ролей I.4 · Суфлёр / Ассистент / настройки / отчёты',
+  subtitle = 'Матрица ролей I.4 · Суфлёр / Ассистент / Онлайн-чат / настройки',
 }: RolePickerProps) {
   const groups = useMemo(() => {
     const map = new Map<string, DemoRoleDefinition[]>()

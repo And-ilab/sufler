@@ -1,9 +1,27 @@
-const ONLINE_CHAT_ARM_ROLES = new Set([
+const ONLINE_CHAT_ARM_OPERATE_ROLES = new Set([
+  'software_administrator',
+  'contact_center_online_chat_operator',
+])
+
+const ONLINE_CHAT_ARM_VIEW_ROLES = new Set([
   'software_administrator',
   'contact_center_online_chat_operator',
   'contact_center_module_administrator',
+  'contact_center_supervisor',
+  'contact_center_analyst',
 ])
 
+/** Full operator ARM (accept / reply / presence). */
+export function canOperateOnlineChatArm(roles: readonly string[]): boolean {
+  return roles.some((role) => ONLINE_CHAT_ARM_OPERATE_ROLES.has(role))
+}
+
+/** May open ARM at least in read-only observation mode. */
+export function canViewOnlineChatArm(roles: readonly string[]): boolean {
+  return roles.some((role) => ONLINE_CHAT_ARM_VIEW_ROLES.has(role))
+}
+
+/** @deprecated Prefer canOperate / canView; kept for existing imports. */
 export function canAccessOnlineChatArm(roles: readonly string[]): boolean {
-  return roles.some((role) => ONLINE_CHAT_ARM_ROLES.has(role))
+  return canViewOnlineChatArm(roles)
 }

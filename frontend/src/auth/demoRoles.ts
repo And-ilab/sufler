@@ -50,6 +50,13 @@ export const DEMO_ROLE_CATALOG: readonly DemoRoleDefinition[] = [
     label: 'Аналитик Контакт-центра',
     group: 'Контакт-центр',
   },
+  /** Project role for online-chat ops panel (not one of the 13 contractual I.4 codes in roles.py). */
+  {
+    number: 14,
+    code: 'contact_center_supervisor',
+    label: 'Супервизор Контакт-центра (онлайн-чат)',
+    group: 'Контакт-центр',
+  },
   {
     number: 8,
     code: 'ai_assistant_module_administrator',

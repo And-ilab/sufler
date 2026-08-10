@@ -128,6 +128,7 @@
 .chat-platform-shell__nav a {
   display: flex;
   align-items: center;
+  gap: 8px;
   padding: 0 15px;
   border-bottom: 3px solid transparent;
   color: #ffffffc7;
@@ -143,6 +144,30 @@
   color: #fff;
   background: #ffffff12;
   border-bottom-color: #9be1bb;
+}
+
+.chat-platform-shell__nav a.is-test-only {
+  color: #ffe8a8;
+  border-bottom-style: dashed;
+}
+
+.chat-platform-shell__nav a.is-test-only.is-active {
+  border-bottom-color: #ffd56a;
+}
+
+.chat-platform-shell__test-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border: 1px solid #ffd56aaa;
+  border-radius: 999px;
+  color: #3d2e00;
+  background: #ffd56a;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .chat-platform-shell__user {

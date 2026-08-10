@@ -98,9 +98,8 @@ export function SupervisorApp({ demoMode = false }: SupervisorAppProps) {
 
         {isDemo && (
           <p className="chat-management__notice" role="status">
-            Локальный / демонстрационный контур: данные предназначены для проверки сценариев.
-            {' '}
-            Внимание! Не забудь поменять функционал кнопки открыть на обычный просмотр диалога оператора
+            Локальный / демонстрационный контур: данные для проверки сценариев.
+            Кнопка «Открыть» запускает АРМ выбранного оператора в режиме просмотра (без ответа от его лица).
           </p>
         )}
         {error && <p className="chat-management__error" role="alert">{error}</p>}
@@ -173,10 +172,10 @@ export function SupervisorApp({ demoMode = false }: SupervisorAppProps) {
                       <td>
                         <a
                           className="chat-button is-secondary"
-                          href={`/online-chat?operator=${encodeURIComponent(operator.name)}`}
+                          href={`/online-chat?mode=view&operator=${encodeURIComponent(operator.name)}&transfer=1`}
                           target="_blank"
                           rel="noreferrer"
-                          aria-label={`Открыть АРМ оператора ${operator.name}`}
+                          aria-label={`Просмотр АРМ оператора ${operator.name}`}
                         >
                           Открыть
                         </a>

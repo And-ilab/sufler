@@ -117,9 +117,9 @@ def _operator_write_denied(
             is_active=True,
         ).first()
     actor_name = profile.display_name if profile else claimed_name.strip()
+    # Never write to another operator's dialog (including module admin / spoofed name).
     if (
-        not is_admin
-        and dialog.operator_name
+        dialog.operator_name
         and actor_name
         and actor_name != dialog.operator_name
     ):

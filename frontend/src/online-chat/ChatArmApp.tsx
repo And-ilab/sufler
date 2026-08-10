@@ -19,6 +19,9 @@ export interface ChatArmAppProps {
   themeKind?: ThemeKind
   statsDrawerOpen?: boolean
   onStatsDrawerOpenChange?: (open: boolean) => void
+  armRole?: 'operator' | 'supervisor' | 'admin'
+  viewOnly?: boolean
+  allowTransferInView?: boolean
 }
 
 /** Emerald ARM: light mockup by default, optional dark toggle. */
@@ -28,6 +31,9 @@ export function ChatArmApp({
   themeKind = 'light',
   statsDrawerOpen,
   onStatsDrawerOpenChange,
+  armRole = 'operator',
+  viewOnly = false,
+  allowTransferInView = false,
 }: ChatArmAppProps) {
   const t = themeKind === 'light' ? ARM_THEME_LIGHT : ARM_THEME_DARK
   const scheme = useMemo(() => getSchemePalette(t, 'belarusbank_emerald'), [t])
@@ -37,10 +43,15 @@ export function ChatArmApp({
   const [suflerSuggestionText, setSuflerSuggestionText] = useState('')
   const [toast, setToast] = useState<string | null>(null)
   const [presence, setPresence] = useState<OperatorPresence>(initialPresence)
-  const [viewMode, setViewMode] = useState<'active' | 'colleague'>('active')
+  const [viewMode, setViewMode] = useState<'active' | 'colleague'>(viewOnly ? 'colleague' : 'active')
   const [closeTopic, setCloseTopic] = useState<string>(CLOSE_TOPICS[0])
 
   useEffect(() => {
+    if (viewOnly) setViewMode('colleague')
+  }, [viewOnly])
+
+  useEffect(() => {
+    if (viewOnly) return
     void operatorsApi.list().then((operators) => {
       const profile = operators.find((item) => item.name === operatorName)
       if (!profile) return
@@ -60,9 +71,10 @@ export function ChatArmApp({
         setPresence('offline_queue')
       }
     }).catch(() => undefined)
-  }, [operatorName])
+  }, [operatorName, viewOnly])
 
   const persistPresence = (next: OperatorPresence) => {
+    if (viewOnly) return
     setPresence(next)
     const mapped: PersistedPresence =
       next === 'tech_break'
@@ -146,6 +158,9 @@ export function ChatArmApp({
           operatorName={operatorName}
           statsDrawerOpen={statsDrawerOpen}
           onStatsDrawerOpenChange={onStatsDrawerOpenChange}
+          armRole={armRole}
+          viewOnly={viewOnly}
+          allowTransferInView={allowTransferInView}
         />
       </div>
     </main>

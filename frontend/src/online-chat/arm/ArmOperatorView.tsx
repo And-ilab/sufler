@@ -2680,6 +2680,9 @@ export function ArmOperatorView({
   operatorName = "Иванов И.И.",
   statsDrawerOpen: statsDrawerOpenProp,
   onStatsDrawerOpenChange,
+  armRole: armRoleProp = "operator",
+  viewOnly = false,
+  allowTransferInView = false,
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
@@ -2701,9 +2704,12 @@ export function ArmOperatorView({
   operatorName?: string;
   statsDrawerOpen?: boolean;
   onStatsDrawerOpenChange?: (open: boolean) => void;
+  armRole?: ArmRole;
+  viewOnly?: boolean;
+  allowTransferInView?: boolean;
 }): JSX.Element {
   const operatorInitials = initialsFromDisplayName(operatorName);
-  const [armRole, setArmRole] = useState<ArmRole>("operator");
+  const armRole: ArmRole = viewOnly && armRoleProp === "admin" ? "supervisor" : armRoleProp;
   const [closedDialogIds, setClosedDialogIds] = useState<Record<string, boolean>>({});
   const [blockedDialogIds, setBlockedDialogIds] = useState<Record<string, boolean>>({});
   const [summaryHistory, setSummaryHistory] = useState<SummaryHistoryData>(EMPTY_SUMMARY_HISTORY);
@@ -2767,23 +2773,40 @@ export function ArmOperatorView({
         sharedOnline.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
       );
 
-      const mineActive = activeDialogs.filter(
-        (dialog) => !dialog.operator_name || dialog.operator_name === operatorName,
-      );
-      // Ожидают ответа — мои active, где последнее сообщение от клиента.
-      const awaitingReply = mineActive.filter((dialog) => dialog.needs_reply);
-      // В диалоге со мной — мои active без неотвеченного сообщения клиента.
-      const mineIdle = mineActive.filter((dialog) => !dialog.needs_reply);
-      setLiveWaiting(
-        awaitingReply.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
-      );
-      setLiveMine(mineIdle.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })));
+      if (viewOnly) {
+        // Observation mode: only the selected operator's active dialogs (read-only).
+        const observed = activeDialogs.filter(
+          (dialog) => dialog.operator_name === operatorName,
+        );
+        setLiveWaiting([]);
+        setLiveMine([]);
+        setLiveShared([]);
+        setLiveColleagues(
+          observed.map((dialog, index) => ({
+            ...dialogToQueueItem(dialog, { active: index === 0 }),
+            readOnly: true,
+            operatorName: dialog.operator_name ?? operatorName,
+          })),
+        );
+      } else {
+        const mineActive = activeDialogs.filter(
+          (dialog) => !dialog.operator_name || dialog.operator_name === operatorName,
+        );
+        // Ожидают ответа — мои active, где последнее сообщение от клиента.
+        const awaitingReply = mineActive.filter((dialog) => dialog.needs_reply);
+        // В диалоге со мной — мои active без неотвеченного сообщения клиента.
+        const mineIdle = mineActive.filter((dialog) => !dialog.needs_reply);
+        setLiveWaiting(
+          awaitingReply.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
+        );
+        setLiveMine(mineIdle.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })));
 
-      setLiveColleagues(
-        activeDialogs
-          .filter((dialog) => dialog.operator_name && dialog.operator_name !== operatorName)
-          .map((dialog) => ({ ...dialogToQueueItem(dialog), readOnly: true })),
-      );
+        setLiveColleagues(
+          activeDialogs
+            .filter((dialog) => dialog.operator_name && dialog.operator_name !== operatorName)
+            .map((dialog) => ({ ...dialogToQueueItem(dialog), readOnly: true })),
+        );
+      }
 
       const offlineMerged = [...offlineWaiting, ...offlineActive];
       const offlineUnique = Array.from(
@@ -2804,14 +2827,20 @@ export function ArmOperatorView({
       );
 
       setLiveInitiated(
-        initiatedDialogs
-          .filter((dialog) => !dialog.operator_name || dialog.operator_name === operatorName)
-          .map((dialog) => dialogToQueueItem(dialog)),
+        viewOnly
+          ? []
+          : initiatedDialogs
+              .filter((dialog) => !dialog.operator_name || dialog.operator_name === operatorName)
+              .map((dialog) => dialogToQueueItem(dialog)),
       );
+      if (viewOnly) {
+        setLiveOffline([]);
+        setLiveClosed([]);
+      }
     } catch {
       /* Backend may be offline in pure UI/story mode — keep mock queues. */
     }
-  }, [operatorName]);
+  }, [operatorName, viewOnly]);
 
   useEffect(() => {
     void refreshLiveQueues();
@@ -2979,7 +3008,8 @@ export function ArmOperatorView({
     remainingDialogs[0] ??
     null;
   const hasActiveDialog = !!active;
-  const isReadOnly = viewMode === "colleague";
+  const isReadOnly = viewOnly || viewMode === "colleague";
+  const canTransferDespiteView = isReadOnly && allowTransferInView;
   const isClientBlocked = !!(active && blockedDialogIds[active.id]);
   const composerLocked = isReadOnly || isClientBlocked || !hasActiveDialog;
 
@@ -3029,6 +3059,7 @@ export function ArmOperatorView({
       });
 
     const needsAccept =
+      !viewOnly &&
       liveShared.some((item) => item.id === dialogId) &&
       !acceptedLiveRef.current[dialogId] &&
       !acceptInFlightRef.current[dialogId];
@@ -3050,7 +3081,7 @@ export function ArmOperatorView({
     return () => {
       cancelled = true;
     };
-  }, [active?.id, active?.live, liveShared, refreshLiveQueues, operatorName]);
+  }, [active?.id, active?.live, liveShared, refreshLiveQueues, operatorName, viewOnly]);
 
   useEffect(() => {
     void operatorsApi
@@ -3145,9 +3176,18 @@ export function ArmOperatorView({
       const next = { ...prev };
       if (liveWaiting.length > 0) next.waiting = true;
       if (liveShared.length > 0) next.shared = true;
+      if (viewOnly && liveColleagues.length > 0) next.colleagues = true;
       return next;
     });
-  }, [liveWaiting.length, liveShared.length]);
+  }, [liveWaiting.length, liveShared.length, liveColleagues.length, viewOnly]);
+
+  useEffect(() => {
+    if (!viewOnly || liveColleagues.length === 0) return;
+    onViewModeChange("colleague");
+    if (!liveColleagues.some((item) => item.id === selectedQueue)) {
+      onSelectQueue(liveColleagues[0].id);
+    }
+  }, [viewOnly, liveColleagues, selectedQueue, onSelectQueue, onViewModeChange]);
 
   useEffect(() => {
     if (armRole !== "admin") return;
@@ -3297,7 +3337,8 @@ export function ArmOperatorView({
   }, [directoryOperators, liveColleagues, operatorName]);
 
   const openTransferDialog = () => {
-    if (!active?.live || composerLocked) return;
+    if (!active?.live) return;
+    if (composerLocked && !canTransferDespiteView) return;
     setTransferOperatorName(transferOperatorOptions[0]?.value ?? "");
     setTransferDialogOpen(true);
   };
@@ -3499,9 +3540,14 @@ export function ArmOperatorView({
               status={status}
               active={presence === status.id}
               size="md"
-              onClick={() => onPresenceChange(status.id)}
+              onClick={viewOnly ? undefined : () => onPresenceChange(status.id)}
             />
           ))}
+          {viewOnly ? (
+            <Pill tone="warning" size="sm">
+              только просмотр
+            </Pill>
+          ) : null}
         </Row>
       </div>
 
@@ -3755,7 +3801,9 @@ export function ArmOperatorView({
                   }}
                 >
                   <Callout tone="warning" style={{ fontSize: 12, maxWidth: 420, width: "100%" }}>
-                    Режим просмотра: диалог коллеги без возможности отправки.
+                    {allowTransferInView
+                      ? "Режим просмотра: без ответа клиенту. Можно перевести диалог."
+                      : "Режим просмотра: диалоги оператора только для наблюдения, без действий от его лица."}
                   </Callout>
                 </div>
               ) : (
@@ -4110,7 +4158,7 @@ export function ArmOperatorView({
               </Button>
               <Button
                 variant="secondary"
-                disabled={composerLocked || !active?.live}
+                disabled={!active?.live || (composerLocked && !canTransferDespiteView)}
                 onClick={openTransferDialog}
               >
                 Перевести

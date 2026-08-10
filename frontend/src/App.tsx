@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { readStoredDemoRole } from './auth/demoRoles'
 import { usePortalAuth } from './auth/usePortalAuth'
 import { AiHubAdminApp } from './ai-hub/admin/AiHubAdminApp'
 import { isAdminCenterRole } from './ai-hub/admin/adminNav'
@@ -10,12 +11,17 @@ import { canAccessInternalKc } from './internal-kc/internalKcAccess'
 import { AssistantWindowApp } from './assistant/AssistantWindowApp'
 import { SuflerPhoneApp } from './sufler/SuflerPhoneApp'
 import { ChatArmApp } from './online-chat/ChatArmApp'
-import { canAccessOnlineChatArm } from './online-chat/chatArmAccess'
+import {
+  canOperateOnlineChatArm,
+  canViewOnlineChatArm,
+} from './online-chat/chatArmAccess'
 import { ChatAdminApp } from './online-chat/admin/ChatAdminApp'
 import {
   canAccessOnlineChatAdmin,
   canAccessOnlineChatSupervisor,
+  canTransferInOnlineChatView,
 } from './online-chat/managementAccess'
+import { OperatorPicker } from './online-chat/OperatorPicker'
 import { ChatSimulatorApp } from './online-chat/simulator/ChatSimulatorApp'
 import { ChatPlatformShell } from './online-chat/shell/ChatPlatformShell'
 import { SupervisorApp } from './online-chat/supervisor/SupervisorApp'
@@ -50,10 +56,21 @@ function jobTitleFromRoles(roles: readonly string[]): string {
   return 'Сотрудник КЦ'
 }
 
-function employeeDisplayName(username: string | null | undefined, operatorFromQuery?: string | null) {
-  if (operatorFromQuery?.trim()) return operatorFromQuery.trim()
+function employeeDisplayName(username: string | null | undefined) {
   if (username && username !== 'Development user') return username
   return 'Иванов И.И.'
+}
+
+/** RolePicker selection narrows FE gates in DEV/demo without changing /api/auth/me. */
+function rolesForUi(authRoles: readonly string[]): string[] {
+  const demo = readStoredDemoRole()
+  if (
+    demo
+    && (import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1')
+  ) {
+    return [demo]
+  }
+  return [...authRoles]
 }
 
 function StandaloneModule({
@@ -124,16 +141,21 @@ function App() {
   }
 
   if (route === '/online-chat' || route.startsWith('/online-chat/')) {
+    const roles = rolesForUi(auth.roles)
     const isSupervisorRoute = route === '/online-chat/supervisor'
     const isAdminRoute = route === '/online-chat/admin'
     const isSimulatorRoute = route === '/online-chat/simulator'
+    const canOperateArm = canOperateOnlineChatArm(roles)
+    const canViewArm = canViewOnlineChatArm(roles)
+    const canSupervisor = canAccessOnlineChatSupervisor(roles)
+    const canAdmin = canAccessOnlineChatAdmin(roles)
     const allowed = isSupervisorRoute
-      ? canAccessOnlineChatSupervisor(auth.roles)
+      ? canSupervisor
       : isAdminRoute
-        ? canAccessOnlineChatAdmin(auth.roles)
+        ? canAdmin
         : isSimulatorRoute
           ? import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'
-          : route === '/online-chat' && canAccessOnlineChatArm(auth.roles)
+          : route === '/online-chat' && canViewArm
 
     if (!allowed) {
       return (
@@ -142,27 +164,33 @@ function App() {
             <StatusBadge status="danger">403</StatusBadge>
             <h1>Нет доступа к разделу онлайн-чата</h1>
             <p>Для выбранного маршрута требуется соответствующая роль Контакт-центра.</p>
-            <Button onClick={() => window.location.assign('/')}>Вернуться на портал</Button>
+            <Button onClick={() => window.location.assign('/ai-hub')}>Выбрать роль</Button>
           </Card>
         </main>
       )
     }
 
-    const operatorFromQuery = new URLSearchParams(window.location.search).get('operator')?.trim()
-    const operatorName = employeeDisplayName(auth.username, operatorFromQuery)
+    const params = new URLSearchParams(window.location.search)
+    const operatorFromQuery = params.get('operator')?.trim() || ''
+    const forcedView = params.get('mode') === 'view' || (!canOperateArm && canViewArm)
+    const allowTransferView = canTransferInOnlineChatView(roles)
+    const viewerName = employeeDisplayName(auth.username)
+    const armRole = canAdmin ? 'admin' as const : canSupervisor && !canOperateArm ? 'supervisor' as const : 'operator' as const
+
     const shellProps = {
       currentPath: route,
-      displayName: operatorName,
-      jobTitle: operatorFromQuery
-        ? 'Оператор онлайн-чата'
-        : jobTitleFromRoles(auth.roles),
-      showSupervisor: canAccessOnlineChatSupervisor(auth.roles),
-      showAdmin: canAccessOnlineChatAdmin(auth.roles),
+      displayName: forcedView && operatorFromQuery
+        ? `Просмотр · ${operatorFromQuery}`
+        : viewerName,
+      jobTitle: jobTitleFromRoles(roles),
+      showArm: canViewArm,
+      showSupervisor: canSupervisor,
+      showAdmin: canAdmin,
       showSimulator: import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1',
       themeKind: chatThemeKind,
       onToggleTheme: () =>
         setChatThemeKind((kind) => (kind === 'light' ? 'dark' : 'light')),
-      showMenuButton: route === '/online-chat',
+      showMenuButton: route === '/online-chat' && canOperateArm && !forcedView,
       menuOpen: armMenuOpen,
       onMenuToggle: () => setArmMenuOpen((open) => !open),
     }
@@ -188,14 +216,26 @@ function App() {
         </ChatPlatformShell>
       )
     }
+
+    if (forcedView && !operatorFromQuery) {
+      return (
+        <ChatPlatformShell {...shellProps} showMenuButton={false}>
+          <OperatorPicker allowTransfer={allowTransferView} />
+        </ChatPlatformShell>
+      )
+    }
+
     return (
       <ChatPlatformShell {...shellProps}>
         <ChatArmApp
           demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
-          operatorName={operatorName}
+          operatorName={forcedView ? operatorFromQuery : viewerName}
           themeKind={chatThemeKind}
           statsDrawerOpen={armMenuOpen}
           onStatsDrawerOpenChange={setArmMenuOpen}
+          armRole={armRole}
+          viewOnly={forcedView}
+          allowTransferInView={forcedView && allowTransferView}
         />
       </ChatPlatformShell>
     )

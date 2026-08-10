@@ -7,6 +7,7 @@ interface ChatPlatformShellProps {
   currentPath: string
   displayName?: string | null
   jobTitle?: string | null
+  showArm?: boolean
   showSupervisor?: boolean
   showAdmin?: boolean
   showSimulator?: boolean
@@ -18,17 +19,23 @@ interface ChatPlatformShellProps {
 }
 
 const routes = [
-  { href: '/online-chat', label: 'АРМ оператора', access: 'arm' },
-  { href: '/online-chat/supervisor', label: 'Супервизор', access: 'supervisor' },
-  { href: '/online-chat/admin', label: 'Управление', access: 'admin' },
-  { href: '/online-chat/simulator', label: 'Симулятор', access: 'simulator' },
-] as const
+  { href: '/online-chat', label: 'АРМ оператора', access: 'arm' as const },
+  { href: '/online-chat/supervisor', label: 'Супервизор', access: 'supervisor' as const },
+  { href: '/online-chat/admin', label: 'Управление', access: 'admin' as const },
+  {
+    href: '/online-chat/simulator',
+    label: 'Симулятор',
+    access: 'simulator' as const,
+    testOnly: true,
+  },
+]
 
 export function ChatPlatformShell({
   children,
   currentPath,
   displayName,
   jobTitle,
+  showArm = true,
   showSupervisor = false,
   showAdmin = false,
   showSimulator = false,
@@ -58,8 +65,8 @@ export function ChatPlatformShell({
     '--arm-bg-editor': t.bg.editor,
   } as CSSProperties
 
-  const visible = (access: typeof routes[number]['access']) =>
-    access === 'arm'
+  const visible = (access: (typeof routes)[number]['access']) =>
+    (access === 'arm' && showArm)
     || (access === 'supervisor' && showSupervisor)
     || (access === 'admin' && showAdmin)
     || (access === 'simulator' && showSimulator)
@@ -112,16 +119,23 @@ export function ChatPlatformShell({
           )}
         </div>
         <nav className="chat-platform-shell__nav" aria-label="Разделы онлайн-чата">
-          {routes.filter(({ access }) => visible(access)).map(({ href, label }) => {
-            const active = currentPath === href
+          {routes.filter(({ access }) => visible(access)).map((route) => {
+            const active = currentPath === route.href
             return (
               <a
-                key={href}
-                href={href}
-                className={active ? 'is-active' : undefined}
+                key={route.href}
+                href={route.href}
+                className={[
+                  active ? 'is-active' : '',
+                  'testOnly' in route && route.testOnly ? 'is-test-only' : '',
+                ].filter(Boolean).join(' ') || undefined}
                 aria-current={active ? 'page' : undefined}
+                title={'testOnly' in route && route.testOnly ? 'Тестовый раздел (только для проверки)' : undefined}
               >
-                {label}
+                <span>{route.label}</span>
+                {'testOnly' in route && route.testOnly ? (
+                  <span className="chat-platform-shell__test-badge">тест</span>
+                ) : null}
               </a>
             )
           })}
