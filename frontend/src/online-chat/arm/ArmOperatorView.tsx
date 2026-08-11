@@ -576,7 +576,7 @@ function dialogToQueueItem(
     id: dialog.id,
     name: dialog.client_name || "Клиент",
     channel: dialog.channel === "widget" ? "Сайт" : dialog.channel,
-    dept: "Розничные продукты",
+    dept: dialog.department_name?.trim() || "",
     preview: dialog.preview || "—",
     wait: trackWait ? formatWaitMmSs(waitSeconds) : "—",
     waitBaseSeconds: trackWait ? waitSeconds : undefined,
@@ -2250,6 +2250,9 @@ function QueueCard({
   onSelect,
   onCollapse,
   nowMs = Date.now(),
+  onAccept,
+  acceptDisabled,
+  acceptBusy,
 }: {
   item: QueueItem;
   t: ArmTheme;
@@ -2258,10 +2261,13 @@ function QueueCard({
   onSelect: () => void;
   onCollapse: () => void;
   nowMs?: number;
+  onAccept?: () => void;
+  acceptDisabled?: boolean;
+  acceptBusy?: boolean;
 }): JSX.Element {
   const resolved = resolveQueueWait(item, nowMs);
   const showTimer = resolved.wait && resolved.wait !== "—";
-  const hasMetaRow = showTimer || item.readOnly;
+  const hasMetaRow = showTimer || item.readOnly || !!onAccept;
 
   return (
     <div
@@ -2309,6 +2315,30 @@ function QueueCard({
             <Pill tone="info" size="sm">
               только просмотр
             </Pill>
+          ) : null}
+          {onAccept ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={acceptDisabled || acceptBusy}
+              title={
+                acceptDisabled
+                  ? "Лимит активных диалогов достигнут"
+                  : "Взять диалог из общей очереди"
+              }
+              onClick={(e) => {
+                e.stopPropagation();
+                if (acceptDisabled || acceptBusy) return;
+                onAccept();
+              }}
+              style={
+                acceptDisabled
+                  ? { opacity: 0.45, cursor: "not-allowed" }
+                  : undefined
+              }
+            >
+              {acceptBusy ? "…" : "Взять"}
+            </Button>
           ) : null}
         </Row>
       ) : null}
@@ -2362,7 +2392,9 @@ function QueueCard({
                   : "отказ"}
             </Pill>
           )}
-          <Text style={{ fontSize: 11, color: t.text.secondary }}>{item.dept}</Text>
+          {item.dept ? (
+            <Text style={{ fontSize: 11, color: t.text.secondary }}>{item.dept}</Text>
+          ) : null}
         </Row>
         <Text
           style={{
@@ -2919,7 +2951,9 @@ export function ArmOperatorView({
   const [suflerLoading, setSuflerLoading] = useState(false);
   const [suflerError, setSuflerError] = useState("");
   const [assignmentGraceUntil, setAssignmentGraceUntil] = useState<number | null>(null);
-  const [acceptingDialog, setAcceptingDialog] = useState(false);
+  const [acceptingDialogId, setAcceptingDialogId] = useState<string | null>(null);
+  const [operatorCapacity, setOperatorCapacity] = useState(3);
+  const suflerTurnKeyRef = useRef<string>("");
   const [editMessageTarget, setEditMessageTarget] = useState<OnlineChatMessage | null>(null);
   const [editMessageText, setEditMessageText] = useState("");
   const [deleteMessageTarget, setDeleteMessageTarget] = useState<OnlineChatMessage | null>(null);
@@ -3274,9 +3308,16 @@ export function ArmOperatorView({
       .list()
       .then((items) => {
         setTransferOperators(items.filter((item) => item.is_active !== false && item.name));
+        const me = items.find((item) => item.name === operatorName);
+        if (me?.capacity != null && me.capacity > 0) {
+          setOperatorCapacity(me.capacity);
+        }
       })
       .catch(() => setTransferOperators([]));
-  }, []);
+  }, [operatorName]);
+
+  const myActiveCount = liveWaiting.length + liveMine.length;
+  const atCapacity = myActiveCount >= operatorCapacity;
 
   useEffect(() => {
     if (!active?.live || !active.id) {
@@ -3306,6 +3347,7 @@ export function ArmOperatorView({
 
   useEffect(() => {
     if (!active?.live || isReadOnly) {
+      suflerTurnKeyRef.current = "";
       setLiveSuflerHints([]);
       setLiveSuflerRaw([]);
       setSuflerError("");
@@ -3316,16 +3358,23 @@ export function ArmOperatorView({
       .reverse()
       .find((item) => item.speaker === "client" && item.text.trim());
     if (!latestClient) {
+      suflerTurnKeyRef.current = "";
       setLiveSuflerHints([]);
       setLiveSuflerRaw([]);
       return;
     }
+    const turnKey = `${active.id}:${latestClient.id}`;
+    if (suflerTurnKeyRef.current === turnKey) {
+      return;
+    }
+    suflerTurnKeyRef.current = turnKey;
     let cancelled = false;
     setSuflerLoading(true);
     setSuflerError("");
     setSuflerQuery(latestClient.text);
+    const historyContext = summaryHistory.summary || summaryHistory.detailedSummary || "";
     void requestSuflerSuggest(latestClient.text, 5, {
-      clientHistory: summaryHistory.summary || summaryHistory.detailedSummary || "",
+      clientHistory: historyContext,
     })
       .then((result) => {
         if (cancelled) return;
@@ -3347,7 +3396,7 @@ export function ArmOperatorView({
         setSuflerError(
           err instanceof Error
             ? err.message
-            : "Суфлёр временно недоступен — ответьте вручную.",
+            : "Ошибка суфлёра. Повторите попытку позже.",
         );
       })
       .finally(() => {
@@ -3356,7 +3405,9 @@ export function ArmOperatorView({
     return () => {
       cancelled = true;
     };
-  }, [active?.id, active?.live, isReadOnly, liveMessages, summaryHistory.detailedSummary, summaryHistory.summary]);
+    // Intentionally depend on message ids / dialog — not summary text (avoids flicker).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, active?.live, isReadOnly, liveMessages]);
 
   useEffect(() => {
     if (assignmentGraceUntil == null) return;
@@ -3556,20 +3607,27 @@ export function ArmOperatorView({
     }
   };
 
-  const handleAcceptSharedDialog = () => {
-    if (!active?.live || acceptingDialog || viewOnly) return;
-    setAcceptingDialog(true);
-    void acceptDialog(active.id, operatorName)
+  const handleAcceptSharedDialog = (dialogId?: string, clientName?: string) => {
+    const id = dialogId || active?.id;
+    if (!id || acceptingDialogId || viewOnly) return;
+    if (atCapacity) {
+      setComposerNotice(`Лимит диалогов ${myActiveCount}/${operatorCapacity}. Освободите слот, чтобы взять ещё.`);
+      return;
+    }
+    setAcceptingDialogId(id);
+    void acceptDialog(id, operatorName)
       .then(() => {
         setAssignmentGraceUntil(null);
-        setComposerNotice(`Диалог с ${active.name} принят.`);
+        onSelectQueue(id);
+        onViewModeChange("active");
+        setComposerNotice(`Диалог с ${clientName || active?.name || "клиентом"} принят.`);
         void refreshLiveQueues();
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : "Не удалось принять диалог";
         setComposerNotice(message);
       })
-      .finally(() => setAcceptingDialog(false));
+      .finally(() => setAcceptingDialogId(null));
   };
 
   const handleTakeOverDialog = () => {
@@ -4137,6 +4195,15 @@ export function ArmOperatorView({
                               nowMs={nowMs}
                               onSelect={() => handleSelectQueue(q.id)}
                               onCollapse={() => collapseCard(q.id)}
+                              onAccept={
+                                section.id === "shared" && !viewOnly
+                                  ? () => handleAcceptSharedDialog(q.id, q.name)
+                                  : undefined
+                              }
+                              acceptDisabled={
+                                section.id === "shared" && !viewOnly ? atCapacity : undefined
+                              }
+                              acceptBusy={acceptingDialogId === q.id}
                             />
                           );
                         })}
@@ -4623,14 +4690,21 @@ export function ArmOperatorView({
             {isSharedQueuePeek ? (
               <Callout tone="info" style={{ marginBottom: 8, fontSize: 12 }}>
                 Просмотр общей очереди: ответ недоступен, пока диалог не принят.
+                Нажмите «Взять» на карточке в списке слева
+                {atCapacity ? ` (лимит ${myActiveCount}/${operatorCapacity})` : ""}.
                 <div style={{ marginTop: 8 }}>
                   <Button
                     size="sm"
                     variant="primary"
-                    disabled={acceptingDialog || viewOnly}
-                    onClick={handleAcceptSharedDialog}
+                    disabled={!!acceptingDialogId || viewOnly || atCapacity}
+                    onClick={() => handleAcceptSharedDialog()}
+                    style={atCapacity ? { opacity: 0.45 } : undefined}
                   >
-                    {acceptingDialog ? "Принимаем…" : "Взять диалог"}
+                    {acceptingDialogId === active?.id
+                      ? "Принимаем…"
+                      : atCapacity
+                        ? `Лимит ${myActiveCount}/${operatorCapacity}`
+                        : "Взять диалог"}
                   </Button>
                 </div>
               </Callout>

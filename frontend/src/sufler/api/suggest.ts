@@ -36,11 +36,37 @@ function csrfToken(): string {
   return match ? decodeURIComponent(match[1]) : ''
 }
 
+function friendlySuggestError(raw: string, status: number): string {
+  const code = (raw || '').toLowerCase()
+  if (
+    status === 401
+    || status === 403
+    || code.includes('authentication_required')
+    || code.includes('permission_denied')
+  ) {
+    return 'Ошибка суфлёра. Повторите попытку позже.'
+  }
+  if (code.includes('no_relevant_knowledge')) {
+    return 'Нет релевантных статей в базе знаний — ответьте вручную.'
+  }
+  if (!raw || raw === 'validation_error' || /^[a-z0-9_]+$/i.test(raw)) {
+    return 'Ошибка суфлёра. Повторите попытку позже.'
+  }
+  return raw
+}
+
 export async function requestSuflerSuggest(
   text: string,
   limit = 5,
   options?: { clientHistory?: string },
 ): Promise<SuggestResponse> {
+  // Online-chat ARM is often opened without a prior admin/login bootstrap.
+  try {
+    const { ensureDevSession } = await import('../../auth/ensureDevSession')
+    await ensureDevSession()
+  } catch {
+    /* ignore — suggest will surface a friendly error if auth still missing */
+  }
   const response = await fetch('/api/v1/sufler/suggest', {
     method: 'POST',
     credentials: 'include',
@@ -54,13 +80,13 @@ export async function requestSuflerSuggest(
       client_history: options?.clientHistory ?? '',
     }),
   })
-  const body = await response.json()
+  const body = await response.json().catch(() => ({} as { error?: string; details?: { request?: string[] } }))
   if (!response.ok) {
-    throw new Error(
+    const raw =
       body.details?.request?.[0]
-        ?? body.error
-        ?? `Suggest failed (${response.status})`,
-    )
+      ?? body.error
+      ?? `Suggest failed (${response.status})`
+    throw new Error(friendlySuggestError(String(raw), response.status))
   }
   return body as SuggestResponse
 }

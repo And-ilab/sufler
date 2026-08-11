@@ -25,7 +25,7 @@ class Migration(migrations.Migration):
                             ("strict_auto", "Только автоназначение"),
                             ("manual_plus_auto", "Ручной выбор + авто (5 сек)"),
                         ],
-                        default="strict_auto",
+                        default="manual_plus_auto",
                         max_length=32,
                     ),
                 ),

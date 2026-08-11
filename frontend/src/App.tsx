@@ -226,8 +226,10 @@ function App() {
         : forcedView && operatorFromQuery
           ? `${viewerTitle} · режим просмотра`
           : viewerTitle,
-      // In simulator operate mode the shell must look like a pure operator session.
-      showArm: true,
+      // Admins manage the line but do not operate dialogs — hide «Чаты».
+      showArm: simOperate
+        ? true
+        : (canOperateArm || canSupervisor) && !canAdmin,
       showOperators: simOperate ? false : (canSupervisor || canAdmin),
       showSupervisor: simOperate ? false : canSupervisor,
       showAdmin: simOperate ? false : canAdmin,
@@ -281,7 +283,17 @@ function App() {
       )
     }
 
+    // Module admin: no operator ARM — send to management / operators list.
+    if (canAdmin && !canOperateArm && !simOperate && !forcedView) {
+      window.location.replace('/online-chat/admin')
+      return null
+    }
+
     if (forcedView && !operatorFromQuery) {
+      if (canAdmin && !canSupervisor) {
+        window.location.replace('/online-chat/admin')
+        return null
+      }
       return (
         <ChatPlatformShell {...shellProps}>
           <ArmMenuHost

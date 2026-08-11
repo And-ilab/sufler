@@ -191,6 +191,8 @@ def _int_field(payload: Mapping[str, Any], key: str) -> int:
 @require_http_methods(["GET", "POST"])
 def dialogs_collection(request: HttpRequest) -> HttpResponse:
     if request.method == "GET":
+        from django.db.models.functions import Coalesce
+
         status = (request.GET.get("status") or "").strip()
         qs = Dialog.objects.all()
         if status:
@@ -214,6 +216,13 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
             qs = qs.filter(department_id=request.GET["department_id"])
         if request.GET.get("channel"):
             qs = qs.filter(channel=request.GET["channel"])
+        # Waiting queue: oldest first so the newest writer is at the bottom in UI.
+        if status == Dialog.Status.WAITING:
+            qs = qs.annotate(
+                queue_key=Coalesce("last_client_message_at", "created_at"),
+            ).order_by("queue_key", "created_at")
+        else:
+            qs = qs.order_by("-updated_at")
         items = [serialize_dialog(dialog) for dialog in qs[:200]]
         return JsonResponse({"ok": True, "items": items, "count": len(items)})
 
@@ -1536,35 +1545,44 @@ def client_history(request: HttpRequest) -> HttpResponse:
     topics = [item["topic"] for item in items if item["topic"]]
     channels = sorted({item["channel"] for item in items})
     previews = [item["preview"] for item in items[:5] if item["preview"]]
-    summary = (
-        f"Обращений: {len(items)}. Каналы: {', '.join(channels) or '—'}. "
-        f"Последние темы: {', '.join(topics[:3]) or 'не определены'}."
-    )
-    if previews:
-        summary += " Недавние вопросы: " + " | ".join(previews[:3])
-    # Flag repeat topic vs current dialog for ARM highlight.
-    current_preview = ""
-    if dialog_id:
-        current_preview = next(
-            (item["preview"] for item in items if item["id"] == dialog_id),
-            "",
+    if len(items) <= 1:
+        summary = (
+            "Это первое обращение клиента — ранее клиент не обращался."
         )
-    repeat_hint = ""
-    if len(items) > 1 and topics:
-        repeat_hint = f"Повторное обращение. Ранее: {', '.join(topics[:3])}."
-    elif len(items) > 1 and current_preview:
-        repeat_hint = "Повторный клиент — в истории есть предыдущие диалоги."
+        if previews:
+            summary += f" Текущий вопрос: {previews[0]}"
+        repeat_hint = ""
+        detailed = (
+            "Ранее клиент не обращался. История пуста — это первое обращение."
+        )
+        if items:
+            detailed += (
+                f"\n• [{items[0]['channel']}] {items[0]['preview'] or '—'} "
+                f"({items[0]['topic'] or 'без темы'})"
+            )
+    else:
+        summary = (
+            f"Обращений: {len(items)}. Каналы: {', '.join(channels) or '—'}. "
+            f"Последние темы: {', '.join(topics[:3]) or 'не определены'}."
+        )
+        if previews:
+            summary += " Недавние вопросы: " + " | ".join(previews[:3])
+        if topics:
+            repeat_hint = f"Повторное обращение. Ранее: {', '.join(topics[:3])}."
+        else:
+            repeat_hint = "Повторный клиент — в истории есть предыдущие диалоги."
+        detailed = "\n".join(
+            f"• [{item['channel']}] {item['preview'] or '—'} "
+            f"({item['topic'] or 'без темы'})"
+            for item in items[:8]
+        )
     return JsonResponse(
         {
             "ok": True,
             "items": items,
             "count": len(items),
             "summary": summary,
-            "detailed_summary": "\n".join(
-                f"• [{item['channel']}] {item['preview'] or '—'} "
-                f"({item['topic'] or 'без темы'})"
-                for item in items[:8]
-            ),
+            "detailed_summary": detailed,
             "repeat_hint": repeat_hint,
         }
     )
@@ -1944,7 +1962,10 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
             },
         )
         supervisor.departments.set([department])
-        AssignmentSettings.get_solo()
+        assignment = AssignmentSettings.get_solo()
+        if assignment.mode != AssignmentSettings.Mode.MANUAL_PLUS_AUTO:
+            assignment.mode = AssignmentSettings.Mode.MANUAL_PLUS_AUTO
+            assignment.save(update_fields=["mode", "updated_at"])
         dialogs = []
         clients_payload = []
         for index in range(client_count):

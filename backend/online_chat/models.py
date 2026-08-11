@@ -498,7 +498,7 @@ class AssignmentSettings(models.Model):
     mode = models.CharField(
         max_length=32,
         choices=Mode.choices,
-        default=Mode.STRICT_AUTO,
+        default=Mode.MANUAL_PLUS_AUTO,
     )
     updated_at = models.DateTimeField(auto_now=True)
 
