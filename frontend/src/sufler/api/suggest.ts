@@ -39,6 +39,7 @@ function csrfToken(): string {
 export async function requestSuflerSuggest(
   text: string,
   limit = 5,
+  options?: { clientHistory?: string },
 ): Promise<SuggestResponse> {
   const response = await fetch('/api/v1/sufler/suggest', {
     method: 'POST',
@@ -47,11 +48,19 @@ export async function requestSuflerSuggest(
       'Content-Type': 'application/json',
       'X-CSRFToken': csrfToken(),
     },
-    body: JSON.stringify({ text, limit }),
+    body: JSON.stringify({
+      text,
+      limit,
+      client_history: options?.clientHistory ?? '',
+    }),
   })
   const body = await response.json()
   if (!response.ok) {
-    throw new Error(body.error ?? `Suggest failed (${response.status})`)
+    throw new Error(
+      body.details?.request?.[0]
+        ?? body.error
+        ?? `Suggest failed (${response.status})`,
+    )
   }
   return body as SuggestResponse
 }

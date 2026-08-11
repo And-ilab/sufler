@@ -9,7 +9,35 @@ from django.utils import timezone
 
 
 def normalize_phone(phone: str) -> str:
-    return re.sub(r"\D+", "", phone or "")
+    """Canonical digit-only phone for cross-channel matching (widget ↔ Telegram).
+
+    Supports BY (80… / 29… → 375…), RU (8… → 7…), and other international
+    numbers as raw digits (E.164 without '+').
+    """
+    digits = re.sub(r"\D+", "", phone or "")
+    if not digits:
+        return ""
+    # Belarus: 80XXXXXXXXX → 375XXXXXXXXX
+    if digits.startswith("80") and len(digits) == 11:
+        digits = "375" + digits[2:]
+    # Belarus mobile without country code: 29/25/33/44 + 7 digits
+    if len(digits) == 9 and digits[:2] in {"25", "29", "33", "44"}:
+        digits = "375" + digits
+    # Russia / common CIS: 8XXXXXXXXXX → 7XXXXXXXXXX
+    if digits.startswith("8") and len(digits) == 11:
+        digits = "7" + digits[1:]
+    return digits
+
+
+def format_phone_e164(phone: str) -> str:
+    """Store/display form with leading '+' when digits are present."""
+    digits = normalize_phone(phone)
+    return f"+{digits}" if digits else ""
+
+
+def is_plausible_phone(phone: str) -> bool:
+    digits = normalize_phone(phone)
+    return 10 <= len(digits) <= 15
 
 
 def short_dialog_ref(dialog_id: uuid.UUID | str) -> str:
@@ -455,3 +483,111 @@ class DialogEvent(models.Model):
 
     class Meta:
         ordering = ("created_at",)
+
+
+class AssignmentSettings(models.Model):
+    """Global dialog distribution mode (singleton row pk=1)."""
+
+    class Mode(models.TextChoices):
+        STRICT_AUTO = "strict_auto", "Только автоназначение"
+        MANUAL_PLUS_AUTO = "manual_plus_auto", "Ручной выбор + авто (5 сек)"
+
+    GRACE_SECONDS = 5
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    mode = models.CharField(
+        max_length=32,
+        choices=Mode.choices,
+        default=Mode.STRICT_AUTO,
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Assignment settings"
+        verbose_name_plural = "Assignment settings"
+
+    def __str__(self) -> str:
+        return f"assignment:{self.mode}"
+
+    @classmethod
+    def get_solo(cls) -> AssignmentSettings:
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+
+class OperatorAssignmentHold(models.Model):
+    """Blocks auto-assign to an operator until ``until`` (manual+auto grace)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    operator = models.ForeignKey(
+        OperatorProfile,
+        on_delete=models.CASCADE,
+        related_name="assignment_holds",
+    )
+    until = models.DateTimeField(db_index=True)
+    reason = models.CharField(max_length=64, blank=True, default="post_close_grace")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-until",)
+        indexes = (models.Index(fields=["operator", "until"]),)
+
+
+class TelegramOnboardingSession(models.Model):
+    """FSM state for Telegram intake: greeting → question → FIO → phone → queue."""
+
+    class Step(models.TextChoices):
+        AWAIT_QUESTION = "await_question", "Await question"
+        AWAIT_FIO = "await_fio", "Await FIO"
+        AWAIT_PHONE = "await_phone", "Await phone"
+        DONE = "done", "Done"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    chat_id = models.CharField(max_length=64, unique=True, db_index=True)
+    step = models.CharField(
+        max_length=32,
+        choices=Step.choices,
+        default=Step.AWAIT_QUESTION,
+    )
+    question = models.TextField(blank=True, default="")
+    first_name = models.CharField(max_length=100, blank=True, default="")
+    last_name = models.CharField(max_length=100, blank=True, default="")
+    phone = models.CharField(max_length=40, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+
+    def __str__(self) -> str:
+        return f"tg:{self.chat_id} · {self.step}"
+
+
+class SuflerHintFeedback(models.Model):
+    """Operator rating of a sufler hint (analytics later; persist now)."""
+
+    class Choice(models.TextChoices):
+        USED = "used", "Использовал"
+        NOT_USED = "not_used", "Не использовал"
+        PARTIAL = "partial", "Частично"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dialog = models.ForeignKey(
+        Dialog,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="sufler_hint_feedback",
+    )
+    operator_name = models.CharField(max_length=160, blank=True, default="")
+    query = models.TextField(blank=True, default="")
+    hint_rank = models.PositiveSmallIntegerField(default=1)
+    hint_text = models.TextField(blank=True, default="")
+    choice = models.CharField(max_length=16, choices=Choice.choices)
+    relevance_percent = models.PositiveSmallIntegerField(null=True, blank=True)
+    citation_title = models.CharField(max_length=255, blank=True, default="")
+    request_id = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)

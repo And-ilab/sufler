@@ -24,6 +24,7 @@ from auth.roles import (
     has_permission,
 )
 from online_chat.models import (
+    AssignmentSettings,
     BotConfiguration,
     ChannelConnection,
     ClientBlock,
@@ -34,6 +35,7 @@ from online_chat.models import (
     InternalMessage,
     OperatorProfile,
     RoutingRule,
+    SuflerHintFeedback,
     WidgetPlacement,
     normalize_phone,
 )
@@ -528,13 +530,119 @@ def dialog_close(request: HttpRequest, dialog_id: str) -> HttpResponse:
         previous_departments = list(
             previous_operator.departments.filter(is_active=True)
         ) if previous_operator else []
-        close_dialog(dialog, topic=topic)
+        closed = close_dialog(dialog, topic=topic)
+        # Held operator is skipped inside run_assignments; others can still receive work.
         if previous_departments:
             for department in previous_departments:
                 run_assignments(department=department)
         else:
             run_assignments()
-        return JsonResponse({"ok": True, "dialog": serialize_dialog(dialog)})
+        response: dict[str, Any] = {"ok": True, "dialog": serialize_dialog(closed)}
+        from django.utils import timezone as dj_tz
+
+        from online_chat.models import OperatorAssignmentHold
+
+        if previous_operator:
+            hold = (
+                OperatorAssignmentHold.objects.filter(operator=previous_operator)
+                .order_by("-until")
+                .first()
+            )
+            if hold is not None and hold.until > dj_tz.now():
+                response["assignment_grace_until"] = hold.until.isoformat()
+                response["assignment_grace_seconds"] = AssignmentSettings.GRACE_SECONDS
+        return JsonResponse(response)
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "PUT", "PATCH"])
+def assignment_settings(request: HttpRequest) -> HttpResponse:
+    settings_obj = AssignmentSettings.get_solo()
+    if request.method == "GET":
+        return JsonResponse(
+            {
+                "ok": True,
+                "settings": {
+                    "mode": settings_obj.mode,
+                    "grace_seconds": AssignmentSettings.GRACE_SECONDS,
+                    "modes": [
+                        {
+                            "id": AssignmentSettings.Mode.STRICT_AUTO,
+                            "label": "Только автоназначение",
+                        },
+                        {
+                            "id": AssignmentSettings.Mode.MANUAL_PLUS_AUTO,
+                            "label": "Ручной выбор + авто (5 сек после закрытия)",
+                        },
+                    ],
+                },
+            }
+        )
+    try:
+        payload = _json_body(request)
+        mode = _str_field(payload, "mode")
+        if mode not in AssignmentSettings.Mode.values:
+            raise OnlineChatApiError("invalid assignment mode")
+        settings_obj.mode = mode
+        settings_obj.save(update_fields=["mode", "updated_at"])
+        return JsonResponse(
+            {
+                "ok": True,
+                "settings": {
+                    "mode": settings_obj.mode,
+                    "grace_seconds": AssignmentSettings.GRACE_SECONDS,
+                },
+            }
+        )
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def sufler_hint_feedback(request: HttpRequest) -> HttpResponse:
+    try:
+        payload = _json_body(request)
+        choice = _str_field(payload, "choice")
+        if choice not in SuflerHintFeedback.Choice.values:
+            raise OnlineChatApiError("choice must be used|not_used|partial")
+        dialog_id = _str_field(payload, "dialog_id")
+        dialog = None
+        if dialog_id:
+            dialog = Dialog.objects.filter(pk=dialog_id).first()
+        relevance = payload.get("relevance_percent")
+        relevance_int = None
+        if isinstance(relevance, int) and not isinstance(relevance, bool):
+            relevance_int = max(0, min(100, relevance))
+        rank_raw = payload.get("hint_rank", 1)
+        try:
+            hint_rank = max(1, int(rank_raw))
+        except (TypeError, ValueError):
+            hint_rank = 1
+        row = SuflerHintFeedback.objects.create(
+            dialog=dialog,
+            operator_name=_str_field(payload, "operator_name"),
+            query=_str_field(payload, "query"),
+            hint_rank=hint_rank,
+            hint_text=_str_field(payload, "hint_text"),
+            choice=choice,
+            relevance_percent=relevance_int,
+            citation_title=_str_field(payload, "citation_title"),
+            request_id=_str_field(payload, "request_id"),
+        )
+        return JsonResponse(
+            {
+                "ok": True,
+                "feedback": {
+                    "id": str(row.id),
+                    "choice": row.choice,
+                    "hint_rank": row.hint_rank,
+                    "created_at": row.created_at.isoformat(),
+                },
+            }
+        )
     except OnlineChatApiError as exc:
         return _error(exc)
 
@@ -1427,12 +1535,38 @@ def client_history(request: HttpRequest) -> HttpResponse:
     ]
     topics = [item["topic"] for item in items if item["topic"]]
     channels = sorted({item["channel"] for item in items})
+    previews = [item["preview"] for item in items[:5] if item["preview"]]
     summary = (
         f"Обращений: {len(items)}. Каналы: {', '.join(channels) or '—'}. "
         f"Последние темы: {', '.join(topics[:3]) or 'не определены'}."
     )
+    if previews:
+        summary += " Недавние вопросы: " + " | ".join(previews[:3])
+    # Flag repeat topic vs current dialog for ARM highlight.
+    current_preview = ""
+    if dialog_id:
+        current_preview = next(
+            (item["preview"] for item in items if item["id"] == dialog_id),
+            "",
+        )
+    repeat_hint = ""
+    if len(items) > 1 and topics:
+        repeat_hint = f"Повторное обращение. Ранее: {', '.join(topics[:3])}."
+    elif len(items) > 1 and current_preview:
+        repeat_hint = "Повторный клиент — в истории есть предыдущие диалоги."
     return JsonResponse(
-        {"ok": True, "items": items, "count": len(items), "summary": summary}
+        {
+            "ok": True,
+            "items": items,
+            "count": len(items),
+            "summary": summary,
+            "detailed_summary": "\n".join(
+                f"• [{item['channel']}] {item['preview'] or '—'} "
+                f"({item['topic'] or 'без темы'})"
+                for item in items[:8]
+            ),
+            "repeat_hint": repeat_hint,
+        }
     )
 
 
@@ -1754,6 +1888,17 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
                 "is_active": True,
             },
         )
+        RoutingRule.objects.update_or_create(
+            name="Dev telegram → Поддержка КЦ",
+            defaults={
+                "priority": 10,
+                "channel": "telegram",
+                "placement": None,
+                "department": department,
+                "conditions": {"max_load": 5},
+                "is_active": True,
+            },
+        )
         BotConfiguration.objects.update_or_create(
             name="Dev бот FAQ",
             department=department,
@@ -1786,6 +1931,20 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
             )
             operator.departments.set([department])
             operators.append(operator)
+        supervisor, _ = OperatorProfile.objects.update_or_create(
+            external_id="dev-supervisor-1",
+            defaults={
+                "display_name": "Козлова Е.В.",
+                "email": "supervisor@dev.local",
+                "presence": OperatorProfile.Presence.ONLINE,
+                "auto_assign": False,
+                "max_active_dialogs": 99,
+                "is_active": True,
+                "role": OperatorProfile.Role.SUPERVISOR,
+            },
+        )
+        supervisor.departments.set([department])
+        AssignmentSettings.get_solo()
         dialogs = []
         clients_payload = []
         for index in range(client_count):

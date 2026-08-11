@@ -1,4 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import {
+  fetchAssignmentSettings,
+  updateAssignmentSettings,
+  type AssignmentMode,
+} from '../../api/onlineChatApi'
 import { Button, Row, Text } from '../primitives'
 import { ArmModuleFrame } from './ArmModuleFrame'
 import type { ArmModuleProps, ArmUiSettings } from './types'
@@ -28,6 +33,9 @@ function loadSettings(): ArmUiSettings {
 export function SettingsModule({ t, scheme, armRole, onBack }: ArmModuleProps) {
   const [settings, setSettings] = useState<ArmUiSettings>(() => loadSettings())
   const [saved, setSaved] = useState(false)
+  const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>('strict_auto')
+  const [assignmentSaving, setAssignmentSaving] = useState(false)
+  const [assignmentNotice, setAssignmentNotice] = useState('')
 
   useEffect(() => {
     try {
@@ -37,10 +45,28 @@ export function SettingsModule({ t, scheme, armRole, onBack }: ArmModuleProps) {
     }
   }, [settings])
 
+  useEffect(() => {
+    void fetchAssignmentSettings()
+      .then((result) => setAssignmentMode(result.mode))
+      .catch(() => {})
+  }, [])
+
   const patch = <K extends keyof ArmUiSettings>(key: K, value: ArmUiSettings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }))
     setSaved(true)
     window.setTimeout(() => setSaved(false), 1200)
+  }
+
+  const saveAssignmentMode = (mode: AssignmentMode) => {
+    setAssignmentMode(mode)
+    setAssignmentSaving(true)
+    void updateAssignmentSettings(mode)
+      .then(() => {
+        setAssignmentNotice('Режим распределения сохранён')
+        window.setTimeout(() => setAssignmentNotice(''), 1500)
+      })
+      .catch(() => setAssignmentNotice('Не удалось сохранить режим'))
+      .finally(() => setAssignmentSaving(false))
   }
 
   return (
@@ -53,6 +79,35 @@ export function SettingsModule({ t, scheme, armRole, onBack }: ArmModuleProps) {
       actions={saved ? <Text style={{ fontSize: 12, color: scheme.accentControl }}>Сохранено</Text> : undefined}
     >
       <div style={{ padding: 16, maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <Section t={t} title="Распределение диалогов">
+          <Text style={{ fontSize: 12, color: t.text.secondary, marginBottom: 8 }}>
+            Глобальный режим очереди (по ТЗ: автоназначение и ручной выбор из общей очереди).
+          </Text>
+          <Row style={{ gap: 8, flexWrap: 'wrap' }}>
+            <Button
+              size="sm"
+              variant={assignmentMode === 'strict_auto' ? 'primary' : 'secondary'}
+              disabled={assignmentSaving}
+              onClick={() => saveAssignmentMode('strict_auto')}
+            >
+              Только авто
+            </Button>
+            <Button
+              size="sm"
+              variant={assignmentMode === 'manual_plus_auto' ? 'primary' : 'secondary'}
+              disabled={assignmentSaving}
+              onClick={() => saveAssignmentMode('manual_plus_auto')}
+            >
+              Ручной + авто (5 сек)
+            </Button>
+          </Row>
+          {assignmentNotice ? (
+            <Text style={{ fontSize: 12, color: scheme.accentControl, marginTop: 8 }}>
+              {assignmentNotice}
+            </Text>
+          ) : null}
+        </Section>
+
         <Section t={t} title="Уведомления">
           <Toggle
             label="Звук нового сообщения клиента"

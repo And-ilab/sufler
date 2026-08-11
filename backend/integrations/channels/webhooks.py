@@ -102,6 +102,8 @@ def _store(
 
 
 def handle_telegram_update(payload: Mapping[str, Any]) -> dict[str, Any]:
+    from online_chat.telegram_onboarding import handle_telegram_client_text
+
     message = payload.get("message") or payload.get("edited_message") or {}
     if not isinstance(message, Mapping):
         raise ChannelWebhookError("telegram payload requires message object")
@@ -115,23 +117,11 @@ def handle_telegram_update(payload: Mapping[str, Any]) -> dict[str, Any]:
         or (user.get("id") if isinstance(user, Mapping) else None)
         or "unknown"
     )
-    event = _store(
-        channel="telegram",
-        external_user_id=external_id,
+    return handle_telegram_client_text(
+        chat_id=external_id,
         text=text.strip(),
         raw=payload,
     )
-    return {
-        "ok": True,
-        "channel": "telegram",
-        "event_id": event["id"],
-        "routed_to": "arm_queue",
-        "reply": {
-            "method": "sendMessage",
-            "chat_id": external_id,
-            "text": "Сообщение принято (mock Telegram). Оператор ответит в АРМ.",
-        },
-    }
 
 
 def handle_viber_event(payload: Mapping[str, Any]) -> dict[str, Any]:

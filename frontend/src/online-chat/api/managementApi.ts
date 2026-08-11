@@ -23,6 +23,7 @@ export interface ChatOperator {
   id: EntityId
   name: string
   username?: string
+  role?: 'operator' | 'supervisor' | 'admin' | string
   department?: EntityId | Department | null
   department_id?: EntityId | null
   department_name?: string
@@ -30,6 +31,7 @@ export interface ChatOperator {
   capacity: number
   active_dialogs?: number
   is_active?: boolean
+  auto_assign?: boolean
 }
 
 export interface WidgetFormField {

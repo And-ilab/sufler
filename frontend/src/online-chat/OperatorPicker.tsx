@@ -38,7 +38,11 @@ export function OperatorPicker({
       .list()
       .then((list) => {
         if (!cancelled) {
-          setItems(list.filter((item) => item.is_active !== false))
+          setItems(
+            list.filter(
+              (item) => item.is_active !== false && (item.role ?? 'operator') === 'operator',
+            ),
+          )
           setError('')
         }
       })

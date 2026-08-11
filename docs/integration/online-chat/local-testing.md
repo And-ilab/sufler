@@ -13,11 +13,65 @@ docker compose ps
 Основные адреса:
 
 - портал и модуль: <http://localhost:5173/online-chat>
+- операторы (для супервизора): <http://localhost:5173/online-chat/operators>
 - симулятор: <http://localhost:5173/online-chat/simulator>
 - супервизор: <http://localhost:5173/online-chat/supervisor>
 - управление: <http://localhost:5173/online-chat/admin>
 - клиентский виджет: <http://localhost:5173/widget/sample.html>
 - тестовые письма: <http://localhost:8025>
+
+## DeepSeek + Telegram (локальное демо)
+
+В `infra/.env` (не коммитить секреты):
+
+```bash
+MODEL_GATEWAY_MODE=openai
+OPENAI_BASE_URL=https://api.deepseek.com/v1
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=deepseek-chat
+TELEGRAM_BOT_TOKEN=...
+```
+
+Перезапустить backend/celery после изменения `.env`.
+
+### База знаний для демо-вопросов
+
+```bash
+# из корня репозитория
+python tools/seed_manual_kb.py   # или через docker compose exec backend
+```
+
+Файлы: `local/kb/manual/limity-snyatiya-nalichnyh.txt`, `komissii-bankomatov.txt`.
+
+Демо-вопросы:
+
+1. Виджет: «Какой суточный лимит снятия наличных в банкоматах Беларусбанка?»
+2. Telegram (тот же телефон): «Какая комиссия за снятие в банкоматах других банков?»
+
+### Telegram webhook через ngrok
+
+```bash
+ngrok http 8001
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=https://XXXX.ngrok-free.app/api/v1/channels/telegram/webhook/"
+```
+
+Сценарий бота: приветствие → вопрос → ФИО → телефон → диалог в общей очереди АРМ.
+
+Телефон нормализуется к единому виду (`8029…` / `29…` → `+37529…`); иностранные номера сохраняются как `+<digits>`.
+
+### Режимы распределения
+
+В меню АРМ → «Настройки»:
+
+- **Только авто** — автоназначение по FIFO (`last_client_message_at`);
+- **Ручной + авто (5 сек)** — после закрытия диалога 5 секунд на ручной выбор, иначе авто.
+
+Кнопка «Взять диалог» доступна в общей очереди (лимит 3/3 по ТЗ соблюдается).
+
+### Супервизор
+
+Три вкладки: **Чаты** (своя пустая АРМ, без автоназначения) · **Операторы** · **Супервизор**.
+В просмотре АРМ оператора — кнопка «Взять на себя». Перевод: оператор или супервизор.
 
 ## Несколько операторов и клиентов
 

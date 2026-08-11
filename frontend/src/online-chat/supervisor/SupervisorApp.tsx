@@ -177,7 +177,7 @@ export function SupervisorApp({ demoMode = false }: SupervisorAppProps) {
                           rel="noreferrer"
                           aria-label={`Просмотр АРМ оператора ${operator.name}`}
                         >
-                          Открыть
+                          Открыть АРМ
                         </a>
                       </td>
                     </tr>

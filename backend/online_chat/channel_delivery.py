@@ -53,18 +53,28 @@ def _post_form(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     return json.loads(body or b"{}")
 
 
-def _telegram(message: DialogMessage) -> DeliveryResult:
+def send_telegram_text(chat_id: str, text: str) -> DeliveryResult:
+    """Send a plain Telegram Bot API message (onboarding prompts / ack)."""
     token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
     if not token:
         return DeliveryResult(False, detail="telegram_not_configured")
-    body = _post_json(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        {"chat_id": message.dialog.client_external_id, "text": message.text},
-    )
+    if not chat_id or not (text or "").strip():
+        return DeliveryResult(False, detail="telegram_empty")
+    try:
+        body = _post_json(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            {"chat_id": chat_id, "text": text.strip()},
+        )
+    except Exception as exc:  # noqa: BLE001 — onboarding must not crash webhook
+        return DeliveryResult(False, detail=str(exc)[:200])
     if not body.get("ok"):
         return DeliveryResult(False, detail="telegram_rejected")
     result = body.get("result") or {}
     return DeliveryResult(True, str(result.get("message_id") or ""))
+
+
+def _telegram(message: DialogMessage) -> DeliveryResult:
+    return send_telegram_text(message.dialog.client_external_id, message.text)
 
 
 def _viber(message: DialogMessage) -> DeliveryResult:

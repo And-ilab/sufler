@@ -159,6 +159,7 @@ function App() {
     const params = new URLSearchParams(window.location.search)
     const roles = rolesForUi(auth.roles, params.get('demo_role'))
     const isSupervisorRoute = route === '/online-chat/supervisor'
+    const isOperatorsRoute = route === '/online-chat/operators'
     const isAdminRoute = route === '/online-chat/admin'
     const isSimulatorRoute = route === '/online-chat/simulator'
     const canOperateArm = canOperateOnlineChatArm(roles)
@@ -169,11 +170,13 @@ function App() {
     const simOperatePreview = params.get('mode') === 'operate' && Boolean(params.get('operator')?.trim())
     const allowed = isSupervisorRoute
       ? canSupervisor
-      : isAdminRoute
-        ? canAdmin
-        : isSimulatorRoute
-          ? showSimulator
-          : route === '/online-chat' && (canViewArm || simOperatePreview || showSimulator)
+      : isOperatorsRoute
+        ? (canSupervisor || canAdmin)
+        : isAdminRoute
+          ? canAdmin
+          : isSimulatorRoute
+            ? showSimulator
+            : route === '/online-chat' && (canViewArm || simOperatePreview || showSimulator)
 
     if (!allowed) {
       return (
@@ -204,7 +207,6 @@ function App() {
         : canSupervisor
           ? 'supervisor' as const
           : 'operator' as const
-    const armNavLabel = canOperateArm || simOperate ? 'Чаты' : 'Операторы'
 
     const operateHref = simOperate
       ? `/online-chat?mode=operate&operator=${encodeURIComponent(operatorFromQuery)}`
@@ -226,16 +228,18 @@ function App() {
           : viewerTitle,
       // In simulator operate mode the shell must look like a pure operator session.
       showArm: true,
+      showOperators: simOperate ? false : (canSupervisor || canAdmin),
       showSupervisor: simOperate ? false : canSupervisor,
       showAdmin: simOperate ? false : canAdmin,
       showSimulator: simOperate ? false : showSimulator,
-      armNavLabel: simOperate ? 'Чаты' : armNavLabel,
+      armNavLabel: 'Чаты',
       armHref: operateHref,
+      operatorsHref: '/online-chat/operators',
       themeKind: chatThemeKind,
       onToggleTheme: () =>
         setChatThemeKind((kind) => (kind === 'light' ? 'dark' : 'light')),
       // Hamburger is part of АРМ for every role on /online-chat (picker + operate + view).
-      showMenuButton: route === '/online-chat',
+      showMenuButton: route === '/online-chat' || route === '/online-chat/operators',
       menuOpen: armMenuOpen,
       onMenuToggle: () => setArmMenuOpen((open) => !open),
     }
@@ -243,6 +247,22 @@ function App() {
       return (
         <ChatPlatformShell {...shellProps} showMenuButton={false}>
           <SupervisorApp demoMode={import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'} />
+        </ChatPlatformShell>
+      )
+    }
+    if (isOperatorsRoute) {
+      return (
+        <ChatPlatformShell {...shellProps}>
+          <ArmMenuHost
+            open={armMenuOpen}
+            onOpenChange={setArmMenuOpen}
+            armRole={armRole}
+            menuContext="picker"
+            themeKind={chatThemeKind}
+            operatorName={viewerName}
+          >
+            <OperatorPicker allowTransfer={allowTransferView} />
+          </ArmMenuHost>
         </ChatPlatformShell>
       )
     }

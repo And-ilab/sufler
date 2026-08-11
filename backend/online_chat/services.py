@@ -24,6 +24,7 @@ from online_chat.models import (
     DialogMessage,
     DialogTranscriptEmail,
     OperatorProfile,
+    format_phone_e164,
     normalize_phone,
 )
 from online_chat.routing_services import (
@@ -32,6 +33,7 @@ from online_chat.routing_services import (
     department_queue_is_full,
     record_event,
     select_department,
+    start_post_close_grace,
     transfer_to_operator,
 )
 
@@ -332,6 +334,7 @@ def create_dialog_with_message(
     status = Dialog.Status.WAITING
     if initiated_by == Dialog.InitiatedBy.OPERATOR and operator_name.strip():
         status = Dialog.Status.ACTIVE
+    normalized_phone = format_phone_e164(client_phone) if client_phone else ""
 
     department, placement_config, routing_reason = select_department(
         widget_id=widget_id,
@@ -357,7 +360,7 @@ def create_dialog_with_message(
         initiated_by=initiated_by,
         client_first_name=client_first_name.strip(),
         client_last_name=client_last_name.strip(),
-        client_phone=client_phone.strip(),
+        client_phone=normalized_phone or client_phone.strip(),
         client_external_id=client_external_id.strip(),
         entry_url=entry_url.strip(),
         locale=locale.strip() or "ru",
@@ -604,6 +607,7 @@ def transfer_dialog(
 
 
 def close_dialog(dialog: Dialog, *, topic: str) -> Dialog:
+    previous_operator = dialog.operator
     dialog.mark_closed(topic)
     record_event(dialog, "closed", actor_name=dialog.operator_name, payload={"topic": topic})
     system = DialogMessage.objects.create(
@@ -612,7 +616,12 @@ def close_dialog(dialog: Dialog, *, topic: str) -> Dialog:
         text="Диалог завершён",
         receipt_status=DialogMessage.ReceiptStatus.READ,
     )
+    # Manual+auto: 5s window for the freed operator before auto-assign fills the slot.
+    hold = start_post_close_grace(previous_operator)
     payload = serialize_dialog(dialog)
+    if hold is not None:
+        payload["assignment_grace_until"] = hold.until.isoformat()
+        payload["assignment_grace_seconds"] = 5
     broadcast(ARM_GROUP, "dialog.updated", payload)
     broadcast(
         dialog_group(str(dialog.id)),

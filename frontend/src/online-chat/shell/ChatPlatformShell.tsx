@@ -8,13 +8,15 @@ interface ChatPlatformShellProps {
   displayName?: string | null
   jobTitle?: string | null
   showArm?: boolean
+  showOperators?: boolean
   showSupervisor?: boolean
   showAdmin?: boolean
   showSimulator?: boolean
-  /** Nav label for /online-chat: «Чаты» (operator) or «Операторы» (admin/supervisor). */
+  /** Nav label for /online-chat: «Чаты». */
   armNavLabel?: string
   /** Keep simulator operate session when clicking brand / «Чаты». */
   armHref?: string
+  operatorsHref?: string
   themeKind?: ThemeKind
   onToggleTheme?: () => void
   showMenuButton?: boolean
@@ -28,11 +30,13 @@ export function ChatPlatformShell({
   displayName,
   jobTitle,
   showArm = true,
+  showOperators = false,
   showSupervisor = false,
   showAdmin = false,
   showSimulator = false,
   armNavLabel = 'Чаты',
   armHref = '/online-chat',
+  operatorsHref = '/online-chat/operators',
   themeKind = 'light',
   onToggleTheme,
   showMenuButton = false,
@@ -41,6 +45,7 @@ export function ChatPlatformShell({
 }: ChatPlatformShellProps) {
   const routes = [
     { href: armHref, label: armNavLabel, access: 'arm' as const },
+    { href: operatorsHref, label: 'Операторы', access: 'operators' as const },
     { href: '/online-chat/supervisor', label: 'Супервизор', access: 'supervisor' as const },
     { href: '/online-chat/admin', label: 'Управление', access: 'admin' as const },
     {
@@ -72,6 +77,7 @@ export function ChatPlatformShell({
 
   const visible = (access: (typeof routes)[number]['access']) =>
     (access === 'arm' && showArm)
+    || (access === 'operators' && showOperators)
     || (access === 'supervisor' && showSupervisor)
     || (access === 'admin' && showAdmin)
     || (access === 'simulator' && showSimulator)
@@ -126,8 +132,8 @@ export function ChatPlatformShell({
         <nav className="chat-platform-shell__nav" aria-label="Разделы онлайн-чата">
           {routes.filter(({ access }) => visible(access)).map((route) => {
             const active = route.access === 'arm'
-              ? currentPath === '/online-chat'
-              : currentPath === route.href
+              ? currentPath === '/online-chat' && !currentPath.endsWith('/operators')
+              : currentPath === route.href || (route.access === 'operators' && currentPath === '/online-chat/operators')
             return (
               <a
                 key={`${route.access}:${route.href}`}

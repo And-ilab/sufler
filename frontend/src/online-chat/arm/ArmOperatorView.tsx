@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react'
 import type { ArmTheme } from './theme'
 import {
+  acceptDialog,
   blockDialogRemote,
   canDownloadAttachment,
   closeDialogRemote,
@@ -19,6 +20,7 @@ import {
   onlineChatArmWsUrl,
   sendOperatorMessage,
   slaToneFromSeconds,
+  submitSuflerHintFeedback,
   transferDialogRemote,
   uploadOperatorAttachment,
   type ClientHistoryItem,
@@ -27,6 +29,10 @@ import {
   type ReceiptStatus,
   type SlaTone,
 } from '../api/onlineChatApi'
+import {
+  requestSuflerSuggest,
+  type SuflerHint,
+} from '../../sufler/api/suggest'
 import {
   getInternalUnreadCount,
   operatorsApi,
@@ -980,11 +986,13 @@ function SuflerFeedbackRow({
   scheme: _scheme,
   cardId: _cardId,
   disabled,
+  onFeedback,
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
   cardId: string;
   disabled?: boolean;
+  onFeedback?: (choice: SuflerFeedbackChoice) => void;
 }): JSX.Element {
   const [selected, setSelected] = useState<SuflerFeedbackChoice | null>(null);
 
@@ -1005,8 +1013,12 @@ function SuflerFeedbackRow({
           t={t}
           option={option}
           selected={selected === option.id}
-          disabled={disabled}
-          onSelect={() => setSelected(selected === option.id ? null : option.id)}
+          disabled={disabled || !!selected}
+          onSelect={() => {
+            if (selected) return;
+            setSelected(option.id);
+            onFeedback?.(option.id);
+          }}
         />
       ))}
     </div>
@@ -1357,32 +1369,24 @@ type SuflerHintData = {
   highlighted?: boolean;
 };
 
-const SUFLER_HINTS: SuflerHintData[] = [
-  {
-    id: "limits",
-    title: "Лимиты снятия наличных",
-    preview: "Суточный лимит снятия в банкоматах Беларусбанка для дебетовых карт…",
-    answerText:
-      "Суточный лимит снятия в банкоматах Беларусбанка для дебетовых карт составляет 2 000 BYN. Лимит обнуляется в 00:00 по минскому времени.",
-    operatorTip:
-      "При превышении клиент получит отказ операции — предложите альтернативу: отделение банка или безналичный перевод.",
-    relevance: "94%",
-    relevanceTone: "success",
-    suzTitle: "Лимиты снятия наличных",
-    highlighted: true,
-  },
-  {
-    id: "atm-fees",
-    title: "Комиссии ATM",
-    preview: "Комиссия за снятие в банкоматах других банков — от 1,5%…",
-    answerText:
-      "Комиссия за снятие наличных в банкоматах других банков составляет от 1,5% от суммы, минимум 3 BYN. В банкоматах Беларусбанка для карт банка комиссия не взимается.",
-    operatorTip: "Уточните тип карты и банк-эмитент перед ответом клиенту.",
-    relevance: "81%",
-    relevanceTone: "warning",
-    suzTitle: "Комиссии банкоматов",
-  },
-];
+function mapApiHintToCard(hint: SuflerHint, index: number): SuflerHintData {
+  const citation = hint.citations?.[0];
+  const title = citation?.title?.trim() || `Подсказка ${hint.rank || index + 1}`;
+  const preview = hint.text.length > 120 ? `${hint.text.slice(0, 117)}…` : hint.text;
+  const percent = Math.round(hint.relevance_percent ?? hint.relevance_score * 100);
+  const tone: SuflerHintData["relevanceTone"] =
+    percent >= 85 ? "success" : percent >= 70 ? "neutral" : "warning";
+  return {
+    id: `hint-${hint.rank}-${index}`,
+    title,
+    preview,
+    answerText: hint.text,
+    relevance: `${percent}%`,
+    relevanceTone: tone,
+    suzTitle: title,
+    highlighted: index === 0,
+  };
+}
 
 type ClientInfoData = {
   name: string;
@@ -1672,6 +1676,7 @@ function SuflerHintCard({
   onToggle,
   onInsert,
   disabled,
+  onFeedback,
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
@@ -1680,6 +1685,7 @@ function SuflerHintCard({
   onToggle: () => void;
   onInsert: (answerText: string) => void;
   disabled?: boolean;
+  onFeedback?: (choice: SuflerFeedbackChoice) => void;
 }): JSX.Element {
   const shade = relevanceShade(t, hint.relevance);
 
@@ -1745,7 +1751,13 @@ function SuflerHintCard({
           ) : null}
           {isExpanded ? (
             <div onClick={(e) => e.stopPropagation()}>
-              <SuflerFeedbackRow t={t} scheme={scheme} cardId={hint.id} disabled={disabled} />
+              <SuflerFeedbackRow
+                t={t}
+                scheme={scheme}
+                cardId={hint.id}
+                disabled={disabled}
+                onFeedback={onFeedback}
+              />
             </div>
           ) : null}
         </CardBody>
@@ -2898,7 +2910,16 @@ export function ArmOperatorView({
   const [showTemplates, setShowTemplates] = useState(false);
   const [composerTemplates, setComposerTemplates] = useState(() => loadReplyTemplates());
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [transferTargetKind, setTransferTargetKind] = useState<"operator" | "supervisor">("operator");
   const [transferOperatorName, setTransferOperatorName] = useState("");
+  const [liveSuflerHints, setLiveSuflerHints] = useState<SuflerHintData[]>([]);
+  const [liveSuflerRaw, setLiveSuflerRaw] = useState<SuflerHint[]>([]);
+  const [suflerRequestId, setSuflerRequestId] = useState("");
+  const [suflerQuery, setSuflerQuery] = useState("");
+  const [suflerLoading, setSuflerLoading] = useState(false);
+  const [suflerError, setSuflerError] = useState("");
+  const [assignmentGraceUntil, setAssignmentGraceUntil] = useState<number | null>(null);
+  const [acceptingDialog, setAcceptingDialog] = useState(false);
   const [editMessageTarget, setEditMessageTarget] = useState<OnlineChatMessage | null>(null);
   const [editMessageText, setEditMessageText] = useState("");
   const [deleteMessageTarget, setDeleteMessageTarget] = useState<OnlineChatMessage | null>(null);
@@ -3266,7 +3287,14 @@ export function ArmOperatorView({
     void fetchClientHistory({ dialogId: active.id })
       .then((response) => {
         if (cancelled) return;
-        setSummaryHistory(historyToSummary(response.items ?? [], response.summary ?? ""));
+        const base = historyToSummary(response.items ?? [], response.summary ?? "");
+        setSummaryHistory({
+          ...base,
+          detailedSummary: response.detailed_summary || base.detailedSummary,
+          summary: response.repeat_hint
+            ? `${response.repeat_hint} ${response.summary || base.summary}`.trim()
+            : base.summary,
+        });
       })
       .catch(() => {
         if (!cancelled) setSummaryHistory(EMPTY_SUMMARY_HISTORY);
@@ -3275,6 +3303,75 @@ export function ArmOperatorView({
       cancelled = true;
     };
   }, [active?.id, active?.live]);
+
+  useEffect(() => {
+    if (!active?.live || isReadOnly) {
+      setLiveSuflerHints([]);
+      setLiveSuflerRaw([]);
+      setSuflerError("");
+      setSuflerLoading(false);
+      return;
+    }
+    const latestClient = [...liveMessages]
+      .reverse()
+      .find((item) => item.speaker === "client" && item.text.trim());
+    if (!latestClient) {
+      setLiveSuflerHints([]);
+      setLiveSuflerRaw([]);
+      return;
+    }
+    let cancelled = false;
+    setSuflerLoading(true);
+    setSuflerError("");
+    setSuflerQuery(latestClient.text);
+    void requestSuflerSuggest(latestClient.text, 5, {
+      clientHistory: summaryHistory.summary || summaryHistory.detailedSummary || "",
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setSuflerRequestId(result.request_id || "");
+        setLiveSuflerRaw(result.hints || []);
+        setLiveSuflerHints((result.hints || []).map(mapApiHintToCard));
+        if (!result.hints?.length) {
+          setSuflerError(
+            result.blocked_reason === "no_relevant_knowledge"
+              ? "Нет релевантных статей в базе знаний — ответьте вручную."
+              : "Подсказки недоступны — ответьте вручную.",
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLiveSuflerHints([]);
+        setLiveSuflerRaw([]);
+        setSuflerError(
+          err instanceof Error
+            ? err.message
+            : "Суфлёр временно недоступен — ответьте вручную.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setSuflerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active?.id, active?.live, isReadOnly, liveMessages, summaryHistory.detailedSummary, summaryHistory.summary]);
+
+  useEffect(() => {
+    if (assignmentGraceUntil == null) return;
+    if (assignmentGraceUntil <= Date.now()) {
+      setAssignmentGraceUntil(null);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      if (assignmentGraceUntil <= Date.now()) {
+        setAssignmentGraceUntil(null);
+        void refreshLiveQueues();
+      }
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [assignmentGraceUntil, refreshLiveQueues]);
 
   const handleSelectQueue = (id: string) => {
     onSelectQueue(id);
@@ -3436,7 +3533,15 @@ export function ArmOperatorView({
     });
     if (wasLive) {
       void closeDialogRemote(closingId, topic)
-        .then(() => void refreshLiveQueues())
+        .then((result) => {
+          if (result.assignment_grace_until) {
+            const until = Date.parse(result.assignment_grace_until);
+            if (!Number.isNaN(until)) {
+              setAssignmentGraceUntil(until);
+            }
+          }
+          void refreshLiveQueues();
+        })
         .catch(() => {
           setComposerNotice("Не удалось закрыть диалог на сервере. Попробуйте ещё раз.");
         });
@@ -3447,8 +3552,37 @@ export function ArmOperatorView({
       setComposerNotice(`Диалог с ${closedName} закрыт · ${topic}.`);
     } else {
       onSelectQueue("");
-      setComposerNotice(`Диалог закрыт · ${topic}. Очередь пуста.`);
+      setComposerNotice(`Диалог закрыт · ${topic}. Очередь пуста — можно взять из общей очереди.`);
     }
+  };
+
+  const handleAcceptSharedDialog = () => {
+    if (!active?.live || acceptingDialog || viewOnly) return;
+    setAcceptingDialog(true);
+    void acceptDialog(active.id, operatorName)
+      .then(() => {
+        setAssignmentGraceUntil(null);
+        setComposerNotice(`Диалог с ${active.name} принят.`);
+        void refreshLiveQueues();
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : "Не удалось принять диалог";
+        setComposerNotice(message);
+      })
+      .finally(() => setAcceptingDialog(false));
+  };
+
+  const handleTakeOverDialog = () => {
+    if (!active?.live || !allowTransferInView) return;
+      void transferDialogRemote(active.id, operatorName, active.operatorName || "")
+      .then(() => {
+        setComposerNotice(`Диалог с ${active.name} взят на себя.`);
+        window.location.assign("/online-chat");
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : "Не удалось взять диалог";
+        setComposerNotice(message);
+      });
   };
 
   const handleConfirmBlockClient = () => {
@@ -3520,10 +3654,24 @@ export function ArmOperatorView({
     setComposerNotice(notice);
   };
 
+  const transferOperatorsOnly = useMemo(
+    () =>
+      transferOperators.filter(
+        (item) => item.name !== operatorName && (item.role ?? "operator") === "operator",
+      ),
+    [transferOperators, operatorName],
+  );
+  const transferSupervisorsOnly = useMemo(
+    () =>
+      transferOperators.filter(
+        (item) => item.name !== operatorName && item.role === "supervisor",
+      ),
+    [transferOperators, operatorName],
+  );
+
   const transferDepartments = useMemo(() => {
     const map = new Map<string, string>();
-    for (const item of transferOperators) {
-      if (item.name === operatorName) continue;
+    for (const item of transferOperatorsOnly) {
       const deptName = item.department_name?.trim() || "Без отдела";
       const deptId = String(item.department_id ?? item.department ?? deptName);
       map.set(deptId, deptName);
@@ -3531,11 +3679,19 @@ export function ArmOperatorView({
     return Array.from(map.entries())
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name, "ru"));
-  }, [transferOperators, operatorName]);
+  }, [transferOperatorsOnly]);
 
   const transferOperatorOptions = useMemo(() => {
-    const inDept = transferOperators.filter((item) => {
-      if (item.name === operatorName) return false;
+    if (transferTargetKind === "supervisor") {
+      const list = transferSupervisorsOnly.length
+        ? transferSupervisorsOnly
+        : [{ name: "Козлова Е.В." } as ChatOperator];
+      return list
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, "ru"))
+        .map((item) => ({ value: item.name, label: item.name }));
+    }
+    const inDept = transferOperatorsOnly.filter((item) => {
       const deptName = item.department_name?.trim() || "Без отдела";
       const deptId = String(item.department_id ?? item.department ?? deptName);
       return deptId === transferDepartment;
@@ -3546,23 +3702,28 @@ export function ArmOperatorView({
         .sort((a, b) => a.name.localeCompare(b.name, "ru"))
         .map((item) => ({ value: item.name, label: item.name }));
     }
-    // Fallback when directory empty: keep demo names under one virtual dept.
-    if (!transferOperators.length) {
+    if (!transferOperatorsOnly.length) {
       return TRANSFER_OPERATORS
         .filter((name) => name !== operatorName)
         .map((name) => ({ value: name, label: name }));
     }
     return [];
-  }, [transferOperators, transferDepartment, operatorName]);
+  }, [
+    transferTargetKind,
+    transferSupervisorsOnly,
+    transferOperatorsOnly,
+    transferDepartment,
+    operatorName,
+  ]);
 
   const openTransferDialog = () => {
     if (!active?.live) return;
     if (composerLocked && !canTransferDespiteView) return;
+    setTransferTargetKind("operator");
     const firstDept = transferDepartments[0]?.id ?? "";
     setTransferDepartment(firstDept);
-    const firstOps = transferOperators
+    const firstOps = transferOperatorsOnly
       .filter((item) => {
-        if (item.name === operatorName) return false;
         const deptName = item.department_name?.trim() || "Без отдела";
         const deptId = String(item.department_id ?? item.department ?? deptName);
         return deptId === firstDept;
@@ -3571,6 +3732,11 @@ export function ArmOperatorView({
     setTransferOperatorName(firstOps[0] ?? TRANSFER_OPERATORS.find((name) => name !== operatorName) ?? "");
     setTransferDialogOpen(true);
   };
+
+  const graceSecondsLeft =
+    assignmentGraceUntil != null
+      ? Math.max(0, Math.ceil((assignmentGraceUntil - nowMs) / 1000))
+      : 0;
 
   const handleConfirmTransferDialog = () => {
     if (!active?.live) return;
@@ -4456,7 +4622,33 @@ export function ArmOperatorView({
             ) : null}
             {isSharedQueuePeek ? (
               <Callout tone="info" style={{ marginBottom: 8, fontSize: 12 }}>
-                Просмотр общей очереди: ответ недоступен, сообщения клиента не отмечаются как прочитанные.
+                Просмотр общей очереди: ответ недоступен, пока диалог не принят.
+                <div style={{ marginTop: 8 }}>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={acceptingDialog || viewOnly}
+                    onClick={handleAcceptSharedDialog}
+                  >
+                    {acceptingDialog ? "Принимаем…" : "Взять диалог"}
+                  </Button>
+                </div>
+              </Callout>
+            ) : null}
+            {graceSecondsLeft > 0 ? (
+              <Callout tone="info" style={{ marginBottom: 8, fontSize: 12 }}>
+                У вас {graceSecondsLeft} сек., чтобы вручную выбрать диалог из общей очереди.
+                Затем следующий диалог будет назначен автоматически.
+              </Callout>
+            ) : null}
+            {viewOnly && allowTransferInView && active?.live ? (
+              <Callout tone="info" style={{ marginBottom: 8, fontSize: 12 }}>
+                Режим просмотра АРМ оператора.
+                <div style={{ marginTop: 8 }}>
+                  <Button size="sm" variant="primary" onClick={handleTakeOverDialog}>
+                    Взять на себя
+                  </Button>
+                </div>
               </Callout>
             ) : null}
             {quoteMessage ? (
@@ -4658,13 +4850,18 @@ export function ArmOperatorView({
           <Divider style={{ margin: "12px 0" }} />
           <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
             <H3 style={{ fontSize: 15, fontWeight: 700 }}>Суфлёр</H3>
-            <Pill tone="success" size="sm">
-              активен
+            <Pill tone={suflerError ? "warning" : suflerLoading ? "neutral" : "success"} size="sm">
+              {suflerLoading ? "загрузка…" : suflerError ? "недоступен" : "активен"}
             </Pill>
           </Row>
+          {suflerError ? (
+            <Callout tone="warning" style={{ marginTop: 8, fontSize: 12 }}>
+              {suflerError}
+            </Callout>
+          ) : null}
 
           <div style={{ position: "relative" }}>
-            {SUFLER_HINTS.map((hint) => (
+            {liveSuflerHints.map((hint, index) => (
               <SuflerHintCard
                 key={hint.id}
                 t={t}
@@ -4679,8 +4876,27 @@ export function ArmOperatorView({
                 }
                 onInsert={onInsertSufler}
                 disabled={isReadOnly}
+                onFeedback={(choice) => {
+                  const raw = liveSuflerRaw[index];
+                  void submitSuflerHintFeedback({
+                    dialog_id: active?.id,
+                    operator_name: operatorName,
+                    query: suflerQuery,
+                    hint_rank: raw?.rank ?? index + 1,
+                    hint_text: hint.answerText,
+                    choice,
+                    relevance_percent: raw?.relevance_percent,
+                    citation_title: hint.suzTitle,
+                    request_id: suflerRequestId,
+                  }).catch(() => {});
+                }}
               />
             ))}
+            {!suflerLoading && !suflerError && liveSuflerHints.length === 0 ? (
+              <Text style={{ fontSize: 12, color: t.text.tertiary, marginTop: 8 }}>
+                Подсказки появятся после сообщения клиента.
+              </Text>
+            ) : null}
           </div>
           </div>
         </div>
@@ -4765,35 +4981,69 @@ export function ArmOperatorView({
               Перевести диалог
             </Text>
             <Text style={{ fontSize: 13, color: t.text.secondary, lineHeight: 1.45, marginBottom: 14 }}>
-              Сначала выберите отдел, затем оператора этого отдела.
+              Выберите получателя: оператор или супервизор.
             </Text>
             <Text style={{ fontSize: 12, color: t.text.secondary, marginBottom: 6 }}>
-              Отдел
+              Кому перевести
             </Text>
-            {transferDepartments.length > 0 ? (
-              <Select
-                value={transferDepartment}
-                onChange={(value) => {
-                  setTransferDepartment(value);
-                  const first = transferOperators.find((item) => {
-                    if (item.name === operatorName) return false;
+            <Select
+              value={transferTargetKind}
+              onChange={(value) => {
+                const kind = value === "supervisor" ? "supervisor" : "operator";
+                setTransferTargetKind(kind);
+                if (kind === "supervisor") {
+                  setTransferOperatorName(transferSupervisorsOnly[0]?.name ?? "Козлова Е.В.");
+                } else {
+                  const firstDept = transferDepartments[0]?.id ?? "";
+                  setTransferDepartment(firstDept);
+                  const first = transferOperatorsOnly.find((item) => {
                     const deptName = item.department_name?.trim() || "Без отдела";
                     const deptId = String(item.department_id ?? item.department ?? deptName);
-                    return deptId === value;
+                    return deptId === firstDept;
                   });
                   setTransferOperatorName(first?.name ?? "");
-                }}
-                options={transferDepartments.map((item) => ({ value: item.id, label: item.name }))}
-                style={{ marginBottom: 12 }}
-              />
+                }
+              }}
+              options={[
+                { value: "operator", label: "Оператору" },
+                { value: "supervisor", label: "Супервизору" },
+              ]}
+              style={{ marginBottom: 12 }}
+            />
+            {transferTargetKind === "operator" ? (
+              <>
+                <Text style={{ fontSize: 12, color: t.text.secondary, marginBottom: 6 }}>
+                  Отдел
+                </Text>
+                {transferDepartments.length > 0 ? (
+                  <Select
+                    value={transferDepartment}
+                    onChange={(value) => {
+                      setTransferDepartment(value);
+                      const first = transferOperatorsOnly.find((item) => {
+                        const deptName = item.department_name?.trim() || "Без отдела";
+                        const deptId = String(item.department_id ?? item.department ?? deptName);
+                        return deptId === value;
+                      });
+                      setTransferOperatorName(first?.name ?? "");
+                    }}
+                    options={transferDepartments.map((item) => ({ value: item.id, label: item.name }))}
+                    style={{ marginBottom: 12 }}
+                  />
+                ) : (
+                  <Text style={{ fontSize: 13, color: t.text.tertiary, marginBottom: 12 }}>
+                    Отделы не найдены — показан общий список операторов.
+                  </Text>
+                )}
+                <Text style={{ fontSize: 12, color: t.text.secondary, marginBottom: 6 }}>
+                  Оператор
+                </Text>
+              </>
             ) : (
-              <Text style={{ fontSize: 13, color: t.text.tertiary, marginBottom: 12 }}>
-                Отделы не найдены — показан общий список операторов.
+              <Text style={{ fontSize: 12, color: t.text.secondary, marginBottom: 6 }}>
+                Супервизор
               </Text>
             )}
-            <Text style={{ fontSize: 12, color: t.text.secondary, marginBottom: 6 }}>
-              Оператор
-            </Text>
             {transferOperatorOptions.length > 0 ? (
               <Select
                 value={transferOperatorName}
@@ -4803,7 +5053,9 @@ export function ArmOperatorView({
               />
             ) : (
               <Text style={{ fontSize: 13, color: t.text.tertiary, marginBottom: 16 }}>
-                В выбранном отделе нет доступных операторов.
+                {transferTargetKind === "supervisor"
+                  ? "Нет доступных супервизоров."
+                  : "В выбранном отделе нет доступных операторов."}
               </Text>
             )}
             <Row style={{ gap: 8, justifyContent: "flex-end" }}>

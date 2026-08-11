@@ -49,6 +49,8 @@ def _citation(document: Mapping[str, Any]) -> dict[str, Any]:
 def _build_messages(
     query: str,
     documents: Sequence[Mapping[str, Any]],
+    *,
+    client_history: str = "",
 ) -> list[dict[str, str]]:
     context_blocks = []
     for document in documents:
@@ -58,10 +60,17 @@ def _build_messages(
             f"{document['snippet']}"
         )
     context = "\n\n".join(context_blocks)
+    history_block = ""
+    cleaned_history = client_history.strip() if isinstance(client_history, str) else ""
+    if cleaned_history:
+        history_block = (
+            f"Контекст предыдущих обращений клиента:\n{cleaned_history[:2000]}\n\n"
+        )
     user_content = (
+        f"{history_block}"
         f"Реплика клиента:\n{query}\n\n"
         f"Фрагменты базы знаний СУЗ ({KB_ID}):\n{context}\n\n"
-        "Сформируй подсказку оператору."
+        "Сформируй подсказку оператору. Если тема повторяется — отметь это явно."
     )
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -112,6 +121,7 @@ def suggest(
     limit: int = DEFAULT_HINT_LIMIT,
     gateway: ModelGateway | None = None,
     request_id: str | None = None,
+    client_history: str = "",
 ) -> dict[str, Any]:
     """Run text → QU → RAG → ModelGateway(sufler_cc) → citations."""
     normalized = text.strip() if isinstance(text, str) else ""
@@ -167,7 +177,7 @@ def suggest(
     active_gateway = gateway or ModelGateway.from_registry()
     llm_response = active_gateway.chat(
         PROFILE,
-        _build_messages(normalized, documents),
+        _build_messages(normalized, documents, client_history=client_history),
         temperature=float(settings.temperature),
         top_p=float(settings.top_p),
         max_tokens=int(settings.max_tokens),
