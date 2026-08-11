@@ -16,6 +16,7 @@ import { QuPreviewScreen } from './QuPreviewScreen'
 import { KbAdminScreen } from './KbAdminScreen'
 import { PromptsAssistantScreen } from './PromptsAssistantScreen'
 import { CapabilitiesScreen } from './CapabilitiesScreen'
+import { DocTypesScreen } from './DocTypesScreen'
 import type { ModelParamsData } from './api/modelRegistry'
 import {
   ADMIN_GROUPS,
@@ -464,6 +465,8 @@ export function AiHubAdminApp({
             <PromptsAssistantScreen canEdit={canEdit} />
           ) : screen === 'capabilities' ? (
             <CapabilitiesScreen canEdit={canEdit} />
+          ) : screen === 'doc_types' ? (
+            <DocTypesScreen canEdit={canEdit} />
           ) : (
             <>
               <section className="admin-stats" aria-label={`Сводка экрана ${copy.title}`}>
@@ -507,7 +510,7 @@ export function AiHubAdminApp({
           )}
         </main>
 
-        {screen !== 'qu_admin' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && (
+        {screen !== 'qu_admin' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && screen !== 'doc_types' && (
         <footer className="admin-save-footer" data-testid="admin-save-footer">
           <span>
             {screen === 'model_params'

@@ -8,7 +8,6 @@ import { Card, Fab, HintCard, StatusBadge } from '../../components'
 import { AssistantChat } from '../../assistant/AssistantChat'
 import { OcrDocumentsPanel } from '../ocr/OcrDocumentsPanel'
 import {
-  canOpenKbAdminDeepLink,
   canWriteAssistantChat,
   getSettingsMenuEntry,
 } from '../../components/portalLauncherAccess'
@@ -56,7 +55,6 @@ export function AiHubPanel({
     : roleTabs
   const [open, setOpen] = useState(initialOpen)
   const [pinned, setPinned] = useState(initialPinned)
-  const [menuOpen, setMenuOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<HubPanelTab>(
     initialTab && visibleTabs.includes(initialTab)
       ? initialTab
@@ -129,14 +127,15 @@ export function AiHubPanel({
             </div>
             <div className="hub-panel__controls">
               {isHubAdminRole(roles) && settingsEntry && (
-                <button
-                  type="button"
-                  aria-label="Открыть меню AI Hub"
-                  aria-expanded={menuOpen}
-                  onClick={() => setMenuOpen((value) => !value)}
+                <a
+                  href={settingsEntry.href}
+                  className="hub-panel__settings"
+                  aria-label={settingsEntry.label}
+                  title={settingsEntry.label}
+                  data-testid="admin-center-gear"
                 >
                   ≡
-                </button>
+                </a>
               )}
               <button
                 type="button"
@@ -153,19 +152,6 @@ export function AiHubPanel({
                 ×
               </button>
             </div>
-            {menuOpen && settingsEntry && (
-              <Card className="hub-panel__menu" role="menu">
-                <a role="menuitem" href={settingsEntry.href}>
-                  {settingsEntry.label}
-                </a>
-                {canOpenKbAdminDeepLink(roles) && (
-                  <a role="menuitem" href="/ai-hub/admin/kb_admin">БЗ · полное окно</a>
-                )}
-                <button type="button" role="menuitem" onClick={() => setMenuOpen(false)}>
-                  Закрыть меню
-                </button>
-              </Card>
-            )}
           </header>
 
           <div className="hub-panel__tabs" role="tablist" aria-label="Модули AI Hub">

@@ -373,7 +373,9 @@ test('assistant window III.3 streams tokens, shows tools and feedback', async ({
   const seedFeedback = page.locator('[data-testid^="feedback-useful-"]').first()
   await seedFeedback.click()
   await expect(page.getByText('Оценка сохранена')).toBeVisible()
-  await expect(seedFeedback).toBeDisabled()
+  await expect(page.locator('[data-testid^="feedback-useful-"]')).toHaveCount(0)
+  await expect(page.locator('[data-testid^="feedback-incomplete-"]')).toHaveCount(0)
+  await expect(page.locator('[data-testid^="feedback-incorrect-"]')).toHaveCount(0)
 
   await page.getByTestId('asst-draft').fill('Нужна справка о вкладе')
   await page.getByTestId('asst-send').click()

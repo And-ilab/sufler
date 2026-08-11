@@ -11,11 +11,27 @@ export interface AssistantSource {
   permalink?: string
   snippet?: string
   kb_slug?: string
+  article_id?: number | string
 }
 
 export interface AssistantAttachmentRef {
   name: string
   type?: string
+}
+
+export interface AssistantOcrField {
+  id: string
+  label: string
+  value: string
+  confidence: number | null
+}
+
+export interface AssistantOcrResult {
+  jobId: string
+  documentId: string
+  documentType: string
+  validationStatus?: string | null
+  fields: AssistantOcrField[]
 }
 
 export interface AssistantMessage {
@@ -27,6 +43,7 @@ export interface AssistantMessage {
   feedback?: FeedbackKind | null
   tools?: ToolId[]
   attachments?: AssistantAttachmentRef[]
+  ocr?: AssistantOcrResult
 }
 
 export interface AssistantToolState {

@@ -274,6 +274,8 @@ class AssistantKnowledgeBaseDocument(models.Model):
     )
     status_message = models.CharField(max_length=500, blank=True)
     extracted_text = models.TextField(blank=True)
+    # Relative path under ASSISTANT_KB_STORAGE_ROOT for the original upload.
+    original_relpath = models.CharField(max_length=512, blank=True, default="")
     chunk_count = models.PositiveIntegerField(default=0)
     article_id = models.BigIntegerField(unique=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)

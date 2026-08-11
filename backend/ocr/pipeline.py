@@ -1,4 +1,4 @@
-"""IV.5 OCR pipeline: upload → queue → recognize → store results."""
+"""IV.5 / IV.8 OCR pipeline: upload → OCR → structure → validate → store."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from django.utils import timezone
 from ocr.engine import OcrEngineError, recognize_document, resolve_ocr_model
 from ocr.models import OcrJob
 from ocr.storage import ObjectStoreError, get_object_store
+from ocr.structuring import structure_document
+from ocr.validation import ValidationRequestError, validate_document
 
 ALLOWED_EXTENSIONS = frozenset(
     {".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".tif"}
@@ -69,8 +71,10 @@ def create_job_from_upload(
     filename: str,
     content_type: str = "",
     created_by: str = "",
+    document_type_hint: str = "",
+    run_inline: bool = False,
 ) -> OcrJob:
-    """Persist original to object storage and enqueue OCR Celery job."""
+    """Persist original to object storage and enqueue (or run) OCR job."""
     raw = upload.read()
     safe_name, detected_type = validate_upload(filename, len(raw))
     ctype = (content_type or "").strip() or detected_type
@@ -97,8 +101,20 @@ def create_job_from_upload(
             original_object_key=original_key,
             result_object_key=result_key,
             ocr_model=model_info["model"],
+            document_type=(document_type_hint or "")[:64],
             created_by=created_by[:150],
         )
+
+    if run_inline:
+        try:
+            process_job(job.job_id)
+        except Exception as exc:
+            job.refresh_from_db()
+            if job.status != OcrJob.STATUS_ERROR:
+                raise OcrPipelineError(str(exc)) from exc
+            raise OcrPipelineError(job.error_message or str(exc)) from exc
+        job.refresh_from_db()
+        return job
 
     from ocr.tasks import run_ocr_job
 
@@ -106,8 +122,113 @@ def create_job_from_upload(
     return job
 
 
+def _attach_structuring(
+    result: dict[str, Any],
+    *,
+    filename: str,
+    document_type_hint: str = "",
+) -> dict[str, Any]:
+    pages = result.get("pages") or []
+    ocr_text = "\n\n".join(
+        str(page.get("text") or "") for page in pages if isinstance(page, dict)
+    )
+    schema = None
+    hint = document_type_hint or None
+    if hint and hint != "unknown":
+        try:
+            from ocr.templates_registry import template_schema_for
+
+            schema = template_schema_for(hint)
+        except Exception:
+            schema = None
+
+    structured = structure_document(
+        ocr_text,
+        filename=filename,
+        document_type_hint=hint,
+        field_schema=schema,
+        use_gateway=True,
+    )
+    doc_type = structured["document_type"]
+    fields = structured["fields"]
+
+    # Validate only schema-known keys; keep extras in result for UI (surname, etc.).
+    known_fields = dict(fields)
+    if doc_type and doc_type != "unknown":
+        try:
+            from ocr.templates_registry import template_schema_for
+            from ocr.validation import _load_rules, DEFAULT_RULES_PATH
+
+            schema_keys = set((template_schema_for(doc_type).get("fields") or {}).keys())
+        except Exception:
+            try:
+                from ocr.validation import DEFAULT_RULES_PATH, _load_rules
+
+                yaml_spec = _load_rules(DEFAULT_RULES_PATH)["document_types"].get(
+                    doc_type
+                ) or {}
+                schema_keys = set((yaml_spec.get("fields") or {}).keys())
+            except Exception:
+                schema_keys = set()
+        if schema_keys:
+            known_fields = {
+                key: value for key, value in fields.items() if key in schema_keys
+            }
+
+    validation_payload: dict[str, Any] | None = None
+    if doc_type and doc_type != "unknown" and known_fields:
+        try:
+            validated = validate_document(
+                doc_type,
+                known_fields,
+                job_id=result.get("job_id"),
+                document_id=result.get("document_id"),
+                document_sha256=result.get("document_sha256"),
+            )
+            validation_payload = validated.as_dict()
+        except (ValidationRequestError, Exception) as exc:
+            validation_payload = {
+                "status": "pending_review",
+                "error": str(exc),
+                "fields": known_fields,
+            }
+
+    result["document_type_candidate"] = doc_type
+    result["document_type"] = doc_type
+    result["fields"] = fields
+    result["field_count"] = len(fields)
+    result["llm_proposal"] = structured.get("llm_proposal")
+    result["validation"] = (
+        validation_payload.get("validation")
+        if validation_payload
+        else {"status": "pending_review", "downstream_allowed": False}
+    )
+    if validation_payload:
+        result["validation_status"] = validation_payload.get("status")
+        result["normalized_fields"] = validation_payload.get("fields")
+    else:
+        result["validation_status"] = "pending_review"
+        result["normalized_fields"] = {}
+
+    try:
+        from ocr.templates_registry import get_template
+
+        if doc_type and doc_type != "unknown":
+            template = get_template(doc_type)
+            result["template"] = {
+                "id": template.doc_type,
+                "version": str(template.template_version),
+                "title": template.title,
+            }
+    except Exception:
+        pass
+
+    result["status"] = "structured"
+    return result
+
+
 def process_job(job_id: str) -> dict[str, Any]:
-    """Celery worker entry: OCR + write result JSON to object storage."""
+    """Celery worker entry: OCR + structure + validate + store JSON."""
     try:
         job = OcrJob.objects.get(pk=job_id)
     except OcrJob.DoesNotExist as exc:
@@ -128,6 +249,11 @@ def process_job(job_id: str) -> dict[str, Any]:
             job_id=job.job_id,
             sha256=job.sha256,
         )
+        result = _attach_structuring(
+            result,
+            filename=job.filename,
+            document_type_hint=job.document_type,
+        )
         payload = json.dumps(result, ensure_ascii=False, indent=2).encode(
             "utf-8"
         )
@@ -147,11 +273,15 @@ def process_job(job_id: str) -> dict[str, Any]:
     job.status = OcrJob.STATUS_COMPLETED
     job.completed_at = timezone.now()
     job.ocr_model = result["ocr_engine"]["version"]
+    job.document_type = str(result.get("document_type") or "")[:64]
+    job.validation_status = str(result.get("validation_status") or "")[:32]
     job.save(
         update_fields=[
             "status",
             "completed_at",
             "ocr_model",
+            "document_type",
+            "validation_status",
             "updated_at",
         ]
     )
@@ -159,8 +289,11 @@ def process_job(job_id: str) -> dict[str, Any]:
         "job_id": job.job_id,
         "document_id": job.document_id,
         "status": job.status,
+        "document_type": job.document_type,
+        "validation_status": job.validation_status,
         "result_object_key": job.result_object_key,
         "pages": len(result["pages"]),
+        "field_count": result.get("field_count", 0),
     }
 
 
@@ -173,6 +306,8 @@ def job_to_dict(job: OcrJob) -> dict[str, Any]:
         "content_type": job.content_type,
         "sha256": job.sha256,
         "ocr_model": job.ocr_model,
+        "document_type": job.document_type or None,
+        "validation_status": job.validation_status or None,
         "original_object_key": job.original_object_key,
         "result_object_key": job.result_object_key or None,
         "error_message": job.error_message or None,
@@ -180,8 +315,8 @@ def job_to_dict(job: OcrJob) -> dict[str, Any]:
         "completed_at": (
             job.completed_at.isoformat() if job.completed_at else None
         ),
-        "pipeline": "IV.5",
-        "fr": ["FR-OCR-04", "FR-OCR-06", "FR-OCR-08"],
+        "pipeline": "IV.5+IV.8",
+        "fr": ["FR-OCR-04", "FR-OCR-06", "FR-OCR-08", "FR-OCR-13", "FR-OCR-14"],
     }
 
 
@@ -198,3 +333,29 @@ def load_result(job: OcrJob) -> dict[str, Any]:
     except ObjectStoreError as exc:
         raise OcrPipelineError(str(exc)) from exc
     return json.loads(raw.decode("utf-8"))
+
+
+def recognize_bytes_inline(
+    content: bytes,
+    *,
+    filename: str,
+    content_type: str = "",
+    created_by: str = "",
+    document_type_hint: str = "",
+) -> dict[str, Any]:
+    """Sync helper for assistant: create job, process, return full result."""
+    from io import BytesIO
+
+    job = create_job_from_upload(
+        BytesIO(content),
+        filename=filename,
+        content_type=content_type,
+        created_by=created_by,
+        document_type_hint=document_type_hint,
+        run_inline=True,
+    )
+    result = load_result(job)
+    return {
+        "job": job_to_dict(job),
+        "result": result,
+    }

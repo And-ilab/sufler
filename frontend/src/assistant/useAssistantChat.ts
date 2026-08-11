@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ChatAttachmentPayload } from './api/attachments'
+import {
+  fieldConfidencePercent,
+  fieldDisplayValue,
+  type ChatAttachmentPayload,
+} from './api/attachments'
 import { streamAssistantChat, streamDemoChat } from './api/chatStream'
 import {
   createDialogInHistory,
@@ -14,10 +18,46 @@ import {
   DEFAULT_TOOLS,
   SEED_MESSAGES,
   type AssistantMessage,
+  type AssistantOcrResult,
   type AssistantToolState,
   type FeedbackKind,
   type ToolId,
 } from './types'
+
+const OCR_FIELD_LABELS: Record<string, string> = {
+  full_name: 'ФИО',
+  surname: 'Фамилия',
+  given_name: 'Имя',
+  patronymic: 'Отчество',
+  series: 'Серия',
+  number: 'Номер',
+  issue_date: 'Дата выдачи',
+  document_number: 'Номер документа',
+  date: 'Дата',
+  payer: 'Плательщик',
+  beneficiary: 'Получатель',
+  amount: 'Сумма',
+  purpose: 'Назначение',
+  currency: 'Валюта',
+}
+
+function toAssistantOcr(attachment: ChatAttachmentPayload): AssistantOcrResult | null {
+  const ocr = attachment.ocr
+  if (!ocr?.job_id) return null
+  const fields = Object.entries(ocr.fields || {}).map(([id, raw]) => ({
+    id,
+    label: OCR_FIELD_LABELS[id] || id,
+    value: fieldDisplayValue(raw),
+    confidence: fieldConfidencePercent(raw),
+  }))
+  return {
+    jobId: ocr.job_id,
+    documentId: ocr.document_id,
+    documentType: ocr.document_type || 'unknown',
+    validationStatus: ocr.validation_status,
+    fields,
+  }
+}
 
 function uid(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -131,14 +171,19 @@ export function useAssistantChat({
   const sendMessage = useCallback(
     async (text: string, attachments: ChatAttachmentPayload[] = []) => {
       const trimmed = text.trim()
-      const readyAttachments = attachments.filter((item) => item.text?.trim())
+      const readyAttachments = attachments.filter(
+        (item) => item.text?.trim() || item.ocr,
+      )
       if ((!trimmed && !readyAttachments.length) || streaming) return
 
+      const ocrResult = readyAttachments.map(toAssistantOcr).find(Boolean) || null
       const displayText =
         trimmed
-        || (readyAttachments.length === 1
-          ? `Суммаризируй вложение «${readyAttachments[0].name}».`
-          : 'Суммаризируй вложения.')
+        || (ocrResult
+          ? `Распознай документ «${readyAttachments[0]?.name || 'файл'}» и покажи поля.`
+          : readyAttachments.length === 1
+            ? `Суммаризируй вложение «${readyAttachments[0].name}».`
+            : 'Суммаризируй вложения.')
       const userId = uid('user')
       const assistantId = uid('asst')
       setError('')
@@ -156,8 +201,17 @@ export function useAssistantChat({
         {
           id: assistantId,
           role: 'assistant',
-          content: '',
-          pending: true,
+          content: ocrResult
+            ? `Поля документа (${ocrResult.documentType}):\n`
+              + ocrResult.fields
+                .map((field) => {
+                  const pct = field.confidence == null ? '—' : `${field.confidence}%`
+                  return `• ${field.label}: ${field.value} — ${pct}`
+                })
+                .join('\n')
+            : '',
+          pending: !ocrResult,
+          ocr: ocrResult || undefined,
           sources: demoMode
             ? [
                 {
@@ -173,6 +227,17 @@ export function useAssistantChat({
           feedback: null,
         },
       ])
+
+      // OCR card already answers the document request; skip LLM unless user typed a question.
+      if (ocrResult && !trimmed) {
+        setMessages((current) =>
+          current.map((item) =>
+            item.id === assistantId ? { ...item, pending: false } : item,
+          ),
+        )
+        return
+      }
+
       setStreaming(true)
 
       const controller = new AbortController()
@@ -182,10 +247,16 @@ export function useAssistantChat({
         const stream = demoMode
           ? streamDemoChat(displayText, controller.signal)
           : streamAssistantChat({
-              message: trimmed,
+              message: trimmed || displayText,
               sessionId,
               kbSlugs: getKbSlugs?.() ?? [],
-              attachments: readyAttachments,
+              attachments: readyAttachments.map((item) => ({
+                name: item.name,
+                type: item.type,
+                text: item.text || '',
+                content_type: item.content_type,
+                size_bytes: item.size_bytes,
+              })),
               signal: controller.signal,
             })
 
@@ -203,6 +274,7 @@ export function useAssistantChat({
                         permalink: source.permalink || '',
                         snippet: source.snippet || '',
                         kb_slug: source.kb_slug,
+                        article_id: source.article_id,
                       })),
                     }
                   : item,

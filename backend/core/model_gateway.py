@@ -338,13 +338,66 @@ class ModelGateway:
             return iter(self._stub_stream(configured))
         return self._openai_stream(configured, payload)
 
+    def _stub_docs_ocr_content(
+        self,
+        messages: Sequence[Mapping[str, Any]],
+    ) -> str:
+        """Build structured JSON from OCR text in the user message."""
+        ocr_text = ""
+        filename = ""
+        document_type_hint = ""
+        for message in reversed(messages):
+            if message.get("role") != "user":
+                continue
+            raw = str(message.get("content") or "")
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                ocr_text = raw
+                break
+            if isinstance(payload, Mapping):
+                ocr_text = str(payload.get("ocr_text") or "")
+                filename = str(payload.get("filename") or "")
+                document_type_hint = str(
+                    payload.get("document_type_hint") or ""
+                )
+                break
+            ocr_text = raw
+            break
+        try:
+            from ocr.extraction import extract_fields
+
+            doc_type, fields = extract_fields(
+                ocr_text,
+                document_type=document_type_hint or None,
+                filename=filename,
+            )
+        except Exception:
+            doc_type, fields = "unknown", {}
+        return json.dumps(
+            {
+                "document_type": doc_type,
+                "fields": fields,
+                "validation": {
+                    "status": "proposed",
+                    "missing_required_fields": [],
+                    "anomalies": [],
+                },
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
     def _stub_chat(
         self,
         profile: GatewayProfile,
         messages: Sequence[Mapping[str, Any]],
         payload: Mapping[str, Any],
     ) -> dict[str, Any]:
-        content = STUB_RESPONSES[profile.profile]
+        if profile.profile == "docs_ocr":
+            content = self._stub_docs_ocr_content(messages)
+        else:
+            content = STUB_RESPONSES[profile.profile]
         completion_id = f"chatcmpl-stub-{uuid.uuid4().hex}"
         prompt_words = sum(
             len(str(message["content"]).split()) for message in messages
