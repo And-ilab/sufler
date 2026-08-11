@@ -32,6 +32,7 @@ const OCR_FIELD_LABELS: Record<string, string> = {
   series: 'Серия',
   number: 'Номер',
   issue_date: 'Дата выдачи',
+  birth_date: 'Дата рождения',
   document_number: 'Номер документа',
   date: 'Дата',
   payer: 'Плательщик',

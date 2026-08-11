@@ -20,6 +20,40 @@ def _field(value: str, confidence: float, *, source: str = "regex") -> FieldValu
     }
 
 
+_NAME_TOKEN = r"[A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё\-']{1,40}"
+_GEO_WORDS = frozenset(
+    {
+        "ГОРОД",
+        "Г",
+        "ОБЛ",
+        "ОБЛАСТЬ",
+        "РЕСП",
+        "РЕСПУБЛИКА",
+        "КРАЙ",
+        "РАЙОН",
+        "СЕЛО",
+        "ДЕР",
+        "ДЕРЕВНЯ",
+        "ПОС",
+        "ПОСЁЛОК",
+        "ПОСЕЛОК",
+        "СТАНЦИЯ",
+        "МОСКВА",
+        "САНКТ",
+        "ПЕТЕРБУРГ",
+        "РОССИЯ",
+        "РОССИЙСКАЯ",
+        "ФЕДЕРАЦИЯ",
+        "PASSPORT",
+        "ПАСПОРТ",
+        "МУЖ",
+        "ЖЕН",
+        "MALE",
+        "FEMALE",
+    }
+)
+
+
 def _label_value(
     text: str,
     labels: tuple[str, ...],
@@ -27,14 +61,41 @@ def _label_value(
     pattern: str,
     confidence: float = 0.9,
 ) -> FieldValue | None:
+    """Match `Label: value` on one line or `Label` / value on the next line."""
     for label in labels:
-        rx = re.compile(
+        same_line = re.compile(
             rf"(?im)(?:^|\n)\s*{re.escape(label)}\s*[:\-–]?\s*({pattern})\s*(?:\n|$)",
         )
-        match = rx.search(text)
+        match = same_line.search(text)
         if match:
             return _field(match.group(1), confidence, source=f"label:{label}")
+        next_line = re.compile(
+            rf"(?im)(?:^|\n)\s*{re.escape(label)}\s*[:\-–]?\s*\n\s*({pattern})\s*(?:\n|$)",
+        )
+        match = next_line.search(text)
+        if match:
+            return _field(
+                match.group(1),
+                confidence - 0.03,
+                source=f"label_nl:{label}",
+            )
     return None
+
+
+def _is_geo_or_junk_name(value: str) -> bool:
+    tokens = [part for part in re.split(r"\s+", value.strip()) if part]
+    if not tokens:
+        return True
+    upper = [token.casefold().replace("ё", "е").upper() for token in tokens]
+    if any(token in _GEO_WORDS for token in upper):
+        return True
+    if len(tokens) == 1 and tokens[0].upper() in _GEO_WORDS:
+        return True
+    return False
+
+
+def _normalize_date(raw: str) -> str:
+    return raw.replace("/", ".").replace("-", ".")
 
 
 def extract_passport_fields(text: str) -> dict[str, FieldValue]:
@@ -44,49 +105,51 @@ def extract_passport_fields(text: str) -> dict[str, FieldValue]:
     surname = _label_value(
         normalized,
         ("Фамилия", "Surname", "Family name"),
-        pattern=r"[A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё\-']{1,60}",
+        pattern=_NAME_TOKEN,
         confidence=0.94,
     )
     name = _label_value(
         normalized,
         ("Имя", "Name", "Given name"),
-        pattern=r"[A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё\-']{1,60}",
+        pattern=_NAME_TOKEN,
         confidence=0.93,
     )
     patronymic = _label_value(
         normalized,
         ("Отчество", "Patronymic", "Middle name"),
-        pattern=r"[A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё\-']{1,60}",
+        pattern=_NAME_TOKEN,
         confidence=0.91,
     )
+
+    # Drop OCR garbage that matched labels incorrectly.
+    if surname and _is_geo_or_junk_name(str(surname["value"])):
+        surname = None
+    if name and _is_geo_or_junk_name(str(name["value"])):
+        name = None
+    if patronymic and _is_geo_or_junk_name(str(patronymic["value"])):
+        patronymic = None
 
     fio = _label_value(
         normalized,
         ("ФИО", "Full name", "Ф.И.О."),
-        pattern=r"[A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё\-\s']{5,180}",
+        pattern=rf"{_NAME_TOKEN}(?:\s+{_NAME_TOKEN}){{1,2}}",
         confidence=0.96,
     )
+    if fio and _is_geo_or_junk_name(str(fio["value"])):
+        fio = None
+
     if fio:
         fields["full_name"] = fio
     elif surname and name:
-        parts = [surname["value"], name["value"]]
+        parts = [str(surname["value"]), str(name["value"])]
         if patronymic:
-            parts.append(patronymic["value"])
+            parts.append(str(patronymic["value"]))
         conf = min(
             float(surname["confidence"]),
             float(name["confidence"]),
             float(patronymic["confidence"]) if patronymic else 1.0,
         )
         fields["full_name"] = _field(" ".join(parts), conf, source="compose")
-    else:
-        # Free-form line after PASSPORT marker.
-        match = re.search(
-            r"(?im)(?:паспорт|passport).{0,40}\n\s*([A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё\-]+"
-            r"(?:\s+[A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё\-]+){1,3})\s*$",
-            normalized,
-        )
-        if match:
-            fields["full_name"] = _field(match.group(1), 0.78, source="proximity")
 
     if surname:
         fields["surname"] = surname
@@ -95,27 +158,47 @@ def extract_passport_fields(text: str) -> dict[str, FieldValue]:
     if patronymic:
         fields["patronymic"] = patronymic
 
+    # RF passport: "45 11 532704" / "4511 532704"; BY: "PD 0000000"
+    rf_id = re.search(
+        r"(?m)(?<![\d])(\d{2})\s*(\d{2})\s+(\d{6})(?!\d)",
+        normalized,
+    )
+    by_id = re.search(
+        r"(?i)\b([A-ZА-Я]{2})\s*[-–]?\s*(\d{7})\b",
+        normalized,
+    )
     series = _label_value(
         normalized,
         ("Серия", "Series", "Серия паспорта"),
-        pattern=r"[A-ZА-Я]{2}",
+        pattern=r"(?:\d{2}\s*\d{2}|[A-ZА-Я]{2})",
         confidence=0.92,
     )
     number = _label_value(
         normalized,
         ("Номер", "Number", "№", "N"),
-        pattern=r"\d{7}",
+        pattern=r"\d{6,7}",
         confidence=0.9,
     )
-    if not series or not number:
-        combo = re.search(
-            r"(?im)(?:серия|series)?\s*([A-ZА-Я]{2})\s*[№#N]?\s*(\d{7})\b",
-            normalized,
+    if rf_id:
+        series = series or _field(
+            f"{rf_id.group(1)} {rf_id.group(2)}",
+            0.9,
+            source="rf_id",
         )
-        if combo:
-            series = series or _field(combo.group(1), 0.86, source="combo")
-            number = number or _field(combo.group(2), 0.86, source="combo")
+        number = number or _field(rf_id.group(3), 0.9, source="rf_id")
+    elif by_id:
+        series = series or _field(by_id.group(1).upper(), 0.8, source="by_id")
+        number = number or _field(by_id.group(2), 0.8, source="by_id")
     if series:
+        # Normalize RF series to "45 11"
+        series_val = re.sub(r"\s+", " ", str(series["value"]).strip())
+        compact = series_val.replace(" ", "")
+        if re.fullmatch(r"\d{4}", compact):
+            series = _field(
+                f"{compact[:2]} {compact[2:]}",
+                float(series["confidence"]),
+                source=str(series.get("source") or "regex"),
+            )
         fields["series"] = series
     if number:
         fields["number"] = number
@@ -132,21 +215,57 @@ def extract_passport_fields(text: str) -> dict[str, FieldValue]:
             normalized,
         )
         if date_match:
-            raw = date_match.group(1)
             issue_date = _field(
-                raw.replace("/", ".").replace("-", "."),
+                _normalize_date(date_match.group(1)),
                 0.72,
                 source="proximity",
             )
+    birth_date = _label_value(
+        normalized,
+        ("Дата рождения", "Date of birth", "Birth", "Рождения"),
+        pattern=r"\d{2}[./-]\d{2}[./-]\d{4}|\d{4}-\d{2}-\d{2}",
+        confidence=0.9,
+    )
+    if birth_date:
+        fields["birth_date"] = _field(
+            _normalize_date(str(birth_date["value"])),
+            float(birth_date["confidence"]),
+            source=str(birth_date.get("source") or "regex"),
+        )
     if issue_date:
-        value = str(issue_date["value"])
-        if re.fullmatch(r"\d{2}[./-]\d{2}[./-]\d{4}", value):
-            issue_date = _field(
-                value.replace("/", ".").replace("-", "."),
-                float(issue_date["confidence"]),
-                source=str(issue_date.get("source") or "regex"),
+        fields["issue_date"] = _field(
+            _normalize_date(str(issue_date["value"])),
+            float(issue_date["confidence"]),
+            source=str(issue_date.get("source") or "regex"),
+        )
+
+    # Free-form FIO only when labels failed — never take geo lines.
+    if "full_name" not in fields:
+        for match in re.finditer(
+            rf"(?m)^\s*({_NAME_TOKEN}(?:\s+{_NAME_TOKEN}){{1,2}})\s*$",
+            normalized,
+        ):
+            candidate = match.group(1)
+            if _is_geo_or_junk_name(candidate):
+                continue
+            # Prefer 3-token FIO (surname + name + patronymic).
+            token_count = len(candidate.split())
+            conf = 0.7 if token_count >= 3 else 0.58
+            fields["full_name"] = _field(candidate, conf, source="caps_line")
+            if token_count >= 3:
+                break
+
+    if "issue_date" not in fields and "birth_date" not in fields:
+        any_date = re.search(
+            r"\b(\d{2})[./-](\d{2})[./-](\d{4})\b",
+            normalized,
+        )
+        if any_date:
+            fields["issue_date"] = _field(
+                f"{any_date.group(1)}.{any_date.group(2)}.{any_date.group(3)}",
+                0.45,
+                source="any_date",
             )
-        fields["issue_date"] = issue_date
 
     return fields
 

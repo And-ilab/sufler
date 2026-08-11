@@ -16,6 +16,8 @@ import {
 } from './api/knowledgeBases'
 import {
   extractChatAttachment,
+  fieldConfidencePercent,
+  fieldDisplayValue,
   type ChatAttachmentPayload,
 } from './api/attachments'
 import {
@@ -34,11 +36,62 @@ const ATTACH_ACCEPT = '.pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png,.tiff,.tif'
 const OCR_ACCEPT = '.pdf,.jpg,.jpeg,.png,.tiff,.tif'
 const ATTACH_MAX_FILES = 5
 
+const OCR_FIELD_LABELS: Record<string, string> = {
+  full_name: 'ФИО',
+  surname: 'Фамилия',
+  given_name: 'Имя',
+  patronymic: 'Отчество',
+  series: 'Серия',
+  number: 'Номер',
+  issue_date: 'Дата выдачи',
+  birth_date: 'Дата рождения',
+  document_number: 'Номер документа',
+  date: 'Дата',
+  payer: 'Плательщик',
+  beneficiary: 'Получатель',
+  amount: 'Сумма',
+  purpose: 'Назначение',
+  currency: 'Валюта',
+}
+
 const OCR_CONFIDENCE_TONE = (pct: number | null): 'success' | 'warning' | 'danger' | 'neutral' => {
   if (pct == null) return 'neutral'
   if (pct >= 85) return 'success'
   if (pct >= 60) return 'warning'
   return 'danger'
+}
+
+interface OcrPanelField {
+  id: string
+  label: string
+  value: string
+  confidence: number | null
+}
+
+interface OcrPanelState {
+  open: boolean
+  busy: boolean
+  error: string
+  fileName: string
+  previewUrl: string | null
+  documentType: string
+  validationStatus: string | null
+  jobId: string
+  fields: OcrPanelField[]
+  rawText: string
+}
+
+const EMPTY_OCR_PANEL: OcrPanelState = {
+  open: false,
+  busy: false,
+  error: '',
+  fileName: '',
+  previewUrl: null,
+  documentType: '',
+  validationStatus: null,
+  jobId: '',
+  fields: [],
+  rawText: '',
 }
 
 function toolBadgeStatus(state: ToolRunState): StatusBadgeStatus {
@@ -291,7 +344,7 @@ function MessageLenta({
             </div>
           ) : (
             <Card className="asst-turn__card">
-              {message.pending && !message.content && !message.ocr ? (
+              {message.pending && !message.content ? (
                 <div className="asst-streaming" data-testid="asst-streaming">
                   <span>Ассистент печатает…</span>
                   <Button type="button" variant="ghost" onClick={onStop}>
@@ -304,34 +357,6 @@ function MessageLenta({
                   {message.pending ? <span className="asst-cursor" aria-hidden>|</span> : null}
                 </p>
               )}
-              {message.ocr ? (
-                <div className="asst-ocr" data-testid={`ocr-card-${message.id}`}>
-                  <header className="asst-ocr__head">
-                    <strong>OCR · {message.ocr.documentType}</strong>
-                    <StatusBadge
-                      status={
-                        message.ocr.validationStatus === 'valid' ? 'success' : 'warning'
-                      }
-                    >
-                      {message.ocr.validationStatus || 'pending_review'}
-                    </StatusBadge>
-                  </header>
-                  <ul className="asst-ocr__fields">
-                    {message.ocr.fields.map((field) => (
-                      <li key={field.id} data-testid={`ocr-field-${field.id}`}>
-                        <span>{field.label}</span>
-                        <strong>{field.value || '—'}</strong>
-                        <StatusBadge status={OCR_CONFIDENCE_TONE(field.confidence)}>
-                          {field.confidence == null ? '—' : `${field.confidence}%`}
-                        </StatusBadge>
-                      </li>
-                    ))}
-                  </ul>
-                  <small className="asst-ocr__meta">
-                    job {message.ocr.jobId}
-                  </small>
-                </div>
-              ) : null}
               {message.sources && message.sources.length > 0 ? (
                 <div className="asst-sources" data-testid={`sources-${message.id}`}>
                   <strong>Источники ({message.sources.length})</strong>
@@ -459,6 +484,124 @@ function ToolsPanel({
               </li>
             ))}
           </ul>
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+function OcrResultDrawer({
+  panel,
+  onClose,
+}: {
+  panel: OcrPanelState
+  onClose: () => void
+}) {
+  useEffect(() => {
+    if (!panel.open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose, panel.open])
+
+  return (
+    <div
+      className={`asst-ocr-panel${panel.open ? ' is-open' : ''}`}
+      data-testid="asst-ocr-panel"
+      aria-hidden={!panel.open}
+    >
+      <button
+        type="button"
+        className="asst-ocr-panel__backdrop"
+        aria-label="Закрыть результат OCR"
+        tabIndex={panel.open ? 0 : -1}
+        onClick={onClose}
+      />
+      <aside
+        id="asst-ocr-drawer"
+        className="asst-ocr-panel__drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Результат распознавания документа"
+        data-testid="asst-ocr-drawer"
+      >
+        <header className="asst-ocr-panel__header">
+          <div>
+            <strong>Распознавание OCR</strong>
+            <span>{panel.fileName || 'Документ'}</span>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+            aria-label="Закрыть OCR"
+            data-testid="asst-ocr-close"
+          >
+            ×
+          </Button>
+        </header>
+        <div className="asst-ocr-panel__body">
+          {panel.busy ? (
+            <p className="asst-ocr-panel__status" data-testid="asst-ocr-busy">
+              Распознаём документ…
+            </p>
+          ) : null}
+          {panel.error ? (
+            <p className="asst-ocr-panel__error" role="alert" data-testid="asst-ocr-error">
+              {panel.error}
+            </p>
+          ) : null}
+          {panel.previewUrl ? (
+            <div className="asst-ocr-panel__preview">
+              <img
+                src={panel.previewUrl}
+                alt={`Скан ${panel.fileName}`}
+                data-testid="asst-ocr-preview"
+              />
+            </div>
+          ) : null}
+          {!panel.busy && !panel.error ? (
+            <>
+              <div className="asst-ocr-panel__meta">
+                <strong>OCR · {panel.documentType || 'unknown'}</strong>
+                <StatusBadge
+                  status={
+                    panel.validationStatus === 'valid' ? 'success' : 'warning'
+                  }
+                >
+                  {panel.validationStatus || 'pending_review'}
+                </StatusBadge>
+              </div>
+              {panel.fields.length ? (
+                <ul className="asst-ocr-panel__fields" data-testid="asst-ocr-fields">
+                  {panel.fields.map((field) => (
+                    <li key={field.id} data-testid={`ocr-field-${field.id}`}>
+                      <span>{field.label}</span>
+                      <strong>{field.value || '—'}</strong>
+                      <StatusBadge status={OCR_CONFIDENCE_TONE(field.confidence)}>
+                        {field.confidence == null ? '—' : `${field.confidence}%`}
+                      </StatusBadge>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="asst-ocr-panel__empty">
+                  Поля не найдены. Ниже — сырой текст, который прочитал OCR.
+                </p>
+              )}
+              {panel.rawText ? (
+                <details className="asst-ocr-panel__raw">
+                  <summary>Текст OCR</summary>
+                  <pre data-testid="asst-ocr-raw">{panel.rawText}</pre>
+                </details>
+              ) : null}
+              {panel.jobId ? (
+                <small className="asst-ocr-panel__job">job {panel.jobId}</small>
+              ) : null}
+            </>
+          ) : null}
         </div>
       </aside>
     </div>
@@ -602,9 +745,11 @@ export function AssistantChat({
   const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([])
   const [attachBusy, setAttachBusy] = useState(false)
   const [attachError, setAttachError] = useState('')
+  const [ocrPanel, setOcrPanel] = useState<OcrPanelState>(EMPTY_OCR_PANEL)
   const kbRootRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const ocrFileInputRef = useRef<HTMLInputElement>(null)
+  const ocrPreviewUrlRef = useRef<string | null>(null)
   const [kbCatalog, setKbCatalog] = useState<AssistantKbOption[]>(
     () => (knowledgeBasesProp ? [...knowledgeBasesProp] : []),
   )
@@ -780,10 +925,19 @@ export function AssistantChat({
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [kbOpen])
 
-  const onPickFiles = async (
-    fileList: FileList | null,
-    options: { forceOcr?: boolean } = {},
-  ) => {
+  const revokeOcrPreview = () => {
+    if (ocrPreviewUrlRef.current) {
+      URL.revokeObjectURL(ocrPreviewUrlRef.current)
+      ocrPreviewUrlRef.current = null
+    }
+  }
+
+  const closeOcrPanel = () => {
+    revokeOcrPreview()
+    setOcrPanel(EMPTY_OCR_PANEL)
+  }
+
+  const onPickFiles = async (fileList: FileList | null) => {
     if (!fileList?.length || readOnly) return
     const remaining = Math.max(0, ATTACH_MAX_FILES - attachments.length)
     if (!remaining) {
@@ -797,7 +951,7 @@ export function AssistantChat({
       await ensureDevSession()
       const extracted: ChatAttachmentPayload[] = []
       for (const file of files) {
-        extracted.push(await extractChatAttachment(file, options))
+        extracted.push(await extractChatAttachment(file))
       }
       setAttachments((current) => [...current, ...extracted].slice(0, ATTACH_MAX_FILES))
     } catch (error) {
@@ -807,9 +961,66 @@ export function AssistantChat({
     } finally {
       setAttachBusy(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const onPickOcr = async (fileList: FileList | null) => {
+    if (!fileList?.length || readOnly) return
+    const file = fileList[0]
+    revokeOcrPreview()
+    const previewUrl = file.type.startsWith('image/')
+      ? URL.createObjectURL(file)
+      : null
+    ocrPreviewUrlRef.current = previewUrl
+    setHistoryOpen(false)
+    setToolsOpen(false)
+    setKbOpen(false)
+    setOcrPanel({
+      ...EMPTY_OCR_PANEL,
+      open: true,
+      busy: true,
+      fileName: file.name,
+      previewUrl,
+    })
+    try {
+      await ensureDevSession()
+      const payload = await extractChatAttachment(file, {
+        forceOcr: true,
+        documentType: 'passport',
+      })
+      const ocr = payload.ocr
+      const fields = Object.entries(ocr?.fields || {}).map(([id, raw]) => ({
+        id,
+        label: OCR_FIELD_LABELS[id] || id,
+        value: fieldDisplayValue(raw),
+        confidence: fieldConfidencePercent(raw),
+      }))
+      setOcrPanel({
+        open: true,
+        busy: false,
+        error: '',
+        fileName: file.name,
+        previewUrl,
+        documentType: ocr?.document_type || 'unknown',
+        validationStatus: ocr?.validation_status || null,
+        jobId: ocr?.job_id || '',
+        fields,
+        rawText: payload.text || '',
+      })
+    } catch (error) {
+      setOcrPanel((current) => ({
+        ...current,
+        open: true,
+        busy: false,
+        error:
+          error instanceof Error ? error.message : 'Не удалось распознать документ',
+      }))
+    } finally {
       if (ocrFileInputRef.current) ocrFileInputRef.current.value = ''
     }
   }
+
+  useEffect(() => () => revokeOcrPreview(), [])
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
@@ -996,6 +1207,8 @@ export function AssistantChat({
         onDelete={deleteDialog}
       />
 
+      <OcrResultDrawer panel={ocrPanel} onClose={closeOcrPanel} />
+
       {!readOnly ? (
         <ToolsPanel
           tools={tools}
@@ -1048,18 +1261,13 @@ export function AssistantChat({
           </Button>
           <Button
             type="button"
-            variant="secondary"
-            disabled={
-              readOnly
-              || attachBusy
-              || streaming
-              || attachments.length >= ATTACH_MAX_FILES
-            }
+            variant={ocrPanel.open ? 'secondary' : 'ghost'}
+            disabled={readOnly || ocrPanel.busy}
             onClick={() => ocrFileInputRef.current?.click()}
             data-testid="asst-composer-ocr"
-            title="Распознать документ (OCR): PDF, JPG, PNG, TIFF"
+            title="Распознать документ — результат откроется слева, без отправки в чат"
           >
-            {attachBusy ? 'OCR…' : 'OCR'}
+            {ocrPanel.busy ? 'OCR…' : 'OCR'}
           </Button>
         </div>
         {attachments.length > 0 ? (
@@ -1106,10 +1314,9 @@ export function AssistantChat({
           type="file"
           className="asst-composer__file"
           accept={OCR_ACCEPT}
-          multiple
           hidden
-          disabled={readOnly || attachBusy || streaming}
-          onChange={(event) => void onPickFiles(event.target.files, { forceOcr: true })}
+          disabled={readOnly || ocrPanel.busy}
+          onChange={(event) => void onPickOcr(event.target.files)}
           data-testid="asst-ocr-input"
         />
         <div className="asst-composer__field">

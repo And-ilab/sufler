@@ -44,6 +44,8 @@ function extensionOf(name: string): string {
 export type ExtractChatAttachmentOptions = {
   /** Force OCR pipeline (images + PDF), even when auto would extract text only. */
   forceOcr?: boolean
+  /** Hint for field extractor / classifier (e.g. passport). */
+  documentType?: string
 }
 
 export async function extractChatAttachment(
@@ -65,8 +67,11 @@ export async function extractChatAttachment(
   body.append('file', file, file.name)
   if (useOcr) {
     body.append('mode', 'ocr')
-    if (/passport|паспорт/i.test(file.name)) {
-      body.append('document_type', 'passport')
+    const hinted =
+      options.documentType?.trim()
+      || (/passport|паспорт/i.test(file.name) ? 'passport' : '')
+    if (hinted) {
+      body.append('document_type', hinted)
     }
   }
 

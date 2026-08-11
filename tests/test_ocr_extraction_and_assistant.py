@@ -53,6 +53,46 @@ class OcrExtractionUnitTest(TestCase):
         self.assertEqual(doc_type, "passport")
         self.assertIn("full_name", fields)
 
+    def test_passport_fields_without_labels(self):
+        """Phone-photo OCR often drops labels — recover FIO / ID / date."""
+        fields = extract_passport_fields(
+            "РЕСПУБЛИКА БЕЛАРУСЬ\n"
+            "ИВАНОВ ИВАН ИВАНОВИЧ\n"
+            "PD 0000000\n"
+            "12.03.2019\n"
+        )
+        self.assertEqual(fields["full_name"]["value"], "ИВАНОВ ИВАН ИВАНОВИЧ")
+        self.assertEqual(fields["series"]["value"], "PD")
+        self.assertEqual(fields["number"]["value"], "0000000")
+        self.assertEqual(fields["issue_date"]["value"], "12.03.2019")
+
+    def test_russian_passport_multiline_labels(self):
+        """RF passport: labels on one line, values on the next; series 45 11."""
+        fields = extract_passport_fields(
+            "ПАСПОРТ\n"
+            "Фамилия\n"
+            "АНАНД\n"
+            "Имя\n"
+            "ОМКАР\n"
+            "Отчество\n"
+            "ВИКТОРОВИЧ\n"
+            "Пол\n"
+            "МУЖ.\n"
+            "Дата рождения\n"
+            "16.09.1988\n"
+            "Место рождения\n"
+            "ГОРОД МОСКВА\n"
+            "45 11 532704\n"
+        )
+        self.assertEqual(fields["full_name"]["value"], "АНАНД ОМКАР ВИКТОРОВИЧ")
+        self.assertEqual(fields["surname"]["value"], "АНАНД")
+        self.assertEqual(fields["given_name"]["value"], "ОМКАР")
+        self.assertEqual(fields["patronymic"]["value"], "ВИКТОРОВИЧ")
+        self.assertEqual(fields["series"]["value"], "45 11")
+        self.assertEqual(fields["number"]["value"], "532704")
+        self.assertEqual(fields["birth_date"]["value"], "16.09.1988")
+        self.assertNotEqual(fields["full_name"]["value"], "ГОРОД МОСКВА")
+
 
 @override_settings(
     CELERY_TASK_ALWAYS_EAGER=True,
