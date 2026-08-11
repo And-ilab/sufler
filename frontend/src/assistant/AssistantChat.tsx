@@ -31,6 +31,7 @@ import { useAssistantChat } from './useAssistantChat'
 import './AssistantChat.css'
 
 const ATTACH_ACCEPT = '.pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png,.tiff,.tif'
+const OCR_ACCEPT = '.pdf,.jpg,.jpeg,.png,.tiff,.tif'
 const ATTACH_MAX_FILES = 5
 
 const OCR_CONFIDENCE_TONE = (pct: number | null): 'success' | 'warning' | 'danger' | 'neutral' => {
@@ -603,6 +604,7 @@ export function AssistantChat({
   const [attachError, setAttachError] = useState('')
   const kbRootRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const ocrFileInputRef = useRef<HTMLInputElement>(null)
   const [kbCatalog, setKbCatalog] = useState<AssistantKbOption[]>(
     () => (knowledgeBasesProp ? [...knowledgeBasesProp] : []),
   )
@@ -778,7 +780,10 @@ export function AssistantChat({
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [kbOpen])
 
-  const onPickFiles = async (fileList: FileList | null) => {
+  const onPickFiles = async (
+    fileList: FileList | null,
+    options: { forceOcr?: boolean } = {},
+  ) => {
     if (!fileList?.length || readOnly) return
     const remaining = Math.max(0, ATTACH_MAX_FILES - attachments.length)
     if (!remaining) {
@@ -792,7 +797,7 @@ export function AssistantChat({
       await ensureDevSession()
       const extracted: ChatAttachmentPayload[] = []
       for (const file of files) {
-        extracted.push(await extractChatAttachment(file))
+        extracted.push(await extractChatAttachment(file, options))
       }
       setAttachments((current) => [...current, ...extracted].slice(0, ATTACH_MAX_FILES))
     } catch (error) {
@@ -802,6 +807,7 @@ export function AssistantChat({
     } finally {
       setAttachBusy(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
+      if (ocrFileInputRef.current) ocrFileInputRef.current.value = ''
     }
   }
 
@@ -1040,6 +1046,21 @@ export function AssistantChat({
           >
             Инструменты
           </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={
+              readOnly
+              || attachBusy
+              || streaming
+              || attachments.length >= ATTACH_MAX_FILES
+            }
+            onClick={() => ocrFileInputRef.current?.click()}
+            data-testid="asst-composer-ocr"
+            title="Распознать документ (OCR): PDF, JPG, PNG, TIFF"
+          >
+            {attachBusy ? 'OCR…' : 'OCR'}
+          </Button>
         </div>
         {attachments.length > 0 ? (
           <ul className="asst-composer__attachments" data-testid="asst-attach-list">
@@ -1079,6 +1100,17 @@ export function AssistantChat({
           disabled={readOnly || attachBusy || streaming}
           onChange={(event) => void onPickFiles(event.target.files)}
           data-testid="asst-attach-input"
+        />
+        <input
+          ref={ocrFileInputRef}
+          type="file"
+          className="asst-composer__file"
+          accept={OCR_ACCEPT}
+          multiple
+          hidden
+          disabled={readOnly || attachBusy || streaming}
+          onChange={(event) => void onPickFiles(event.target.files, { forceOcr: true })}
+          data-testid="asst-ocr-input"
         />
         <div className="asst-composer__field">
           <textarea

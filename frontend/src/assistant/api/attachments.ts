@@ -41,19 +41,33 @@ function extensionOf(name: string): string {
   return idx >= 0 ? name.slice(idx).toLowerCase() : ''
 }
 
+export type ExtractChatAttachmentOptions = {
+  /** Force OCR pipeline (images + PDF), even when auto would extract text only. */
+  forceOcr?: boolean
+}
+
 export async function extractChatAttachment(
   file: File,
+  options: ExtractChatAttachmentOptions = {},
 ): Promise<ChatAttachmentPayload> {
   const ext = extensionOf(file.name)
-  const endpoint = OCR_EXTENSIONS.has(ext) && ext !== '.pdf'
+  const forceOcr = Boolean(options.forceOcr)
+  const useOcr =
+    forceOcr
+    || (OCR_EXTENSIONS.has(ext) && ext !== '.pdf')
+    || (ext === '.pdf' && /passport|паспорт|scan|скан/i.test(file.name))
+
+  const endpoint = useOcr
     ? '/api/v1/assistant/attachments/ocr'
     : '/api/v1/assistant/attachments/extract'
 
   const body = new FormData()
   body.append('file', file, file.name)
-  if (ext === '.pdf' && /passport|паспорт|scan|скан/i.test(file.name)) {
+  if (useOcr) {
     body.append('mode', 'ocr')
-    body.append('document_type', 'passport')
+    if (/passport|паспорт/i.test(file.name)) {
+      body.append('document_type', 'passport')
+    }
   }
 
   const response = await fetch(endpoint, {

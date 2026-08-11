@@ -99,7 +99,7 @@ test('admin sidebar exposes all groups and routable screens', async ({ page }) =
     'audit', 'llm_config_assistant', 'model_params', 'prompts_assistant',
     'capabilities', 'kb_admin', 'qu_admin', 'data_sources', 'assistant_tools',
     'monitoring', 'llm_config_cc', 'model_params/cc', 'scenario_editor',
-    'scenario_test', 'scenario_bindings', 'sufler_policies', 'doc_types',
+    'scenario_test', 'scenario_bindings', 'sufler_policies', 'ocr', 'doc_types',
     'doc_export', 'external',
   ]
   for (const route of routes) {

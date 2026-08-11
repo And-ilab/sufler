@@ -88,7 +88,7 @@ const SETTINGS_ENTRY_BY_ROLE: Record<string, SettingsMenuEntry> = {
     kind: 'admin',
   },
   document_recognition_module_administrator: {
-    href: '/ai-hub/admin/doc_types',
+    href: '/ai-hub/admin/ocr',
     label: 'Центр настроек',
     kind: 'admin',
   },
