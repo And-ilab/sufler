@@ -117,7 +117,7 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
         try:
             result = await sync_to_async(suggest, thread_sensitive=True)(
                 text,
-                limit=5,
+                limit=3,
             )
         except SuflerOrchestratorError as exc:
             await self.send_json(
@@ -143,7 +143,7 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
                 "type": "hints",
                 "turn_id": turn_id,
                 "query": result["query"],
-                "hints": result["hints"][:5],
+                "hints": result["hints"][:3],
                 "latency_ms": result["latency_ms"],
                 "request_id": result["request_id"],
                 "blocked_reason": result.get("blocked_reason"),

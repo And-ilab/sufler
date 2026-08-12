@@ -49,14 +49,14 @@ class SufTSmokeAcceptanceTest(TestCase):
         response = post_json(
             client,
             "/api/v1/sufler/suggest",
-            {"text": query, "limit": 5},
+            {"text": query, "limit": 3},
             HTTP_X_REQUEST_ID="suf-t-01",
         )
         self.assertEqual(response.status_code, 200, response.content)
         body = response.json()
         self.assertEqual(body["kb_id"], "cc_production")
         self.assertGreaterEqual(len(body["hints"]), 1)
-        self.assertLessEqual(len(body["hints"]), 5)
+        self.assertLessEqual(len(body["hints"]), 3)
         hint = body["hints"][0]
         self.assertIn("text", hint)
         self.assertTrue(hint.get("citations"))

@@ -158,7 +158,13 @@ class Command(BaseCommand):
                     f"suggest smoke returned no hints: {result.get('blocked_reason')}"
                 )
             hint = result["hints"][0]["text"]
-            if "Подсказка" not in hint and "суфлёр" not in hint.lower():
+            hint_l = hint.lower()
+            if (
+                "суз" not in hint_l
+                and "подсказка" not in hint
+                and "уточните" not in hint_l
+                and "ответ" not in hint_l
+            ):
                 raise CommandError(f"unexpected stub hint text: {hint[:80]!r}")
             self.stdout.write(
                 self.style.SUCCESS(

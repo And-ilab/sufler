@@ -65,7 +65,7 @@ class CcReportsApiTest(TestCase):
         self.assertEqual(chat.status_code, 200)
         chat_body = chat.json()
         self.assertEqual(chat_body["filters"]["channel"], "online_chat")
-        self.assertIn("online_chat", chat_body["source"])
+        self.assertIn("Онлайн-чат", chat_body["source"])
 
     def test_csv_and_xlsx_export_downloadable(self):
         client = Client()

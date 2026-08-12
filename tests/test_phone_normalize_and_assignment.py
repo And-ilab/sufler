@@ -2,6 +2,7 @@ import os
 import sys
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
@@ -67,6 +68,10 @@ class AssignmentQueueTest(TestCase):
         )
 
     def test_fifo_by_last_client_message(self):
+        # Keep dialogs in WAITING — create_dialog_with_message auto-assigns
+        # when an eligible online operator exists.
+        self.operator.auto_assign = False
+        self.operator.save(update_fields=["auto_assign", "updated_at"])
         first, _ = create_dialog_with_message(
             text="первый",
             channel="widget",
@@ -79,10 +84,13 @@ class AssignmentQueueTest(TestCase):
             client_phone="+375292222222",
             client_external_id="c2",
         )
+        self.assertEqual(first.status, Dialog.Status.WAITING)
+        self.assertEqual(second.status, Dialog.Status.WAITING)
         # Newer client activity on the first dialog → it must go to the end.
         first.last_client_message_at = timezone.now() + timedelta(seconds=30)
         first.save(update_fields=["last_client_message_at", "updated_at"])
         ordered = list(waiting_queue_queryset())
+        self.assertEqual(len(ordered), 2)
         self.assertEqual(ordered[0].id, second.id)
         self.assertEqual(ordered[-1].id, first.id)
 
@@ -114,6 +122,15 @@ class AssignmentQueueTest(TestCase):
         settings = AssignmentSettings.get_solo()
         settings.mode = AssignmentSettings.Mode.MANUAL_PLUS_AUTO
         settings.save(update_fields=["mode", "updated_at"])
-        hold = start_post_close_grace(self.operator)
+        before = timezone.now()
+        with patch(
+            "online_chat.tasks.run_assignments_after_delay.apply_async",
+            return_value=None,
+        ):
+            hold = start_post_close_grace(self.operator)
         self.assertIsNotNone(hold)
-        self.assertGreater(hold.until, timezone.now())
+        self.assertGreaterEqual(
+            hold.until,
+            before + timedelta(seconds=AssignmentSettings.GRACE_SECONDS - 1),
+        )
+        self.assertGreater(hold.until, before)

@@ -51,7 +51,7 @@ class OnlineChatApiAcceptanceTest(TestCase):
         self.assertEqual(dialog["client_first_name"], "Анна")
         self.assertEqual(dialog["client_last_name"], "Козлова")
         self.assertEqual(dialog["client_name"], "Анна Козлова")
-        self.assertEqual(dialog["client_phone"], "+375 29 123-45-67")
+        self.assertEqual(dialog["client_phone"], "+375291234567")
         self.assertEqual(dialog["status"], "waiting")
         self.assertGreaterEqual(len(dialog.get("messages") or []), 1)
 

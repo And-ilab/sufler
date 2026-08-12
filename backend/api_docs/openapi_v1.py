@@ -273,7 +273,7 @@ def _sufler_paths() -> dict[str, Any]:
                             },
                             "example": {
                                 "text": "как оформить дебетовую карту",
-                                "limit": 5,
+                                "limit": 3,
                             },
                         }
                     },
@@ -478,8 +478,8 @@ def _schemas() -> dict[str, Any]:
                 "limit": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 10,
-                    "default": 5,
+                    "maximum": 3,
+                    "default": 3,
                 },
             },
         },
