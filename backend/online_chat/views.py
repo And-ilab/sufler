@@ -891,7 +891,6 @@ def _safe_config(value: object) -> object:
 
 
 def _channel_counters(channel: str) -> dict[str, int]:
-    from django.utils import timezone
 
     today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
     qs = Dialog.objects.filter(channel=channel)
@@ -1298,7 +1297,6 @@ def channel_detail(request: HttpRequest, item_id: str) -> HttpResponse:
 @require_http_methods(["POST"])
 @_chat_permissions(PERM_CC_ADMIN)
 def channel_health_check(request: HttpRequest, item_id: str) -> HttpResponse:
-    from django.utils import timezone
 
     from online_chat.channel_delivery import probe_channel
 
@@ -1385,7 +1383,6 @@ def routing_rule_detail(request: HttpRequest, item_id: str) -> HttpResponse:
 def supervisor_overview(request: HttpRequest) -> HttpResponse:
     from datetime import timedelta
 
-    from django.utils import timezone
 
     statuses = dict(Dialog.objects.values_list("status").annotate(count=Count("id")))
     now = timezone.now()
@@ -1472,7 +1469,6 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
 @_chat_permissions(PERM_CC_REPORTS, PERM_CC_ADMIN)
 def analytics(request: HttpRequest) -> HttpResponse:
     from datetime import timedelta
-    from django.utils import timezone
 
     period = (request.GET.get("period") or "7d").lower()
     days = {

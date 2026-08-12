@@ -848,7 +848,6 @@ def report_executive(date_from: date, date_to: date, **filters: Any) -> dict[str
             "total": len(closed),
         },
         {
-        {
             "metric": "Соблюдение SLA первого ответа, %",
             "online_chat": (
                 round(100 * sum(1 for f in sla_vals if f) / len(sla_vals), 1)
