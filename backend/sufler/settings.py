@@ -468,6 +468,9 @@ ONLINE_CHAT_LOST_TIMEOUT_SECONDS = int(
 )
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+# polling | webhook | both — test contour defaults to long poll (no HTTPS/ngrok).
+TELEGRAM_MODE = (os.getenv("TELEGRAM_MODE", "polling") or "polling").strip().lower()
+TELEGRAM_POLL_TIMEOUT_SECONDS = int(os.getenv("TELEGRAM_POLL_TIMEOUT_SECONDS", "25"))
 VIBER_AUTH_TOKEN = os.getenv("VIBER_AUTH_TOKEN", "")
 VK_ACCESS_TOKEN = os.getenv("VK_ACCESS_TOKEN", "")
 VK_WEBHOOK_SECRET = os.getenv("VK_WEBHOOK_SECRET", "")

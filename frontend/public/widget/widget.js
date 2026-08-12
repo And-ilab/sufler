@@ -1241,6 +1241,14 @@
           if (payload.system_message) handleRemoteMessage(payload.system_message);
           return;
         }
+        if (type === 'dialog.transferred') {
+          if (payload.system_message) handleRemoteMessage(payload.system_message);
+          connectOperator(
+            payload.to_operator_name || payload.operator_name,
+            { announce: false },
+          );
+          return;
+        }
         if (type === 'message.created') {
           handleRemoteMessage(payload);
           return;
@@ -1313,6 +1321,41 @@
         });
     }
 
+    function resetPrechatForm() {
+      if (nameEl) nameEl.value = '';
+      if (lastNameEl) lastNameEl.value = '';
+      if (phoneEl) phoneEl.value = '';
+      if (questionEl) questionEl.value = '';
+      if (commentEl) commentEl.value = '';
+      if (emailEl) emailEl.value = '';
+      state.rating = 0;
+      state.hoverRating = 0;
+      state.feedbackSaved = false;
+      renderStars();
+    }
+
+    function closeWidgetAfterThanks(message) {
+      if (farewellEl) {
+        farewellEl.textContent = message || STR.farewell;
+      }
+      setPostchatStatus(message || STR.farewell, false);
+      showView('postchat');
+      setOpen(true);
+      window.setTimeout(function () {
+        persistDialogId(null);
+        state.dialogId = null;
+        state.closed = false;
+        state.operatorConnected = false;
+        state.seenMessageIds = {};
+        messagesEl.innerHTML = '';
+        state.messages = [];
+        opStrip.setAttribute('hidden', '');
+        resetPrechatForm();
+        showView('prechat');
+        setOpen(false);
+      }, 1600);
+    }
+
     function sendTranscript() {
       if (!state.dialogId || !emailEl) return;
       var email = (emailEl.value || '').trim();
@@ -1342,7 +1385,7 @@
               if (!response.ok || !body.ok) {
                 throw new Error(detail || STR.transcriptFailed);
               }
-              setPostchatStatus(STR.transcriptSent, false);
+              closeWidgetAfterThanks('Спасибо за обращение! Транскрипт отправлен.');
             });
           })
           .catch(function (err) {
@@ -1360,16 +1403,7 @@
         return;
       }
       submitFeedbackThen(function () {
-        persistDialogId(null);
-        state.dialogId = null;
-        state.closed = false;
-        state.operatorConnected = false;
-        state.seenMessageIds = {};
-        messagesEl.innerHTML = '';
-        state.messages = [];
-        opStrip.setAttribute('hidden', '');
-        showView('prechat');
-        setOpen(false);
+        closeWidgetAfterThanks(STR.farewell);
       });
     }
 

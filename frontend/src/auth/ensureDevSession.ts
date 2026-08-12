@@ -52,6 +52,8 @@ function candidatePasswords(): string[] {
   const passwords = [
     workingPassword ?? '',
     configured,
+    // Local infra/.env default used in this repo.
+    'SuflerDevPass123',
     'replace-with-dev-only-password',
     'dev-only-password',
   ].filter(Boolean)

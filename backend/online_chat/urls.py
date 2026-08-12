@@ -2,6 +2,7 @@ from django.urls import path
 
 from online_chat.views import (
     analytics,
+    assignment_settings,
     bot_detail,
     bots_collection,
     channel_detail,
@@ -38,6 +39,7 @@ from online_chat.views import (
     routing_rule_detail,
     routing_rules_collection,
     routing_run,
+    sufler_hint_feedback,
     supervisor_overview,
     widget_config,
 )
@@ -70,6 +72,8 @@ urlpatterns = [
         name="online_chat_routing_rule",
     ),
     path("supervisor/overview/", supervisor_overview, name="online_chat_supervisor"),
+    path("assignment-settings/", assignment_settings, name="online_chat_assignment_settings"),
+    path("sufler-feedback/", sufler_hint_feedback, name="online_chat_sufler_feedback"),
     path("analytics/", analytics, name="online_chat_analytics"),
     path("history/", client_history, name="online_chat_client_history"),
     path(

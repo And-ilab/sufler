@@ -140,6 +140,8 @@ services:
       ONLINE_CHAT_CHANNEL_HTTP_TIMEOUT_SECONDS: ${ONLINE_CHAT_CHANNEL_HTTP_TIMEOUT_SECONDS:-10}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_MODE: ${TELEGRAM_MODE:-polling}
+      TELEGRAM_POLL_TIMEOUT_SECONDS: ${TELEGRAM_POLL_TIMEOUT_SECONDS:-25}
       VIBER_AUTH_TOKEN: ${VIBER_AUTH_TOKEN:-}
       VK_ACCESS_TOKEN: ${VK_ACCESS_TOKEN:-}
       VK_WEBHOOK_SECRET: ${VK_WEBHOOK_SECRET:-}
@@ -276,6 +278,22 @@ services:
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-180}
       ASSISTANT_MAX_TOKENS: ${ASSISTANT_MAX_TOKENS:-256}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ONLINE_CHAT_BUCKET: ${MINIO_ONLINE_CHAT_BUCKET:-sufler-online-chat}
+      ONLINE_CHAT_OBJECT_STORE_BACKEND: ${ONLINE_CHAT_OBJECT_STORE_BACKEND:-auto}
+      ONLINE_CHAT_CHANNEL_HTTP_TIMEOUT_SECONDS: ${ONLINE_CHAT_CHANNEL_HTTP_TIMEOUT_SECONDS:-10}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_MODE: ${TELEGRAM_MODE:-polling}
+      TELEGRAM_POLL_TIMEOUT_SECONDS: ${TELEGRAM_POLL_TIMEOUT_SECONDS:-25}
+      VIBER_AUTH_TOKEN: ${VIBER_AUTH_TOKEN:-}
+      VK_ACCESS_TOKEN: ${VK_ACCESS_TOKEN:-}
+      VK_WEBHOOK_SECRET: ${VK_WEBHOOK_SECRET:-}
+      VK_CONFIRMATION_CODE: ${VK_CONFIRMATION_CODE:-}
+      OK_ACCESS_TOKEN: ${OK_ACCESS_TOKEN:-}
+      OK_WEBHOOK_SECRET: ${OK_WEBHOOK_SECRET:-}
+      ONLINE_CHAT_API_CHANNEL_SIGNING_SECRET: ${ONLINE_CHAT_API_CHANNEL_SIGNING_SECRET:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: celery -A sufler worker --loglevel=info --hostname=worker@%h
@@ -325,6 +343,55 @@ services:
     command: celery -A sufler beat --loglevel=info
     volumes:
       - ../backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+  telegram-poller:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      AUTH_BACKEND: ${AUTH_BACKEND:-${AUTH_MODE:-mock_ldap}}
+      AUTH_MODE: ${AUTH_MODE:-mock_ldap}
+      POSTGRES_DB: ${POSTGRES_DB:-sufler}
+      POSTGRES_USER: ${POSTGRES_USER:-sufler}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ONLINE_CHAT_BUCKET: ${MINIO_ONLINE_CHAT_BUCKET:-sufler-online-chat}
+      ONLINE_CHAT_OBJECT_STORE_BACKEND: ${ONLINE_CHAT_OBJECT_STORE_BACKEND:-auto}
+      ONLINE_CHAT_CHANNEL_HTTP_TIMEOUT_SECONDS: ${ONLINE_CHAT_CHANNEL_HTTP_TIMEOUT_SECONDS:-10}
+      MODEL_GATEWAY_MODE: ${MODEL_GATEWAY_MODE:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-local}
+      OPENAI_MODEL: ${OPENAI_MODEL:-qwen2.5:3b}
+      OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-600}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_MODE: ${TELEGRAM_MODE:-polling}
+      TELEGRAM_POLL_TIMEOUT_SECONDS: ${TELEGRAM_POLL_TIMEOUT_SECONDS:-25}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: python manage.py poll_telegram
+    volumes:
+      - ../backend:/app
+      - audit_data:/var/log/sufler
     depends_on:
       postgres:
         condition: service_healthy

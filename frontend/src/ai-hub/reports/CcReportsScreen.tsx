@@ -1,25 +1,53 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BarChartView, DataTable, PieChartView } from './charts'
 import {
   CHANNEL_OPTIONS,
   CLOSE_TOPICS,
-  DEPARTMENT_OPTIONS,
-  REPORT_TYPES,
-  getReportPreview,
-  type ReportTypeId,
   type ReportViewMode,
 } from './demoData'
+import {
+  CcReportsApiError,
+  downloadCcExport,
+  fetchBuilderTemplates,
+  fetchCcCatalog,
+  previewBuilder,
+  triggerBrowserDownload,
+  type CatalogPayload,
+  type CatalogReportMeta,
+} from './api/ccReports'
+import { fieldLabel, localizeCell, metricLabel, summaryLabel } from './labels'
 
-function downloadText(filename: string, content: string, type: string) {
-  const blob = new Blob([content], { type })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
+function isoDaysAgo(days: number): string {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() - days)
+  return d.toISOString().slice(0, 10)
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function toneForIndex(index: number): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
+  const tones = ['success', 'info', 'warning', 'danger', 'neutral'] as const
+  return tones[index % tones.length]
+}
+
+function rowsToTable(rows: Record<string, unknown>[]): { headers: string[]; rows: string[][] } {
+  if (!rows.length) return { headers: ['Нет данных'], rows: [['За выбранный период записей нет']] }
+  const keys = Object.keys(rows[0]).filter((key) => key !== 'dialog_id' && key !== 'id')
+  return {
+    headers: keys.map((key) => fieldLabel(key)),
+    rows: rows.map((row) => keys.map((key) => localizeCell(row[key]))),
+  }
+}
+
+function downloadCsv(filename: string, headers: string[], rows: string[][]) {
+  const csv = [headers, ...rows]
+    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    .join('\n')
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
+  triggerBrowserDownload(blob, filename.endsWith('.csv') ? filename : `${filename}.csv`)
 }
 
 export function CcReportsScreen({
@@ -28,41 +56,109 @@ export function CcReportsScreen({
   initialPanel?: 'reports' | 'builder'
 }) {
   const [panel, setPanel] = useState<'reports' | 'builder'>(initialPanel)
-  const [reportType, setReportType] = useState<ReportTypeId>('chat-period')
+  const [catalogMeta, setCatalogMeta] = useState<CatalogReportMeta[]>([])
+  const [reportType, setReportType] = useState('chat-period')
   const [viewMode, setViewMode] = useState<ReportViewMode>('bar')
-  const [filtersOpen, setFiltersOpen] = useState(false)
-  const [periodFrom, setPeriodFrom] = useState('2026-08-01')
-  const [periodTo, setPeriodTo] = useState('2026-08-06')
+  const [filtersOpen, setFiltersOpen] = useState(true)
+  const [periodFrom, setPeriodFrom] = useState(isoDaysAgo(13))
+  const [periodTo, setPeriodTo] = useState(todayIso())
   const [channel, setChannel] = useState('all')
-  const [department, setDepartment] = useState('all')
   const [topic, setTopic] = useState('all')
-  const [dialogueStatus, setDialogueStatus] = useState('closed')
+  const [dialogueStatus, setDialogueStatus] = useState('all')
+  const [payload, setPayload] = useState<CatalogPayload | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [exportBusy, setExportBusy] = useState(false)
 
-  const selected = REPORT_TYPES.find((item) => item.id === reportType) ?? REPORT_TYPES[0]
-  const preview = useMemo(
-    () => getReportPreview(reportType, viewMode),
-    [reportType, viewMode],
-  )
+  const selected = useMemo(() => {
+    return (
+      catalogMeta.find((item) => item.id === reportType)
+      || payload?.report
+      || {
+        id: reportType,
+        fr: '',
+        label: reportType,
+        default_view: 'table',
+      }
+    )
+  }, [catalogMeta, payload, reportType])
+
+  const loadReport = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const messenger = channel === 'all' || channel === 'phone' ? '' : channel
+      const data = await fetchCcCatalog({
+        date_from: periodFrom,
+        date_to: periodTo,
+        channel: 'online_chat',
+        report: reportType,
+        messenger,
+        topic: topic === 'all' ? '' : topic,
+        status: dialogueStatus === 'all' ? '' : dialogueStatus,
+      })
+      setPayload(data)
+      setCatalogMeta(data.catalog || [])
+      const nextView = (data.report.default_view || 'table') as ReportViewMode
+      if (nextView === 'table' || nextView === 'pie' || nextView === 'bar') {
+        setViewMode(nextView)
+      }
+    } catch (err) {
+      const message =
+        err instanceof CcReportsApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Не удалось загрузить отчёт'
+      setError(message)
+    } finally {
+      setLoading(false)
+    }
+  }, [channel, dialogueStatus, periodFrom, periodTo, reportType, topic])
+
+  useEffect(() => {
+    if (panel === 'reports') {
+      void loadReport()
+    }
+  }, [panel, loadReport])
+
+  const table = useMemo(() => rowsToTable((payload?.rows || []) as Record<string, unknown>[]), [payload])
+  const chart = payload?.chart || []
+  const pieData = chart.map((item, index) => ({
+    label: item.label,
+    value: item.value,
+    tone: toneForIndex(index),
+  }))
+  const barCategories = chart.map((item) => item.label)
+  const barSeries = [{ name: selected.label, data: chart.map((item) => item.value) }]
 
   const channelLabel =
-    CHANNEL_OPTIONS.find((item) => item.value === channel)?.label ?? 'Все каналы'
-  const statusLabel =
-    {
-      closed: 'Закрыт',
-      active: 'В работе',
-      offline: 'Офлайн',
-      lost: 'Потерянный',
-      declined: 'Отказ клиента',
-    }[dialogueStatus] || dialogueStatus
-  const filtersSummary = `${periodFrom} — ${periodTo} · ${channelLabel} · ${statusLabel}`
+    CHANNEL_OPTIONS.find((item) => item.value === channel)?.label ?? 'Все каналы чата'
+  const filtersSummary = `${periodFrom} — ${periodTo} · ${channelLabel}`
 
-  const exportTable = () => {
-    const headers = preview.table?.headers ?? ['Показатель', 'Значение']
-    const rows = preview.table?.rows ?? [['Нет строк', '—']]
-    const csv = [headers, ...rows]
-      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-      .join('\n')
-    downloadText(`${selected.label}.csv`, `\uFEFF${csv}`, 'text/csv;charset=utf-8')
+  const exportCurrentCsv = () => {
+    downloadCsv(`${selected.label}.csv`, table.headers, table.rows)
+  }
+
+  const exportServer = async (format: 'xlsx' | 'pdf') => {
+    setExportBusy(true)
+    setError(null)
+    try {
+      const { blob, filename } = await downloadCcExport(
+        {
+          date_from: periodFrom,
+          date_to: periodTo,
+          channel: 'online_chat',
+          report: reportType,
+        },
+        format,
+      )
+      triggerBrowserDownload(blob, filename)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка экспорта')
+    } finally {
+      setExportBusy(false)
+    }
   }
 
   if (panel === 'builder') {
@@ -101,14 +197,12 @@ export function CcReportsScreen({
                 Тип отчёта
                 <select
                   value={reportType}
-                  onChange={(event) => {
-                    const next = event.target.value as ReportTypeId
-                    setReportType(next)
-                    const meta = REPORT_TYPES.find((item) => item.id === next)
-                    if (meta) setViewMode(meta.defaultView)
-                  }}
+                  onChange={(event) => setReportType(event.target.value)}
                 >
-                  {REPORT_TYPES.map((item) => (
+                  {(catalogMeta.length
+                    ? catalogMeta
+                    : [{ id: reportType, label: selected.label, fr: '', default_view: 'table' }]
+                  ).map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.label}
                     </option>
@@ -124,19 +218,9 @@ export function CcReportsScreen({
                 <input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} />
               </label>
               <label className="rpt-field">
-                Канал
+                Канал чата
                 <select value={channel} onChange={(e) => setChannel(e.target.value)}>
-                  {CHANNEL_OPTIONS.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="rpt-field">
-                Отдел / скилл-группа
-                <select value={department} onChange={(e) => setDepartment(e.target.value)}>
-                  {DEPARTMENT_OPTIONS.map((item) => (
+                  {CHANNEL_OPTIONS.filter((item) => item.value !== 'phone').map((item) => (
                     <option key={item.value} value={item.value}>
                       {item.label}
                     </option>
@@ -155,13 +239,15 @@ export function CcReportsScreen({
                 </select>
               </label>
               <label className="rpt-field">
-                Статус диалога
+                Статус / outcome
                 <select value={dialogueStatus} onChange={(e) => setDialogueStatus(e.target.value)}>
+                  <option value="all">Все</option>
                   <option value="closed">Закрыт</option>
                   <option value="active">В работе</option>
+                  <option value="waiting">В очереди</option>
                   <option value="offline">Офлайн</option>
                   <option value="lost">Потерянный</option>
-                  <option value="declined">Отказ клиента</option>
+                  <option value="rejected">Отказ клиента</option>
                 </select>
               </label>
             </div>
@@ -185,45 +271,65 @@ export function CcReportsScreen({
         <span className="rpt-muted">
           {selected.label} · {filtersSummary}
         </span>
-        <button type="button" className="rpt-btn" onClick={() => setFiltersOpen(true)}>
-          Сформировать
+        <button type="button" className="rpt-btn" disabled={loading} onClick={() => void loadReport()}>
+          {loading ? 'Загрузка…' : 'Сформировать'}
         </button>
-        <button type="button" className="rpt-btn rpt-btn--primary" onClick={exportTable}>
+        <button type="button" className="rpt-btn" onClick={exportCurrentCsv}>
+          CSV
+        </button>
+        <button
+          type="button"
+          className="rpt-btn rpt-btn--primary"
+          disabled={exportBusy}
+          onClick={() => void exportServer('xlsx')}
+        >
           Экспорт xlsx
         </button>
-        <button type="button" className="rpt-btn" onClick={exportTable}>
+        <button
+          type="button"
+          className="rpt-btn"
+          disabled={exportBusy}
+          onClick={() => void exportServer('pdf')}
+        >
           Экспорт pdf
         </button>
       </div>
 
+      {error ? (
+        <div className="rpt-card">
+          <div className="rpt-card__body" style={{ color: '#c62828' }}>
+            {error}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="rpt-stats">
+        {Object.entries(payload?.summary || {})
+          .filter(([key]) => !['report_id', 'note', 'period', 'rows', 'distribution', 'by_outcome'].includes(key))
+          .slice(0, 6)
+          .map(([key, value]) => (
+            <div key={key} className="rpt-stat rpt-stat--info">
+              <span>{summaryLabel(key)}</span>
+              <strong>{localizeCell(value)}</strong>
+            </div>
+          ))}
+      </div>
+
       <div className="rpt-card">
         <div className="rpt-card__head">
-          <span>{preview.title}</span>
-          <span className="rpt-badge rpt-badge--info">{selected.group}</span>
+          <span>{selected.label}</span>
         </div>
         <div className="rpt-card__body">
-          {viewMode === 'table' && preview.table ? (
-            <DataTable headers={preview.table.headers} rows={preview.table.rows} />
+          {loading ? <p className="rpt-muted">Загрузка данных…</p> : null}
+          {!loading && viewMode === 'table' ? (
+            <DataTable headers={table.headers} rows={table.rows} />
           ) : null}
-          {viewMode === 'pie' && preview.pie ? <PieChartView data={preview.pie} /> : null}
-          {viewMode === 'bar' && preview.bar ? (
-            <BarChartView
-              categories={preview.bar.categories}
-              series={preview.bar.series}
-              valueSuffix={preview.bar.valueSuffix}
-            />
+          {!loading && viewMode === 'pie' && pieData.length ? <PieChartView data={pieData} /> : null}
+          {!loading && viewMode === 'bar' && barCategories.length ? (
+            <BarChartView categories={barCategories} series={barSeries} />
           ) : null}
-          {viewMode === 'pie' && !preview.pie && preview.bar ? (
-            <BarChartView categories={preview.bar.categories} series={preview.bar.series} />
-          ) : null}
-          {viewMode === 'table' && !preview.table && preview.bar ? (
-            <DataTable
-              headers={['Категория', ...preview.bar.series.map((s) => s.name)]}
-              rows={preview.bar.categories.map((cat, index) => [
-                cat,
-                ...preview.bar!.series.map((series) => String(series.data[index])),
-              ])}
-            />
+          {!loading && viewMode !== 'table' && !chart.length ? (
+            <DataTable headers={table.headers} rows={table.rows} />
           ) : null}
         </div>
       </div>
@@ -232,17 +338,63 @@ export function CcReportsScreen({
 }
 
 function BuilderPanel({ onBack }: { onBack: () => void }) {
-  const [filters, setFilters] = useState([
-    { id: 'f1', field: 'period', operator: 'between', value: '2026-08-01 — 2026-08-06' },
-    { id: 'f2', field: 'channel', operator: 'in', value: 'Виджет, Telegram' },
-  ])
-  const [metrics, setMetrics] = useState([
-    { id: 'm1', metric: 'dialogs_total', aggregate: 'count' },
-    { id: 'm2', metric: 'sla_pct', aggregate: 'avg' },
-    { id: 'm3', metric: 'csat', aggregate: 'avg' },
-  ])
-  const [templateName, setTemplateName] = useState('Сводка КЦ — месяц')
-  const [schedule, setSchedule] = useState(true)
+  const [metrics, setMetrics] = useState(['dialogs_total', 'sla_pct', 'csat', 'useful_pct'])
+  const [templateName, setTemplateName] = useState('Онлайн-чат — неделя')
+  const [viewMode, setViewMode] = useState<'table' | 'bar' | 'pie'>('table')
+  const [periodFrom, setPeriodFrom] = useState(isoDaysAgo(6))
+  const [periodTo, setPeriodTo] = useState(todayIso())
+  const [catalog, setCatalog] = useState<{ id: string; label: string }[]>([])
+  const [preview, setPreview] = useState<{
+    rows: { metric: string; value: number; unit: string }[]
+    chart: { label: string; value: number }[]
+    message?: string
+  } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    void fetchBuilderTemplates()
+      .then((data) => setCatalog(data.metric_catalog || []))
+      .catch(() => setCatalog([]))
+  }, [])
+
+  const runPreview = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await previewBuilder({
+        name: templateName,
+        metrics,
+        view_mode: viewMode,
+        date_from: periodFrom,
+        date_to: periodTo,
+      })
+      setPreview(data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка предпросмотра')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void runPreview()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const saveTemplateLocal = () => {
+    const key = 'sufler.cc.report.templates'
+    const prev = JSON.parse(localStorage.getItem(key) || '[]') as unknown[]
+    prev.unshift({
+      name: templateName,
+      metrics,
+      view_mode: viewMode,
+      date_from: periodFrom,
+      date_to: periodTo,
+      saved_at: new Date().toISOString(),
+    })
+    localStorage.setItem(key, JSON.stringify(prev.slice(0, 20)))
+  }
 
   return (
     <div className="rpt-body">
@@ -258,221 +410,131 @@ function BuilderPanel({ onBack }: { onBack: () => void }) {
       <div className="rpt-builder-grid">
         <div style={{ display: 'grid', gap: 16 }}>
           <div className="rpt-card">
-            <div className="rpt-card__head">
-              <span>Динамические фильтры</span>
-              <button
-                type="button"
-                className="rpt-btn rpt-btn--ghost"
-                onClick={() =>
-                  setFilters((prev) => [
-                    ...prev,
-                    {
-                      id: `f-${Date.now()}`,
-                      field: 'department',
-                      operator: 'eq',
-                      value: '',
-                    },
-                  ])
-                }
-              >
-                + Фильтр
-              </button>
-            </div>
-            <div className="rpt-card__body rpt-filter-list">
-              {filters.map((row) => (
-                <div key={row.id} className="rpt-inline-selects">
-                  <select
-                    value={row.field}
-                    onChange={(e) =>
-                      setFilters((prev) =>
-                        prev.map((item) =>
-                          item.id === row.id ? { ...item, field: e.target.value } : item,
-                        ),
-                      )
-                    }
-                  >
-                    <option value="period">Период</option>
-                    <option value="channel">Канал</option>
-                    <option value="department">Отдел</option>
-                    <option value="topic">Тематика</option>
-                    <option value="operator">Оператор</option>
-                  </select>
-                  <select
-                    value={row.operator}
-                    onChange={(e) =>
-                      setFilters((prev) =>
-                        prev.map((item) =>
-                          item.id === row.id ? { ...item, operator: e.target.value } : item,
-                        ),
-                      )
-                    }
-                  >
-                    <option value="eq">=</option>
-                    <option value="in">в списке</option>
-                    <option value="between">между</option>
-                  </select>
-                  <input
-                    value={row.value}
-                    onChange={(e) =>
-                      setFilters((prev) =>
-                        prev.map((item) =>
-                          item.id === row.id ? { ...item, value: e.target.value } : item,
-                        ),
-                      )
-                    }
-                    placeholder="Значение…"
-                  />
-                  <button
-                    type="button"
-                    className="rpt-btn rpt-btn--ghost"
-                    onClick={() => setFilters((prev) => prev.filter((item) => item.id !== row.id))}
-                  >
-                    Удалить
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rpt-card">
-            <div className="rpt-card__head">
-              <span>Динамические показатели</span>
-              <button
-                type="button"
-                className="rpt-btn rpt-btn--ghost"
-                onClick={() =>
-                  setMetrics((prev) => [
-                    ...prev,
-                    { id: `m-${Date.now()}`, metric: 'aht', aggregate: 'avg' },
-                  ])
-                }
-              >
-                + Поле
-              </button>
-            </div>
-            <div className="rpt-card__body rpt-metric-list">
-              {metrics.map((row) => (
-                <div key={row.id} className="rpt-inline-selects">
-                  <select
-                    value={row.metric}
-                    onChange={(e) =>
-                      setMetrics((prev) =>
-                        prev.map((item) =>
-                          item.id === row.id ? { ...item, metric: e.target.value } : item,
-                        ),
-                      )
-                    }
-                  >
-                    <option value="dialogs_total">Обращений всего</option>
-                    <option value="dialogs_closed">Закрытых диалогов</option>
-                    <option value="sla_pct">% соблюдения SLA</option>
-                    <option value="aht">AHT</option>
-                    <option value="csat">Средняя оценка клиента</option>
-                    <option value="sufler_used_pct">% использования суфлёра</option>
-                  </select>
-                  <select
-                    value={row.aggregate}
-                    onChange={(e) =>
-                      setMetrics((prev) =>
-                        prev.map((item) =>
-                          item.id === row.id ? { ...item, aggregate: e.target.value } : item,
-                        ),
-                      )
-                    }
-                  >
-                    <option value="count">COUNT</option>
-                    <option value="sum">SUM</option>
-                    <option value="avg">AVG</option>
-                    <option value="p95">P95</option>
-                  </select>
-                  <button
-                    type="button"
-                    className="rpt-btn rpt-btn--ghost"
-                    onClick={() => setMetrics((prev) => prev.filter((item) => item.id !== row.id))}
-                  >
-                    Удалить
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rpt-card">
-            <div className="rpt-card__head">Сохранение шаблона</div>
+            <div className="rpt-card__head">Период и шаблон</div>
             <div className="rpt-card__body" style={{ display: 'grid', gap: 10 }}>
               <label className="rpt-field">
                 Название
                 <input value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
               </label>
-              <label className="rpt-row" style={{ fontSize: 13 }}>
-                <input
-                  type="checkbox"
-                  checked={schedule}
-                  onChange={(e) => setSchedule(e.target.checked)}
-                />
-                Периодическая рассылка (день / неделя / месяц)
-              </label>
-              {schedule ? (
-                <select defaultValue="monthly">
-                  <option value="daily">Ежедневно — 08:00</option>
-                  <option value="weekly">Еженедельно — пн 09:00</option>
-                  <option value="monthly">Ежемесячно — 1-е число</option>
-                </select>
-              ) : null}
-              <div className="rpt-row">
-                <button type="button" className="rpt-btn rpt-btn--primary">
-                  Сохранить шаблон
-                </button>
-                <button type="button" className="rpt-btn">
-                  Предпросмотр
-                </button>
+              <div className="rpt-grid-2">
+                <label className="rpt-field">
+                  С
+                  <input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} />
+                </label>
+                <label className="rpt-field">
+                  По
+                  <input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} />
+                </label>
               </div>
+              <label className="rpt-field">
+                Вид
+                <select value={viewMode} onChange={(e) => setViewMode(e.target.value as typeof viewMode)}>
+                  <option value="table">Таблица</option>
+                  <option value="bar">Столбчатая</option>
+                  <option value="pie">Круговая</option>
+                </select>
+              </label>
             </div>
           </div>
+
+          <div className="rpt-card">
+            <div className="rpt-card__head">
+              <span>Показатели</span>
+              <button
+                type="button"
+                className="rpt-btn rpt-btn--ghost"
+                onClick={() => setMetrics((prev) => [...prev, catalog[0]?.id || 'dialogs_total'])}
+              >
+                + Поле
+              </button>
+            </div>
+            <div className="rpt-card__body rpt-metric-list">
+              {metrics.map((metric, index) => (
+                <div key={`${metric}-${index}`} className="rpt-inline-selects">
+                  <select
+                    value={metric}
+                    onChange={(e) =>
+                      setMetrics((prev) =>
+                        prev.map((item, i) => (i === index ? e.target.value : item)),
+                      )
+                    }
+                  >
+                    {(catalog.length
+                      ? catalog
+                      : [
+                          { id: 'dialogs_total', label: 'Число диалогов' },
+                          { id: 'sla_pct', label: 'Соблюдение SLA первого ответа, %' },
+                          { id: 'csat', label: 'Средняя оценка клиента' },
+                          { id: 'useful_pct', label: 'Полезность суфлёра' },
+                          { id: 'aht_sec', label: 'Среднее время обработки, с' },
+                        ]
+                    ).map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="rpt-btn rpt-btn--ghost"
+                    onClick={() => setMetrics((prev) => prev.filter((_, i) => i !== index))}
+                  >
+                    Удалить
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rpt-row">
+            <button type="button" className="rpt-btn rpt-btn--primary" disabled={loading} onClick={() => void runPreview()}>
+              {loading ? 'Считаем…' : 'Предпросмотр'}
+            </button>
+            <button type="button" className="rpt-btn" onClick={saveTemplateLocal}>
+              Сохранить шаблон (локально)
+            </button>
+          </div>
+          {error ? <p style={{ color: '#c62828' }}>{error}</p> : null}
         </div>
 
         <div className="rpt-card">
           <div className="rpt-card__head">Предпросмотр конструктора</div>
           <div className="rpt-card__body" style={{ display: 'grid', gap: 14 }}>
+            {preview?.message ? <p className="rpt-muted">{preview.message}</p> : null}
             <div className="rpt-stats" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-              {[
-                ['Обращений всего', '1 284'],
-                ['SLA', '94.8%'],
-                ['CSAT', '4.6'],
-                ['AHT', '6.1 мин'],
-              ].map(([label, value]) => (
-                <div key={label} className="rpt-stat rpt-stat--info">
-                  <span>{label}</span>
-                  <strong>{value}</strong>
+              {(preview?.rows || []).map((row) => (
+                <div key={row.metric} className="rpt-stat rpt-stat--info">
+                  <span>{metricLabel(row.metric, catalog)}</span>
+                  <strong>
+                    {localizeCell(row.value)}
+                    {row.unit ? ` ${row.unit}` : ''}
+                  </strong>
                 </div>
               ))}
             </div>
-            <BarChartView
-              categories={['Виджет', 'Telegram', 'Viber', 'ВК', 'Телефония']}
-              series={[
-                { name: 'Обращений', data: [620, 210, 86, 54, 314] },
-                { name: 'Закрыто', data: [582, 198, 79, 51, 288], tone: 'success' },
-              ]}
-            />
-            <PieChartView
-              data={[
-                { label: 'Воспользовался', value: 58, tone: 'success' },
-                { label: 'Неполный ответ', value: 24, tone: 'warning' },
-                { label: 'Не воспользовался', value: 18, tone: 'danger' },
-              ]}
-            />
+            {viewMode === 'bar' && preview?.chart?.length ? (
+              <BarChartView
+                categories={preview.chart.map((item) => metricLabel(item.label, catalog))}
+                series={[{ name: 'Значение', data: preview.chart.map((item) => item.value) }]}
+              />
+            ) : null}
+            {viewMode === 'pie' && preview?.chart?.length ? (
+              <PieChartView
+                data={preview.chart.map((item, index) => ({
+                  label: metricLabel(item.label, catalog),
+                  value: item.value,
+                  tone: toneForIndex(index),
+                }))}
+              />
+            ) : null}
             <DataTable
-              headers={['Фильтр', 'Условие', 'Значение']}
-              rows={filters.map((row) => [row.field, row.operator, row.value || '—'])}
+              headers={['Показатель', 'Значение', 'Ед.']}
+              rows={(preview?.rows || []).map((row) => [
+                metricLabel(row.metric, catalog),
+                localizeCell(row.value),
+                row.unit || '—',
+              ])}
             />
-            <div className="rpt-row">
-              <button type="button" className="rpt-btn rpt-btn--primary">
-                Экспорт xlsx
-              </button>
-              <button type="button" className="rpt-btn">
-                Экспорт pdf
-              </button>
-            </div>
           </div>
         </div>
       </div>

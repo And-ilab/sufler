@@ -1,5 +1,7 @@
 const ONLINE_CHAT_ARM_OPERATE_ROLES = new Set([
   'contact_center_online_chat_operator',
+  // Supervisor has own writable ARM (empty by default; dialogs only after take-over / transfer).
+  'contact_center_supervisor',
 ])
 
 const ONLINE_CHAT_ARM_VIEW_ROLES = new Set([

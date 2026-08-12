@@ -52,6 +52,26 @@ def deliver_channel_message(message_id: str) -> dict[str, str | bool]:
 
 
 @shared_task
+def run_assignments_after_delay(operator_id: str = "") -> dict[str, int]:
+    """Resume auto-assign after post-close grace (manual+auto mode)."""
+    from online_chat.models import OperatorProfile
+    from online_chat.routing_services import clear_assignment_hold, run_assignments
+
+    if operator_id:
+        operator = OperatorProfile.objects.filter(pk=operator_id).first()
+        if operator:
+            clear_assignment_hold(operator)
+            assigned = []
+            for department in operator.departments.filter(is_active=True):
+                assigned.extend(run_assignments(department=department))
+            if not assigned and not operator.departments.exists():
+                assigned = run_assignments()
+            return {"assigned": len(assigned)}
+    assigned = run_assignments()
+    return {"assigned": len(assigned)}
+
+
+@shared_task
 def classify_stale_dialogs() -> dict[str, int]:
     timeout = max(60, int(settings.ONLINE_CHAT_LOST_TIMEOUT_SECONDS))
     cutoff = timezone.now() - timedelta(seconds=timeout)

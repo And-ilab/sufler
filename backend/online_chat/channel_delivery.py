@@ -53,18 +53,78 @@ def _post_form(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     return json.loads(body or b"{}")
 
 
-def _telegram(message: DialogMessage) -> DeliveryResult:
+def send_telegram_text(
+    chat_id: str,
+    text: str,
+    *,
+    reply_markup: dict[str, Any] | None = None,
+) -> DeliveryResult:
+    """Send a Telegram Bot API message (optionally with inline keyboard)."""
     token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
     if not token:
         return DeliveryResult(False, detail="telegram_not_configured")
-    body = _post_json(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        {"chat_id": message.dialog.client_external_id, "text": message.text},
-    )
+    if not chat_id or not (text or "").strip():
+        return DeliveryResult(False, detail="telegram_empty")
+    payload: dict[str, Any] = {"chat_id": chat_id, "text": text.strip()}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    try:
+        body = _post_json(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            payload,
+        )
+    except Exception as exc:  # noqa: BLE001 — onboarding must not crash webhook
+        return DeliveryResult(False, detail=str(exc)[:200])
     if not body.get("ok"):
         return DeliveryResult(False, detail="telegram_rejected")
     result = body.get("result") or {}
     return DeliveryResult(True, str(result.get("message_id") or ""))
+
+
+def send_telegram_close_survey(dialog: Any) -> DeliveryResult:
+    """After operator closes a Telegram dialog — farewell + 1..5 rating buttons."""
+    chat_id = str(getattr(dialog, "client_external_id", "") or "").strip()
+    dialog_id = str(getattr(dialog, "id", "") or "")
+    if not chat_id or not dialog_id:
+        return DeliveryResult(False, detail="telegram_no_chat")
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": f"{n}⭐", "callback_data": f"rate:{dialog_id}:{n}"}
+                for n in range(1, 6)
+            ]
+        ]
+    }
+    return send_telegram_text(
+        chat_id,
+        "Диалог завершён. Спасибо за обращение!\n"
+        "Оцените, пожалуйста, работу оператора:",
+        reply_markup=keyboard,
+    )
+
+
+def answer_telegram_callback(callback_query_id: str, text: str = "") -> DeliveryResult:
+    token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+    if not token or not callback_query_id:
+        return DeliveryResult(False, detail="telegram_not_configured")
+    payload: dict[str, Any] = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text
+        payload["show_alert"] = False
+    try:
+        body = _post_json(
+            f"https://api.telegram.org/bot{token}/answerCallbackQuery",
+            payload,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return DeliveryResult(False, detail=str(exc)[:200])
+    if not body.get("ok"):
+        return DeliveryResult(False, detail="telegram_rejected")
+    return DeliveryResult(True)
+
+
+def _telegram(message: DialogMessage) -> DeliveryResult:
+    return send_telegram_text(message.dialog.client_external_id, message.text)
 
 
 def _viber(message: DialogMessage) -> DeliveryResult:

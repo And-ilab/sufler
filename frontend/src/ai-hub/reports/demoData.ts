@@ -97,10 +97,13 @@ export function channelLabelRu(channel: string): string {
 export function statusLabelRu(status: string): string {
   const map: Record<string, string> = {
     online: 'в сети',
+    busy: 'занят',
     break: 'перерыв',
     offline: 'не в сети',
     lunch: 'обед',
     training: 'обучение',
+    meeting: 'совещание',
+    tech_issue: 'тех. проблема',
     closed: 'Закрыт',
     active: 'В работе',
     waiting: 'Ожидает',

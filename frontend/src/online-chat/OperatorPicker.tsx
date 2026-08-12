@@ -38,7 +38,11 @@ export function OperatorPicker({
       .list()
       .then((list) => {
         if (!cancelled) {
-          setItems(list.filter((item) => item.is_active !== false))
+          setItems(
+            list.filter(
+              (item) => item.is_active !== false && (item.role ?? 'operator') === 'operator',
+            ),
+          )
           setError('')
         }
       })
@@ -56,12 +60,13 @@ export function OperatorPicker({
   }, [])
 
   const hrefFor = (name: string) => {
+    // Stay under /online-chat/operators so the «Операторы» tab remains active.
     const params = new URLSearchParams({
       mode: 'view',
       operator: name,
     })
     if (allowTransfer) params.set('transfer', '1')
-    return `/online-chat?${params.toString()}`
+    return `/online-chat/operators?${params.toString()}`
   }
 
   return (

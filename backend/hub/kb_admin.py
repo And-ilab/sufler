@@ -556,6 +556,22 @@ def reindex_knowledge_base(kb_id: int) -> dict[str, Any]:
                 overlap=profile.chunk_overlap_tokens,
             )
             checksum = checksum_for_text(text)
+            # Prefer a real source URL from the document body when present
+            # (e.g. scraper "URL: https://belarusbank.by/..."), else local stub.
+            source_url = ""
+            for line in text.splitlines()[:12]:
+                stripped = line.strip()
+                if stripped.lower().startswith("url:"):
+                    candidate = stripped.split(":", 1)[1].strip()
+                    if candidate.startswith("http://") or candidate.startswith("https://"):
+                        source_url = candidate
+                        break
+                if stripped.startswith("http://") or stripped.startswith("https://"):
+                    source_url = stripped.split()[0]
+                    break
+            permalink = source_url or (
+                f"https://suz.local/admin-kb/{kb.slug}/documents/{document.pk}"
+            )
             CCProductionChunk.objects.filter(
                 article_id=document.article_id
             ).delete()
@@ -567,10 +583,7 @@ def reindex_knowledge_base(kb_id: int) -> dict[str, Any]:
                         chunk_index=index,
                         title=document.filename,
                         content=chunk,
-                        permalink=(
-                            f"https://suz.local/admin-kb/{kb.slug}"
-                            f"/documents/{document.pk}"
-                        ),
+                        permalink=permalink,
                         locale="ru",
                         visibility_scope=["kc_operator", "contact_center"],
                         checksum=checksum,

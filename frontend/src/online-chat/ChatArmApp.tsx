@@ -14,6 +14,8 @@ import './ChatArmApp.css'
 
 export interface ChatArmAppProps {
   operatorName?: string
+  /** Logged-in actor (supervisor) when observing another operator's ARM. */
+  actorName?: string
   demoMode?: boolean
   initialPresence?: OperatorPresence
   themeKind?: ThemeKind
@@ -45,6 +47,7 @@ function mapApiPresence(presence: string): OperatorPresence | null {
 export function ChatArmApp({
   initialPresence = 'online',
   operatorName = 'Иванов И.И.',
+  actorName = '',
   themeKind = 'light',
   statsDrawerOpen,
   onStatsDrawerOpenChange,
@@ -174,6 +177,7 @@ export function ChatArmApp({
           armRole={armRole}
           viewOnly={viewOnly}
           allowTransferInView={allowTransferInView}
+          actorName={actorName || (viewOnly ? '' : operatorName)}
         />
       </div>
     </main>

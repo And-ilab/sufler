@@ -59,7 +59,8 @@ class InferenceTierTests(unittest.TestCase):
             "sufler_cc",
             [{"role": "user", "content": "test"}],
         )
-        self.assertIn("Подсказка", result["choices"][0]["message"]["content"])
+        self.assertIn("СУЗ", result["choices"][0]["message"]["content"])
+        self.assertIn("ОТВЕТ", result["choices"][0]["message"]["content"])
 
     def test_verify_inference_tier_command(self):
         server = HTTPServer(("127.0.0.1", 0), _OkHealth)

@@ -1,4 +1,4 @@
-"""Stub CC analytics and export for FR-RPT-CC / II.6 (UI workflow)."""
+"""CC analytics and export for FR-RPT-CC / II.6 (online-chat production path)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ import zipfile
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from xml.sax.saxutils import escape
+
+from reports.cc_chat_metrics import build_analytics_rows
 
 CHANNEL_ALL = ""
 CHANNEL_TELEPHONY = "telephony"
@@ -42,100 +44,83 @@ def parse_analytics_filters(query: Any) -> dict[str, Any]:
     if date_from > date_to:
         raise CcAnalyticsError("date_from must be <= date_to")
 
-    channel = (query.get("channel") or CHANNEL_ALL).strip()
+    # Default to online_chat: telephony is out of current delivery scope.
+    raw_channel = query.get("channel")
+    if raw_channel is None:
+        channel = CHANNEL_ONLINE_CHAT
+    else:
+        channel = str(raw_channel).strip()
+    if channel in {"all", "*"}:
+        channel = CHANNEL_ALL
     if channel and channel not in CHANNELS:
-        raise CcAnalyticsError("channel must be telephony|online_chat")
-
-    export_format = (query.get("format") or EXPORT_CSV).strip().lower()
-    if export_format not in EXPORT_FORMATS:
-        raise CcAnalyticsError("format must be csv|xlsx|pdf")
+        # Allow messenger codes from UI (widget/telegram/…) → treat as chat.
+        if channel in {
+            "widget",
+            "telegram",
+            "viber",
+            "vk",
+            "ok",
+            "api",
+            "email",
+            "phone",
+        }:
+            messenger = "" if channel == "phone" else channel
+            if channel == "phone":
+                channel = CHANNEL_TELEPHONY
+            else:
+                channel = CHANNEL_ONLINE_CHAT
+            return {
+                "date_from": date_from.isoformat(),
+                "date_to": date_to.isoformat(),
+                "channel": channel,
+                "messenger": messenger,
+                "format": _parse_format(query),
+            }
+        raise CcAnalyticsError("channel must be telephony|online_chat|messenger")
 
     return {
         "date_from": date_from.isoformat(),
         "date_to": date_to.isoformat(),
         "channel": channel,
-        "format": export_format,
+        "messenger": str(query.get("messenger") or "").strip(),
+        "format": _parse_format(query),
     }
 
 
-def _chat_overlay_rows(
-    date_from: date, date_to: date, channel: str
-) -> list[dict[str, Any]]:
-    """Fold online_chat dialogs into daily analytics when present."""
-    if channel and channel != CHANNEL_ONLINE_CHAT:
-        return []
-    try:
-        from online_chat.models import Dialog as ChatDialog
-    except Exception:
-        return []
-
-    qs = ChatDialog.objects.filter(
-        created_at__date__gte=date_from,
-        created_at__date__lte=date_to,
-    )
-    by_day: dict[str, list[Any]] = {}
-    for dialog in qs.iterator():
-        key = dialog.created_at.date().isoformat()
-        by_day.setdefault(key, []).append(dialog)
-
-    rows: list[dict[str, Any]] = []
-    for day, dialogs in sorted(by_day.items()):
-        operators = {d.operator_name or "—" for d in dialogs}
-        closed = sum(1 for d in dialogs if d.status == ChatDialog.Status.CLOSED)
-        rows.append(
-            {
-                "date": day,
-                "channel": CHANNEL_ONLINE_CHAT,
-                "operator": ", ".join(sorted(operators))[:80] or "—",
-                "sessions": len(dialogs),
-                "recognized_pct": 100.0,
-                "avg_confidence": 1.0,
-                "useful_pct": 70.0 if closed else 50.0,
-                "incomplete_pct": 15.0,
-                "unused_pct": 15.0,
-                "incorrect_llm": 0,
-                "hint_latency_p95_ms": 900,
-                "aht_sec": 240,
-            }
-        )
-    return rows
+def _parse_format(query: Any) -> str:
+    export_format = (query.get("format") or EXPORT_CSV).strip().lower()
+    if export_format not in EXPORT_FORMATS:
+        raise CcAnalyticsError("format must be csv|xlsx|pdf")
+    return export_format
 
 
-def _seed_rows(date_from: date, date_to: date, channel: str) -> list[dict[str, Any]]:
-    """Deterministic stub rows for the selected period."""
+def _telephony_stub_rows(date_from: date, date_to: date) -> list[dict[str, Any]]:
+    """Keep telephony API shape for future; not used for online-chat prod path."""
     rows: list[dict[str, Any]] = []
     day = date_from
     index = 0
     while day <= date_to:
-        for ch, operator in (
-            (CHANNEL_TELEPHONY, "Иванова А."),
-            (CHANNEL_ONLINE_CHAT, "Петров С."),
-        ):
-            if channel and ch != channel:
-                continue
-            recognized = 88 + (index % 8)
-            useful = 62 + (index % 12)
-            incomplete = 18 + (index % 5)
-            unused = max(0, 100 - useful - incomplete)
-            latency_p95 = 420 + (index % 9) * 15
-            aht_sec = 210 + (index % 7) * 12
-            rows.append(
-                {
-                    "date": day.isoformat(),
-                    "channel": ch,
-                    "operator": operator,
-                    "sessions": 40 + (index % 20),
-                    "recognized_pct": recognized,
-                    "avg_confidence": round(0.78 + (index % 10) * 0.015, 3),
-                    "useful_pct": useful,
-                    "incomplete_pct": incomplete,
-                    "unused_pct": unused,
-                    "incorrect_llm": 2 + (index % 4),
-                    "hint_latency_p95_ms": latency_p95,
-                    "aht_sec": aht_sec,
-                }
-            )
-            index += 1
+        recognized = 88 + (index % 8)
+        useful = 62 + (index % 12)
+        incomplete = 18 + (index % 5)
+        unused = max(0, 100 - useful - incomplete)
+        rows.append(
+            {
+                "date": day.isoformat(),
+                "channel": CHANNEL_TELEPHONY,
+                "operator": "—",
+                "sessions": 0,
+                "recognized_pct": recognized,
+                "avg_confidence": round(0.78 + (index % 10) * 0.015, 3),
+                "useful_pct": useful,
+                "incomplete_pct": incomplete,
+                "unused_pct": unused,
+                "incorrect_llm": 0,
+                "hint_latency_p95_ms": 420 + (index % 9) * 15,
+                "aht_sec": 210 + (index % 7) * 12,
+            }
+        )
+        index += 1
         day += timedelta(days=1)
     return rows
 
@@ -146,7 +131,7 @@ def _asr_series(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         by_date.setdefault(row["date"], []).append(row)
     series: list[dict[str, Any]] = []
     for day, group in sorted(by_date.items()):
-        sessions = sum(item["sessions"] for item in group)
+        sessions = sum(item["sessions"] for item in group) or 1
         recognized = round(
             sum(item["recognized_pct"] * item["sessions"] for item in group) / sessions,
             1,
@@ -160,7 +145,7 @@ def _asr_series(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "date": day,
                 "recognized_pct": recognized,
                 "avg_confidence": confidence,
-                "sessions": sessions,
+                "sessions": sum(item["sessions"] for item in group),
             }
         )
     return series
@@ -169,81 +154,84 @@ def _asr_series(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def build_analytics(filters: dict[str, Any]) -> dict[str, Any]:
     date_from = date.fromisoformat(filters["date_from"])
     date_to = date.fromisoformat(filters["date_to"])
-    rows = _seed_rows(date_from, date_to, filters["channel"])
-    chat_rows = _chat_overlay_rows(date_from, date_to, filters["channel"])
-    if chat_rows:
-        # Prefer live chat counts for overlapping online_chat days.
-        chat_dates = {row["date"] for row in chat_rows}
-        rows = [
-            row
-            for row in rows
-            if not (row["channel"] == CHANNEL_ONLINE_CHAT and row["date"] in chat_dates)
-        ]
-        rows.extend(chat_rows)
-        rows.sort(key=lambda item: (item["date"], item["channel"]))
-    asr_quality = _asr_series(rows)
+    channel = filters.get("channel") or CHANNEL_ONLINE_CHAT
+    messenger = filters.get("messenger") or ""
 
-    total_sessions = sum(row["sessions"] for row in rows) or 1
-    summary = {
-        "sessions": sum(row["sessions"] for row in rows),
-        "recognized_pct": round(
-            sum(row["recognized_pct"] * row["sessions"] for row in rows) / total_sessions,
-            1,
-        ),
-        "avg_confidence": round(
-            sum(row["avg_confidence"] * row["sessions"] for row in rows) / total_sessions,
-            3,
-        ),
-        "useful_pct": round(
-            sum(row["useful_pct"] * row["sessions"] for row in rows) / total_sessions,
-            1,
-        ),
-        "incorrect_llm": sum(row["incorrect_llm"] for row in rows),
-        "hint_latency_p95_ms": max(
-            (row["hint_latency_p95_ms"] for row in rows), default=0
-        ),
-    }
+    if channel == CHANNEL_TELEPHONY:
+        rows = _telephony_stub_rows(date_from, date_to)
+        summary = {
+            "sessions": 0,
+            "recognized_pct": 0,
+            "avg_confidence": 0,
+            "useful_pct": 0,
+            "incorrect_llm": 0,
+            "hint_latency_p95_ms": 0,
+        }
+        return {
+            "filters": {
+                "date_from": filters["date_from"],
+                "date_to": filters["date_to"],
+                "channel": channel,
+            },
+            "summary": summary,
+            "rows": rows,
+            "usefulness": [],
+            "asr_quality": _asr_series(rows),
+            "stub": True,
+            "source": "Телефония",
+        }
 
+    rows, summary = build_analytics_rows(
+        date_from, date_to, messenger=messenger
+    )
     usefulness = [
         {
-            "channel": ch,
-            "label": "Телефония" if ch == CHANNEL_TELEPHONY else "Онлайн-чат",
-            "useful_pct": round(
-                sum(r["useful_pct"] * r["sessions"] for r in group) / sessions,
-                1,
-            ),
-            "incomplete_pct": round(
-                sum(r["incomplete_pct"] * r["sessions"] for r in group) / sessions,
-                1,
-            ),
-            "unused_pct": round(
-                sum(r["unused_pct"] * r["sessions"] for r in group) / sessions,
-                1,
-            ),
-            "sessions": sessions,
+            "channel": CHANNEL_ONLINE_CHAT,
+            "label": "Онлайн-чат",
+            "useful_pct": summary.get("useful_pct") or 0,
+            "incomplete_pct": 0,
+            "unused_pct": 0,
+            "sessions": summary.get("sufler_total") or summary.get("sessions") or 0,
         }
-        for ch in (CHANNEL_TELEPHONY, CHANNEL_ONLINE_CHAT)
-        for group in [[r for r in rows if r["channel"] == ch]]
-        for sessions in [sum(r["sessions"] for r in group) or 0]
-        if sessions
     ]
+    if summary.get("sufler_total"):
+        # Fill incomplete/unused from daily averages when available.
+        if rows:
+            sessions = sum(r["sessions"] for r in rows) or 1
+            usefulness[0]["incomplete_pct"] = round(
+                sum(r["incomplete_pct"] * r["sessions"] for r in rows) / sessions, 1
+            )
+            usefulness[0]["unused_pct"] = round(
+                sum(r["unused_pct"] * r["sessions"] for r in rows) / sessions, 1
+            )
 
     return {
         "filters": {
             "date_from": filters["date_from"],
             "date_to": filters["date_to"],
-            "channel": filters["channel"],
+            "channel": CHANNEL_ONLINE_CHAT if channel in {CHANNEL_ALL, ""} else channel,
+            "messenger": messenger,
         },
-        "summary": summary,
+        "summary": {
+            "sessions": summary.get("sessions") or 0,
+            "recognized_pct": summary.get("recognized_pct") or 0,
+            "avg_confidence": summary.get("avg_confidence") or 0,
+            "useful_pct": summary.get("useful_pct") or 0,
+            "incorrect_llm": summary.get("incorrect_llm") or 0,
+            "hint_latency_p95_ms": summary.get("hint_latency_p95_ms") or 0,
+            "closed": summary.get("closed"),
+            "avg_first_response_sec": summary.get("avg_first_response_sec"),
+            "avg_aht_sec": summary.get("avg_aht_sec"),
+            "avg_rating": summary.get("avg_rating"),
+            "sla_ok_pct": summary.get("sla_ok_pct"),
+            "sufler_total": summary.get("sufler_total"),
+            "sufler_avg_relevance": summary.get("sufler_avg_relevance"),
+        },
         "rows": rows,
         "usefulness": usefulness,
-        "asr_quality": asr_quality,
-        "stub": not bool(chat_rows),
-        "source": (
-            "FR-RPT-CC · demo + online_chat overlay"
-            if chat_rows
-            else "FR-RPT-CC · II.6 demo analytics (нет LLM/КЦ)"
-        ),
+        "asr_quality": [],  # telephony/ASR out of scope
+        "stub": not bool(rows),
+        "source": "Онлайн-чат",
     }
 
 
@@ -336,7 +324,7 @@ def build_xlsx_export(analytics: dict[str, Any]) -> bytes:
 
 
 def export_filename(filters: dict[str, Any], export_format: str) -> str:
-    channel = filters["channel"] or "all"
+    channel = filters.get("channel") or "online_chat"
     return (
         f"cc-analytics_{filters['date_from']}_{filters['date_to']}"
         f"_{channel}.{export_format}"

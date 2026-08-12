@@ -1,12 +1,16 @@
-import { ensureDevSession } from '../../../auth/ensureDevSession'
+import { ensureCsrfToken, ensureDevSession, readCsrfToken } from '../../../auth/ensureDevSession'
 
 export type CcChannel = 'telephony' | 'online_chat'
 
 export interface CcAnalyticsFilters {
   date_from?: string
   date_to?: string
-  channel?: CcChannel | ''
+  channel?: CcChannel | '' | string
   report?: string
+  messenger?: string
+  topic?: string
+  status?: string
+  department?: string
 }
 
 export interface CcAnalyticsSummary {
@@ -70,6 +74,7 @@ export interface LiveKpis {
   operators_online: number
   sla_ok_pct: number
   hint_p95_ms: number
+  closed_today?: number
 }
 
 export interface LiveDashboard {
@@ -93,6 +98,22 @@ export interface LiveDashboard {
     relevance_pct: number
     feedback: string
     latency_ms: number
+    at: string
+    query?: string
+  }[]
+  dialog_feed?: {
+    id: string
+    ref: string
+    channel: string
+    messenger: string
+    operator: string
+    client: string
+    topic: string
+    status: string
+    wait_sec: number | null
+    relevance_pct: number | null
+    feedback: string
+    preview: string
     at: string
   }[]
   chat: {
@@ -157,6 +178,10 @@ function toQuery(
   if (filters.date_to) params.set('date_to', filters.date_to)
   if (filters.channel) params.set('channel', filters.channel)
   if (filters.report) params.set('report', filters.report)
+  if (filters.messenger) params.set('messenger', filters.messenger)
+  if (filters.topic) params.set('topic', filters.topic)
+  if (filters.status) params.set('status', filters.status)
+  if (filters.department) params.set('department', filters.department)
   for (const [key, value] of Object.entries(extra)) {
     if (value) params.set(key, value)
   }
@@ -165,7 +190,21 @@ function toQuery(
 }
 
 async function parseJson<T>(response: Response): Promise<T> {
-  const body = (await response.json()) as T | ApiErrorPayload
+  const text = await response.text()
+  const trimmed = text.trim()
+  if (!trimmed || trimmed.startsWith('<')) {
+    throw new CcReportsApiError(
+      response.ok
+        ? 'Сервер вернул не JSON-ответ'
+        : `Ошибка сервера (HTTP ${response.status})`,
+    )
+  }
+  let body: T | ApiErrorPayload
+  try {
+    body = JSON.parse(trimmed) as T | ApiErrorPayload
+  } catch {
+    throw new CcReportsApiError(`Не удалось разобрать ответ (HTTP ${response.status})`)
+  }
   if (!response.ok) {
     const error = body as ApiErrorPayload
     throw new CcReportsApiError(
@@ -178,7 +217,13 @@ async function parseJson<T>(response: Response): Promise<T> {
 
 async function authedFetch(input: string, init?: RequestInit): Promise<Response> {
   await ensureDevSession()
-  return fetch(input, { credentials: 'include', ...init })
+  const headers = new Headers(init?.headers || {})
+  const method = (init?.method || 'GET').toUpperCase()
+  if (method !== 'GET' && method !== 'HEAD') {
+    const csrf = readCsrfToken() || (await ensureCsrfToken(true))
+    if (csrf) headers.set('X-CSRFToken', csrf)
+  }
+  return fetch(input, { credentials: 'include', ...init, headers })
 }
 
 export async function fetchCcAnalytics(
@@ -209,6 +254,8 @@ export async function previewBuilder(body: {
   name?: string
   metrics?: string[]
   view_mode?: string
+  date_from?: string
+  date_to?: string
 }): Promise<{
   name: string
   view_mode: string

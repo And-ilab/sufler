@@ -14,6 +14,7 @@ from django.core.validators import validate_email
 from django.db.models import Avg, Count, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
@@ -24,6 +25,7 @@ from auth.roles import (
     has_permission,
 )
 from online_chat.models import (
+    AssignmentSettings,
     BotConfiguration,
     ChannelConnection,
     ClientBlock,
@@ -34,6 +36,7 @@ from online_chat.models import (
     InternalMessage,
     OperatorProfile,
     RoutingRule,
+    SuflerHintFeedback,
     WidgetPlacement,
     normalize_phone,
 )
@@ -189,6 +192,8 @@ def _int_field(payload: Mapping[str, Any], key: str) -> int:
 @require_http_methods(["GET", "POST"])
 def dialogs_collection(request: HttpRequest) -> HttpResponse:
     if request.method == "GET":
+        from django.db.models.functions import Coalesce
+
         status = (request.GET.get("status") or "").strip()
         qs = Dialog.objects.all()
         if status:
@@ -212,6 +217,13 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
             qs = qs.filter(department_id=request.GET["department_id"])
         if request.GET.get("channel"):
             qs = qs.filter(channel=request.GET["channel"])
+        # Waiting queue: oldest first so the newest writer is at the bottom in UI.
+        if status == Dialog.Status.WAITING:
+            qs = qs.annotate(
+                queue_key=Coalesce("last_client_message_at", "created_at"),
+            ).order_by("queue_key", "created_at")
+        else:
+            qs = qs.order_by("-updated_at")
         items = [serialize_dialog(dialog) for dialog in qs[:200]]
         return JsonResponse({"ok": True, "items": items, "count": len(items)})
 
@@ -528,13 +540,119 @@ def dialog_close(request: HttpRequest, dialog_id: str) -> HttpResponse:
         previous_departments = list(
             previous_operator.departments.filter(is_active=True)
         ) if previous_operator else []
-        close_dialog(dialog, topic=topic)
+        closed = close_dialog(dialog, topic=topic)
+        # Held operator is skipped inside run_assignments; others can still receive work.
         if previous_departments:
             for department in previous_departments:
                 run_assignments(department=department)
         else:
             run_assignments()
-        return JsonResponse({"ok": True, "dialog": serialize_dialog(dialog)})
+        response: dict[str, Any] = {"ok": True, "dialog": serialize_dialog(closed)}
+        from django.utils import timezone as dj_tz
+
+        from online_chat.models import OperatorAssignmentHold
+
+        if previous_operator:
+            hold = (
+                OperatorAssignmentHold.objects.filter(operator=previous_operator)
+                .order_by("-until")
+                .first()
+            )
+            if hold is not None and hold.until > dj_tz.now():
+                response["assignment_grace_until"] = hold.until.isoformat()
+                response["assignment_grace_seconds"] = AssignmentSettings.GRACE_SECONDS
+        return JsonResponse(response)
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "PUT", "PATCH"])
+def assignment_settings(request: HttpRequest) -> HttpResponse:
+    settings_obj = AssignmentSettings.get_solo()
+    if request.method == "GET":
+        return JsonResponse(
+            {
+                "ok": True,
+                "settings": {
+                    "mode": settings_obj.mode,
+                    "grace_seconds": AssignmentSettings.GRACE_SECONDS,
+                    "modes": [
+                        {
+                            "id": AssignmentSettings.Mode.STRICT_AUTO,
+                            "label": "Только автоназначение",
+                        },
+                        {
+                            "id": AssignmentSettings.Mode.MANUAL_PLUS_AUTO,
+                            "label": "Ручной выбор + авто (10 сек после закрытия)",
+                        },
+                    ],
+                },
+            }
+        )
+    try:
+        payload = _json_body(request)
+        mode = _str_field(payload, "mode")
+        if mode not in AssignmentSettings.Mode.values:
+            raise OnlineChatApiError("invalid assignment mode")
+        settings_obj.mode = mode
+        settings_obj.save(update_fields=["mode", "updated_at"])
+        return JsonResponse(
+            {
+                "ok": True,
+                "settings": {
+                    "mode": settings_obj.mode,
+                    "grace_seconds": AssignmentSettings.GRACE_SECONDS,
+                },
+            }
+        )
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def sufler_hint_feedback(request: HttpRequest) -> HttpResponse:
+    try:
+        payload = _json_body(request)
+        choice = _str_field(payload, "choice")
+        if choice not in SuflerHintFeedback.Choice.values:
+            raise OnlineChatApiError("choice must be used|not_used|partial")
+        dialog_id = _str_field(payload, "dialog_id")
+        dialog = None
+        if dialog_id:
+            dialog = Dialog.objects.filter(pk=dialog_id).first()
+        relevance = payload.get("relevance_percent")
+        relevance_int = None
+        if isinstance(relevance, int) and not isinstance(relevance, bool):
+            relevance_int = max(0, min(100, relevance))
+        rank_raw = payload.get("hint_rank", 1)
+        try:
+            hint_rank = max(1, int(rank_raw))
+        except (TypeError, ValueError):
+            hint_rank = 1
+        row = SuflerHintFeedback.objects.create(
+            dialog=dialog,
+            operator_name=_str_field(payload, "operator_name"),
+            query=_str_field(payload, "query"),
+            hint_rank=hint_rank,
+            hint_text=_str_field(payload, "hint_text"),
+            choice=choice,
+            relevance_percent=relevance_int,
+            citation_title=_str_field(payload, "citation_title"),
+            request_id=_str_field(payload, "request_id"),
+        )
+        return JsonResponse(
+            {
+                "ok": True,
+                "feedback": {
+                    "id": str(row.id),
+                    "choice": row.choice,
+                    "hint_rank": row.hint_rank,
+                    "created_at": row.created_at.isoformat(),
+                },
+            }
+        )
     except OnlineChatApiError as exc:
         return _error(exc)
 
@@ -773,7 +891,6 @@ def _safe_config(value: object) -> object:
 
 
 def _channel_counters(channel: str) -> dict[str, int]:
-    from django.utils import timezone
 
     today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
     qs = Dialog.objects.filter(channel=channel)
@@ -1180,7 +1297,6 @@ def channel_detail(request: HttpRequest, item_id: str) -> HttpResponse:
 @require_http_methods(["POST"])
 @_chat_permissions(PERM_CC_ADMIN)
 def channel_health_check(request: HttpRequest, item_id: str) -> HttpResponse:
-    from django.utils import timezone
 
     from online_chat.channel_delivery import probe_channel
 
@@ -1267,7 +1383,6 @@ def routing_rule_detail(request: HttpRequest, item_id: str) -> HttpResponse:
 def supervisor_overview(request: HttpRequest) -> HttpResponse:
     from datetime import timedelta
 
-    from django.utils import timezone
 
     statuses = dict(Dialog.objects.values_list("status").annotate(count=Count("id")))
     now = timezone.now()
@@ -1354,7 +1469,6 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
 @_chat_permissions(PERM_CC_REPORTS, PERM_CC_ADMIN)
 def analytics(request: HttpRequest) -> HttpResponse:
     from datetime import timedelta
-    from django.utils import timezone
 
     period = (request.GET.get("period") or "7d").lower()
     days = {
@@ -1383,26 +1497,162 @@ def analytics(request: HttpRequest) -> HttpResponse:
     })
 
 
+_CHANNEL_LABELS = {
+    "widget": "Виджет сайта",
+    "telegram": "Telegram",
+    "viber": "Viber",
+    "api": "API",
+    "email": "E-mail",
+}
+
+
+def _channel_label(channel: str) -> str:
+    key = (channel or "").strip().lower()
+    return _CHANNEL_LABELS.get(key, channel or "неизвестный канал")
+
+
+def _phones_linked(left: str, right: str) -> bool:
+    """Same client phone: exact normalized, national BY mobile, or 1-digit typo."""
+    a = normalize_phone(left)
+    b = normalize_phone(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    # Belarus mobile without country code: 29/25/33/44 + 7 digits.
+    if len(a) >= 9 and len(b) >= 9 and a[-9:] == b[-9:]:
+        return True
+    # One-digit typo tolerance for the same-length numbers (widget ↔ TG re-entry).
+    if len(a) == len(b) and len(a) >= 10:
+        diffs = sum(1 for x, y in zip(a, b) if x != y)
+        if diffs == 1:
+            return True
+    # Soft fallback for truncated numbers.
+    return len(a) >= 7 and len(b) >= 7 and a[-7:] == b[-7:]
+
+
+def _name_token_set(first_name: str, last_name: str) -> frozenset[str]:
+    parts = []
+    for raw in (first_name or "", last_name or ""):
+        for token in re.split(r"[\s\-]+", raw.strip().casefold()):
+            if len(token) >= 2:
+                parts.append(token)
+    return frozenset(parts)
+
+
+def _names_linked(
+    first_a: str,
+    last_a: str,
+    first_b: str,
+    last_b: str,
+) -> bool:
+    """Same person even if widget/TG swapped имя/фамилия fields."""
+    left = _name_token_set(first_a, last_a)
+    right = _name_token_set(first_b, last_b)
+    return len(left) >= 2 and left == right
+
+
+def _history_identity_query(
+    *,
+    phone: str = "",
+    external_id: str = "",
+    first_name: str = "",
+    last_name: str = "",
+) -> Q:
+    """Match dialogs by phone (primary), external id, and FIO tokens."""
+    normalized = normalize_phone(phone)
+    phones: set[str] = {normalized} if normalized else set()
+    external_ids: set[str] = {external_id.strip()} if external_id.strip() else set()
+    name_key = _name_token_set(first_name, last_name)
+    matched_ids: set[Any] = set()
+
+    # Expand TG chat_id ↔ phone ↔ widget phone ↔ FIO (order-independent).
+    for _ in range(3):
+        before = (frozenset(phones), frozenset(external_ids), frozenset(matched_ids))
+        for item in Dialog.objects.only(
+            "id",
+            "client_phone",
+            "client_external_id",
+            "client_first_name",
+            "client_last_name",
+        ).iterator(chunk_size=500):
+            phone_hit = bool(phones) and any(
+                _phones_linked(item.client_phone, p) for p in phones
+            )
+            external_hit = bool(
+                item.client_external_id and item.client_external_id in external_ids
+            )
+            same_fio = bool(name_key) and _names_linked(
+                first_name,
+                last_name,
+                item.client_first_name,
+                item.client_last_name,
+            )
+            candidate_phone = normalize_phone(item.client_phone)
+            # FIO helps when phone was mistyped once or fields were swapped.
+            # Do not merge all namesakes: require phone/external already known,
+            # or both sides anonymous.
+            if same_fio and not phone_hit and not external_hit:
+                if phones or external_ids:
+                    if candidate_phone and not any(
+                        _phones_linked(candidate_phone, p) for p in phones
+                    ):
+                        same_fio = False
+                else:
+                    same_fio = not candidate_phone and not (
+                        item.client_external_id or ""
+                    ).strip()
+            if not (phone_hit or external_hit or same_fio):
+                continue
+            matched_ids.add(item.id)
+            phone_norm = normalize_phone(item.client_phone)
+            if phone_norm:
+                phones.add(phone_norm)
+            if item.client_external_id:
+                external_ids.add(item.client_external_id)
+        after = (frozenset(phones), frozenset(external_ids), frozenset(matched_ids))
+        if after == before:
+            break
+
+    if not matched_ids and not phones and not external_ids:
+        return Q()
+
+    query = Q()
+    if matched_ids:
+        query |= Q(id__in=list(matched_ids))
+    if phones:
+        query |= Q(
+            id__in=[
+                item.id
+                for item in Dialog.objects.only("id", "client_phone")
+                if any(_phones_linked(item.client_phone, p) for p in phones)
+            ]
+        )
+    if external_ids:
+        query |= Q(client_external_id__in=list(external_ids))
+    return query if query else Q(pk__in=[])
+
+
 @require_http_methods(["GET"])
 def client_history(request: HttpRequest) -> HttpResponse:
     dialog_id = (request.GET.get("dialog_id") or "").strip()
     phone = (request.GET.get("phone") or "").strip()
     external_id = (request.GET.get("external_id") or "").strip()
+    current = None
+    first_name = ""
+    last_name = ""
     if dialog_id:
         current = get_object_or_404(Dialog, pk=dialog_id)
         phone = phone or current.client_phone
         external_id = external_id or current.client_external_id
-    query = Q()
-    normalized = normalize_phone(phone)
-    if normalized:
-        candidate_ids = [
-            item.id
-            for item in Dialog.objects.only("id", "client_phone")
-            if normalize_phone(item.client_phone) == normalized
-        ]
-        query |= Q(id__in=candidate_ids)
-    if external_id:
-        query |= Q(client_external_id=external_id)
+        first_name = current.client_first_name
+        last_name = current.client_last_name
+    query = _history_identity_query(
+        phone=phone,
+        external_id=external_id,
+        first_name=first_name,
+        last_name=last_name,
+    )
     if not query:
         return JsonResponse({"ok": True, "items": [], "count": 0, "summary": ""})
     dialogs = (
@@ -1414,6 +1664,7 @@ def client_history(request: HttpRequest) -> HttpResponse:
         {
             "id": str(item.id),
             "channel": item.channel,
+            "channel_label": _channel_label(item.channel),
             "status": item.status,
             "outcome": item.outcome,
             "topic": item.close_topic,
@@ -1425,14 +1676,53 @@ def client_history(request: HttpRequest) -> HttpResponse:
         }
         for item in dialogs
     ]
-    topics = [item["topic"] for item in items if item["topic"]]
-    channels = sorted({item["channel"] for item in items})
-    summary = (
-        f"Обращений: {len(items)}. Каналы: {', '.join(channels) or '—'}. "
-        f"Последние темы: {', '.join(topics[:3]) or 'не определены'}."
+    previous_dialogs = [
+        item for item in dialogs if current is None or item.id != current.id
+    ]
+    previous_items = [
+        item for item in items if current is None or item["id"] != str(current.id)
+    ]
+    current_channel = _channel_label(current.channel) if current else (
+        items[0]["channel_label"] if items else ""
     )
+
+    from online_chat.summary_service import build_history_summaries
+
+    packed = build_history_summaries(list(previous_dialogs))
+    # previous_items is the source of truth for "first vs repeat".
+    is_first = len(previous_items) == 0
+    if is_first and current_channel:
+        packed["detailed_summary"] = (
+            f"Первое обращение клиента.\nКанал: {current_channel}."
+        )
+        packed["summary"] = "Первое обращение клиента."
+    blocks = packed.get("detailed_blocks") or []
+    for block in blocks:
+        raw_channel = block.get("channel") or ""
+        block["channel"] = _channel_label(raw_channel) if raw_channel else "—"
+    if blocks:
+        packed["detailed_summary"] = "\n\n".join(
+            (
+                f"{block['date_label']}\n"
+                f"Тема: {block['topic']}\n"
+                f"{block['essence']}\n"
+                f"Канал: {block['channel']} · Оператор: {block['operator_name']}"
+            )
+            for block in blocks
+        )
     return JsonResponse(
-        {"ok": True, "items": items, "count": len(items), "summary": summary}
+        {
+            "ok": True,
+            "items": items,
+            "count": len(items),
+            "previous_count": len(previous_items),
+            "summary": packed["summary"],
+            "detailed_summary": packed["detailed_summary"],
+            "summary_topics": packed.get("summary_topics") or [],
+            "detailed_blocks": blocks,
+            "is_first": is_first,
+            "repeat_hint": "",
+        }
     )
 
 
@@ -1754,6 +2044,17 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
                 "is_active": True,
             },
         )
+        RoutingRule.objects.update_or_create(
+            name="Dev telegram → Поддержка КЦ",
+            defaults={
+                "priority": 10,
+                "channel": "telegram",
+                "placement": None,
+                "department": department,
+                "conditions": {"max_load": 5},
+                "is_active": True,
+            },
+        )
         BotConfiguration.objects.update_or_create(
             name="Dev бот FAQ",
             department=department,
@@ -1786,6 +2087,23 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
             )
             operator.departments.set([department])
             operators.append(operator)
+        supervisor, _ = OperatorProfile.objects.update_or_create(
+            external_id="dev-supervisor-1",
+            defaults={
+                "display_name": "Козлова Е.В.",
+                "email": "supervisor@dev.local",
+                "presence": OperatorProfile.Presence.ONLINE,
+                "auto_assign": False,
+                "max_active_dialogs": 99,
+                "is_active": True,
+                "role": OperatorProfile.Role.SUPERVISOR,
+            },
+        )
+        supervisor.departments.set([department])
+        assignment = AssignmentSettings.get_solo()
+        if assignment.mode != AssignmentSettings.Mode.MANUAL_PLUS_AUTO:
+            assignment.mode = AssignmentSettings.Mode.MANUAL_PLUS_AUTO
+            assignment.save(update_fields=["mode", "updated_at"])
         dialogs = []
         clients_payload = []
         for index in range(client_count):

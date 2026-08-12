@@ -8,6 +8,7 @@ export interface SuflerHintCitation {
 export interface SuflerHint {
   rank: number
   text: string
+  operator_tip?: string
   relevance_score: number
   relevance_percent: number
   citations: SuflerHintCitation[]
@@ -36,10 +37,37 @@ function csrfToken(): string {
   return match ? decodeURIComponent(match[1]) : ''
 }
 
+function friendlySuggestError(raw: string, status: number): string {
+  const code = (raw || '').toLowerCase()
+  if (
+    status === 401
+    || status === 403
+    || code.includes('authentication_required')
+    || code.includes('permission_denied')
+  ) {
+    return 'Ошибка суфлёра. Повторите попытку позже.'
+  }
+  if (code.includes('no_relevant_knowledge') || code.includes('sufler_unavailable')) {
+    return 'Ошибка суфлёра. Повторите попытку позже.'
+  }
+  if (!raw || raw === 'validation_error' || /^[a-z0-9_]+$/i.test(raw)) {
+    return 'Ошибка суфлёра. Повторите попытку позже.'
+  }
+  return raw
+}
+
 export async function requestSuflerSuggest(
   text: string,
-  limit = 5,
+  limit = 3,
+  options?: { clientHistory?: string; dialogContext?: string },
 ): Promise<SuggestResponse> {
+  // Online-chat ARM is often opened without a prior admin/login bootstrap.
+  try {
+    const { ensureDevSession } = await import('../../auth/ensureDevSession')
+    await ensureDevSession()
+  } catch {
+    /* ignore — suggest will surface a friendly error if auth still missing */
+  }
   const response = await fetch('/api/v1/sufler/suggest', {
     method: 'POST',
     credentials: 'include',
@@ -47,11 +75,20 @@ export async function requestSuflerSuggest(
       'Content-Type': 'application/json',
       'X-CSRFToken': csrfToken(),
     },
-    body: JSON.stringify({ text, limit }),
+    body: JSON.stringify({
+      text,
+      limit,
+      client_history: options?.clientHistory ?? '',
+      dialog_context: options?.dialogContext ?? '',
+    }),
   })
-  const body = await response.json()
+  const body = await response.json().catch(() => ({} as { error?: string; details?: { request?: string[] } }))
   if (!response.ok) {
-    throw new Error(body.error ?? `Suggest failed (${response.status})`)
+    const raw =
+      body.details?.request?.[0]
+      ?? body.error
+      ?? `Suggest failed (${response.status})`
+    throw new Error(friendlySuggestError(String(raw), response.status))
   }
   return body as SuggestResponse
 }

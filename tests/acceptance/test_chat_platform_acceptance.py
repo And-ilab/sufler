@@ -177,20 +177,30 @@ class ChatPlatformAcceptanceTest(TestCase):
 
     @mark_acceptance("CHAT-T-12")
     def test_telegram_webhook_creates_arm_dialog(self):
-        response = self.client.post(
-            "/api/v1/channels/telegram/webhook/",
-            data=json.dumps(
-                {
-                    "update_id": 100,
-                    "message": {
-                        "text": "Вопрос из Telegram",
-                        "chat": {"id": 4242},
-                    },
-                }
-            ),
-            content_type="application/json",
-        )
+        from unittest.mock import patch
+
+        def _post(text: str, update_id: int):
+            return self.client.post(
+                "/api/v1/channels/telegram/webhook/",
+                data=json.dumps(
+                    {
+                        "update_id": update_id,
+                        "message": {
+                            "text": text,
+                            "chat": {"id": 4242},
+                        },
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        with patch("online_chat.telegram_onboarding.send_telegram_text"):
+            self.assertEqual(_post("/start", 100).status_code, 200)
+            self.assertEqual(_post("Вопрос из Telegram", 101).status_code, 200)
+            self.assertEqual(_post("Иванов Иван", 102).status_code, 200)
+            response = _post("+375291112233", 103)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["routed_to"], "arm_queue")
         self.assertTrue(
             Dialog.objects.filter(
                 channel="telegram",

@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +17,7 @@ django.setup()
 from django.test import Client, TestCase  # noqa: E402
 
 from integrations.channels.webhooks import reset_inbox  # noqa: E402
-from online_chat.models import Dialog  # noqa: E402
+from online_chat.models import Dialog, TelegramOnboardingSession  # noqa: E402
 
 
 class ChannelWebhooksTest(TestCase):
@@ -24,28 +25,53 @@ class ChannelWebhooksTest(TestCase):
         reset_inbox()
         self.client = Client()
 
-    def test_telegram_webhook_routes_to_arm_queue(self):
-        response = self.client.post(
+    def _tg(self, text: str, chat_id: int = 4242, update_id: int = 1):
+        return self.client.post(
             "/api/v1/channels/telegram/webhook/",
             data=json.dumps(
                 {
-                    "update_id": 1,
+                    "update_id": update_id,
                     "message": {
-                        "message_id": 10,
-                        "text": "Лимит снятия наличных?",
-                        "chat": {"id": 4242, "type": "private"},
-                        "from": {"id": 4242, "first_name": "Анна"},
+                        "message_id": update_id * 10,
+                        "text": text,
+                        "chat": {"id": chat_id, "type": "private"},
+                        "from": {"id": chat_id, "first_name": "Анна"},
                     },
                 }
             ),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
+
+    @patch("online_chat.telegram_onboarding.send_telegram_text")
+    def test_telegram_onboarding_then_queue(self, _send):
+        start = self._tg("/start", update_id=1)
+        self.assertEqual(start.status_code, 200)
+        self.assertEqual(start.json()["routed_to"], "onboarding")
+        self.assertEqual(Dialog.objects.count(), 0)
+
+        question = self._tg("Лимит снятия наличных?", update_id=2)
+        self.assertEqual(question.status_code, 200)
+        self.assertEqual(question.json()["routed_to"], "onboarding")
+        self.assertEqual(Dialog.objects.count(), 0)
+
+        fio = self._tg("Козлова Анна", update_id=3)
+        self.assertEqual(fio.status_code, 200)
+        self.assertEqual(fio.json()["routed_to"], "onboarding")
+
+        phone = self._tg("80291234567", update_id=4)
+        self.assertEqual(phone.status_code, 200)
+        body = phone.json()
         self.assertTrue(body["ok"])
-        self.assertEqual(body["channel"], "telegram")
         self.assertEqual(body["routed_to"], "arm_queue")
-        self.assertIn("sendMessage", body["reply"]["method"])
+        self.assertEqual(Dialog.objects.count(), 1)
+        dialog = Dialog.objects.get()
+        self.assertEqual(dialog.channel, "telegram")
+        self.assertEqual(dialog.client_phone, "+375291234567")
+        self.assertEqual(dialog.client_first_name, "Анна")
+        self.assertEqual(dialog.client_last_name, "Козлова")
+        self.assertIn("Лимит снятия", dialog.preview)
+        session = TelegramOnboardingSession.objects.get(chat_id="4242")
+        self.assertEqual(session.step, TelegramOnboardingSession.Step.DONE)
 
     def test_viber_webhook_message_and_handshake(self):
         handshake = self.client.post(

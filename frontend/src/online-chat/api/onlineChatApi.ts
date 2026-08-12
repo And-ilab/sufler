@@ -27,6 +27,7 @@ export type OnlineChatDialog = {
   department_id?: string | null
   department_name?: string | null
   preview: string
+  entry_url?: string
   close_topic: string
   created_at: string
   updated_at: string
@@ -34,7 +35,11 @@ export type OnlineChatDialog = {
   closed_at: string | null
   client_last_seen_at?: string | null
   wait_seconds: number
+  /** Absolute ISO timestamp for client-side SLA stopwatch (no drift on refresh). */
+  wait_anchor_at?: string | null
   needs_reply?: boolean
+  /** Simulator / seed client — sufler must stay disabled. */
+  is_test_client?: boolean
   has_feedback?: boolean
   messages?: OnlineChatMessage[]
 }
@@ -52,11 +57,43 @@ export type ClientHistoryItem = {
   message_count?: number
 }
 
+export type ClientHistorySummaryBlock = {
+  date_label: string
+  topic: string
+  essence?: string
+  channel?: string
+  operator_name?: string
+}
+
 export type ClientHistoryResponse = {
   ok: boolean
   items: ClientHistoryItem[]
   count: number
+  previous_count?: number
   summary: string
+  detailed_summary?: string
+  summary_topics?: string[]
+  detailed_blocks?: ClientHistorySummaryBlock[]
+  is_first?: boolean
+  repeat_hint?: string
+}
+
+export type AssignmentMode = 'strict_auto' | 'manual_plus_auto'
+
+export type AssignmentSettingsResponse = {
+  ok: boolean
+  settings: {
+    mode: AssignmentMode
+    grace_seconds: number
+    modes?: { id: AssignmentMode; label: string }[]
+  }
+}
+
+export type CloseDialogResponse = {
+  ok: boolean
+  dialog: OnlineChatDialog
+  assignment_grace_until?: string
+  assignment_grace_seconds?: number
 }
 
 export type OnlineChatFeedback = {
@@ -195,14 +232,50 @@ export async function transferDialogRemote(
 export async function closeDialogRemote(
   dialogId: string,
   topic: string,
-): Promise<OnlineChatDialog> {
+): Promise<CloseDialogResponse> {
   const response = await fetch(`/api/v1/online-chat/dialogs/${dialogId}/close/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ topic }),
   })
-  const body = await parseJson<{ ok: boolean; dialog: OnlineChatDialog }>(response)
-  return body.dialog
+  return parseJson<CloseDialogResponse>(response)
+}
+
+export async function fetchAssignmentSettings(): Promise<AssignmentSettingsResponse['settings']> {
+  const response = await fetch('/api/v1/online-chat/assignment-settings/')
+  const body = await parseJson<AssignmentSettingsResponse>(response)
+  return body.settings
+}
+
+export async function updateAssignmentSettings(
+  mode: AssignmentMode,
+): Promise<AssignmentSettingsResponse['settings']> {
+  const response = await fetch('/api/v1/online-chat/assignment-settings/', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  })
+  const body = await parseJson<AssignmentSettingsResponse>(response)
+  return body.settings
+}
+
+export async function submitSuflerHintFeedback(payload: {
+  dialog_id?: string
+  operator_name?: string
+  query?: string
+  hint_rank?: number
+  hint_text?: string
+  choice: 'used' | 'not_used' | 'partial'
+  relevance_percent?: number
+  citation_title?: string
+  request_id?: string
+}): Promise<void> {
+  const response = await fetch('/api/v1/online-chat/sufler-feedback/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  await parseJson<{ ok: boolean }>(response)
 }
 
 export async function submitDialogFeedback(

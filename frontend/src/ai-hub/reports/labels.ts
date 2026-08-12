@@ -1,0 +1,155 @@
+/** Russian labels for report UI (field keys, statuses, metrics). */
+
+const FIELD_LABELS: Record<string, string> = {
+  date: 'Дата',
+  channel: 'Канал',
+  channel_label: 'Канал',
+  operator: 'Оператор',
+  sessions: 'Обращений',
+  closed: 'Закрыто',
+  waiting: 'В очереди',
+  active: 'В работе',
+  avg_first_response_sec: 'Среднее время первого ответа, с',
+  avg_aht_sec: 'Среднее время обработки, с',
+  aht_sec: 'Время обработки, с',
+  sla_ok_pct: 'Соблюдение SLA, %',
+  sla_ok: 'SLA соблюдён',
+  avg_rating: 'Средняя оценка',
+  rating: 'Оценка',
+  ratings: 'Оценок',
+  ref: 'Номер',
+  client: 'Клиент',
+  phone: 'Телефон',
+  status: 'Статус',
+  outcome: 'Исход',
+  topic: 'Тематика',
+  topics: 'Тематик',
+  created_at: 'Создан',
+  closed_at: 'Закрыт',
+  messages: 'Сообщений',
+  summary: 'Краткое саммари',
+  wait_sec: 'Ожидание, с',
+  first_response_sec: 'Первый ответ, с',
+  comment: 'Комментарий',
+  dialogs: 'Диалогов',
+  share_pct: 'Доля, %',
+  growth_pct: 'Рост, %',
+  prev_dialogs: 'За прошлый период',
+  label: 'Показатель',
+  count: 'Количество',
+  pct: 'Доля, %',
+  choice: 'Отметка',
+  value: 'Значение',
+  useful_pct: 'Воспользовался, %',
+  incomplete_pct: 'Неполный ответ, %',
+  unused_pct: 'Не воспользовался, %',
+  avg_relevance: 'Средняя релевантность, %',
+  answers: 'Ответов',
+  used_pct: 'Воспользовался, %',
+  reason: 'Причина',
+  example: 'Пример',
+  repeats: 'Повторов',
+  channels: 'Каналы',
+  metric: 'Показатель',
+  online_chat: 'Онлайн-чат',
+  telephony: 'Телефония',
+  total: 'Итого',
+  p95_first_response_sec: 'p95 первого ответа, с',
+  p95_ms: 'p95 первого ответа, мс',
+  avg_first_response_sec_summary: 'Среднее время первого ответа, с',
+  dialogs_total: 'Число диалогов',
+  dialogs_closed: 'Закрытых диалогов',
+  sla_pct: 'Соблюдение SLA первого ответа, %',
+  csat: 'Средняя оценка клиента',
+  relevance_avg: 'Средняя релевантность',
+  incorrect_llm: 'Доля «не использовал», %',
+  topics_top: 'Число тематик',
+  sufler_used_pct: 'Использование суфлёра, %',
+  target_sec: 'Целевой SLA, с',
+  answered: 'С ответом',
+  operators: 'Операторов',
+  cases: 'Кейсов',
+  clients: 'Клиентов',
+  repeat_clients: 'Повторных клиентов',
+  repeat_pct: 'Доля повторных, %',
+  sufler: 'Отметок суфлёра',
+  sufler_total: 'Отметок суфлёра',
+  sufler_avg_relevance: 'Средняя релевантность',
+  rows: 'Строк',
+  period: 'Период',
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  waiting: 'В очереди',
+  active: 'В работе',
+  closed: 'Закрыт',
+  blocked: 'Заблокирован',
+  offline: 'Офлайн',
+  lost: 'Потерянный',
+  rejected: 'Отказ клиента',
+  declined: 'Отказ клиента',
+  resolved: 'Решён',
+  escalated: 'Эскалация',
+  used: 'Воспользовался',
+  not_used: 'Не воспользовался',
+  partial: 'Неполный ответ',
+  incomplete: 'Неполный ответ',
+  online: 'В сети',
+  busy: 'Занят',
+  break: 'Перерыв',
+  lunch: 'Обед',
+  training: 'Обучение',
+  meeting: 'Совещание',
+  tech_issue: 'Тех. проблема',
+  true: 'да',
+  false: 'нет',
+}
+
+const SUMMARY_LABELS: Record<string, string> = {
+  ...FIELD_LABELS,
+  dialogs: 'Диалогов',
+  closed: 'Закрыто',
+  channels: 'Каналов',
+  sla_ok_pct: 'Соблюдение SLA, %',
+  avg_first_response_sec: 'Ср. время первого ответа, с',
+  p95_first_response_sec: 'p95 первого ответа, с',
+  avg_wait_sec: 'Ср. ожидание, с',
+  avg_rating: 'Средняя оценка',
+  ratings: 'Оценок',
+  operators: 'Операторов',
+  topics: 'Тематик',
+  total: 'Всего отметок',
+  used_pct: 'Воспользовался, %',
+  avg_relevance: 'Ср. релевантность, %',
+  answers: 'Ответов',
+  avg_aht_sec: 'Ср. время обработки, с',
+  clients: 'Клиентов',
+  repeat_clients: 'Повторных клиентов',
+  repeat_pct: 'Доля повторных, %',
+  cases: 'Кейсов',
+  sufler: 'Отметок суфлёра',
+  target_sec: 'Целевой SLA, с',
+  answered: 'С ответом',
+}
+
+export function fieldLabel(key: string): string {
+  return FIELD_LABELS[key] || key
+}
+
+export function summaryLabel(key: string): string {
+  return SUMMARY_LABELS[key] || FIELD_LABELS[key] || key
+}
+
+export function localizeCell(value: unknown): string {
+  if (value == null || value === '') return '—'
+  if (typeof value === 'boolean') return value ? 'да' : 'нет'
+  const raw = String(value)
+  return STATUS_LABELS[raw] || STATUS_LABELS[raw.toLowerCase()] || raw
+}
+
+export function metricLabel(
+  metricId: string,
+  catalog: { id: string; label: string }[] = [],
+): string {
+  return catalog.find((item) => item.id === metricId)?.label || FIELD_LABELS[metricId] || metricId
+}

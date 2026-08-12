@@ -159,6 +159,7 @@ function App() {
     const params = new URLSearchParams(window.location.search)
     const roles = rolesForUi(auth.roles, params.get('demo_role'))
     const isSupervisorRoute = route === '/online-chat/supervisor'
+    const isOperatorsRoute = route === '/online-chat/operators'
     const isAdminRoute = route === '/online-chat/admin'
     const isSimulatorRoute = route === '/online-chat/simulator'
     const canOperateArm = canOperateOnlineChatArm(roles)
@@ -169,11 +170,13 @@ function App() {
     const simOperatePreview = params.get('mode') === 'operate' && Boolean(params.get('operator')?.trim())
     const allowed = isSupervisorRoute
       ? canSupervisor
-      : isAdminRoute
-        ? canAdmin
-        : isSimulatorRoute
-          ? showSimulator
-          : route === '/online-chat' && (canViewArm || simOperatePreview || showSimulator)
+      : isOperatorsRoute
+        ? (canSupervisor || canAdmin)
+        : isAdminRoute
+          ? canAdmin
+          : isSimulatorRoute
+            ? showSimulator
+            : route === '/online-chat' && (canViewArm || simOperatePreview || showSimulator)
 
     if (!allowed) {
       return (
@@ -204,38 +207,42 @@ function App() {
         : canSupervisor
           ? 'supervisor' as const
           : 'operator' as const
-    const armNavLabel = canOperateArm || simOperate ? 'Чаты' : 'Операторы'
 
+    // «Чаты» = own ARM. Operator observation lives under /online-chat/operators.
     const operateHref = simOperate
       ? `/online-chat?mode=operate&operator=${encodeURIComponent(operatorFromQuery)}`
-      : forcedView && operatorFromQuery
-        ? `/online-chat?mode=view&operator=${encodeURIComponent(operatorFromQuery)}`
-        : '/online-chat'
+      : '/online-chat'
+    const viewingOperatorArm =
+      forcedView && Boolean(operatorFromQuery) && isOperatorsRoute
 
     const shellProps = {
       currentPath: route,
       displayName: simOperate
         ? operatorFromQuery
-        : forcedView && operatorFromQuery
+        : viewingOperatorArm
           ? `Просмотр · ${operatorFromQuery}`
           : viewerName,
       jobTitle: simOperate
         ? 'Оператор онлайн-чата · симулятор'
-        : forcedView && operatorFromQuery
+        : viewingOperatorArm
           ? `${viewerTitle} · режим просмотра`
           : viewerTitle,
-      // In simulator operate mode the shell must look like a pure operator session.
-      showArm: true,
+      // Admins manage the line but do not operate dialogs — hide «Чаты».
+      showArm: simOperate
+        ? true
+        : (canOperateArm || canSupervisor) && !canAdmin,
+      showOperators: simOperate ? false : (canSupervisor || canAdmin),
       showSupervisor: simOperate ? false : canSupervisor,
       showAdmin: simOperate ? false : canAdmin,
       showSimulator: simOperate ? false : showSimulator,
-      armNavLabel: simOperate ? 'Чаты' : armNavLabel,
+      armNavLabel: 'Чаты',
       armHref: operateHref,
+      operatorsHref: '/online-chat/operators',
       themeKind: chatThemeKind,
       onToggleTheme: () =>
         setChatThemeKind((kind) => (kind === 'light' ? 'dark' : 'light')),
       // Hamburger is part of АРМ for every role on /online-chat (picker + operate + view).
-      showMenuButton: route === '/online-chat',
+      showMenuButton: route === '/online-chat' || route === '/online-chat/operators',
       menuOpen: armMenuOpen,
       onMenuToggle: () => setArmMenuOpen((open) => !open),
     }
@@ -243,6 +250,40 @@ function App() {
       return (
         <ChatPlatformShell {...shellProps} showMenuButton={false}>
           <SupervisorApp demoMode={import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'} />
+        </ChatPlatformShell>
+      )
+    }
+    if (isOperatorsRoute) {
+      // Viewing a specific operator ARM stays on the Operators tab.
+      if (forcedView && operatorFromQuery) {
+        return (
+          <ChatPlatformShell {...shellProps}>
+            <ChatArmApp
+              demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
+              operatorName={operatorFromQuery}
+              actorName={viewerName}
+              themeKind={chatThemeKind}
+              statsDrawerOpen={armMenuOpen}
+              onStatsDrawerOpenChange={setArmMenuOpen}
+              armRole={armRole}
+              viewOnly
+              allowTransferInView={allowTransferView}
+            />
+          </ChatPlatformShell>
+        )
+      }
+      return (
+        <ChatPlatformShell {...shellProps}>
+          <ArmMenuHost
+            open={armMenuOpen}
+            onOpenChange={setArmMenuOpen}
+            armRole={armRole}
+            menuContext="picker"
+            themeKind={chatThemeKind}
+            operatorName={viewerName}
+          >
+            <OperatorPicker allowTransfer={allowTransferView} />
+          </ArmMenuHost>
         </ChatPlatformShell>
       )
     }
@@ -261,7 +302,17 @@ function App() {
       )
     }
 
+    // Module admin: no operator ARM — send to management / operators list.
+    if (canAdmin && !canOperateArm && !simOperate && !forcedView) {
+      window.location.replace('/online-chat/admin')
+      return null
+    }
+
     if (forcedView && !operatorFromQuery) {
+      if (canAdmin && !canSupervisor) {
+        window.location.replace('/online-chat/admin')
+        return null
+      }
       return (
         <ChatPlatformShell {...shellProps}>
           <ArmMenuHost
@@ -278,17 +329,27 @@ function App() {
       )
     }
 
+    // Legacy: /online-chat?mode=view&operator=… → Operators tab.
+    if (forcedView && operatorFromQuery && !simOperate) {
+      const next = new URLSearchParams(params)
+      next.set('mode', 'view')
+      next.set('operator', operatorFromQuery)
+      window.location.replace(`/online-chat/operators?${next.toString()}`)
+      return null
+    }
+
     return (
       <ChatPlatformShell {...shellProps}>
         <ChatArmApp
           demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
-          operatorName={simOperate || forcedView ? operatorFromQuery : viewerName}
+          operatorName={simOperate ? operatorFromQuery : viewerName}
+          actorName={viewerName}
           themeKind={chatThemeKind}
           statsDrawerOpen={armMenuOpen}
           onStatsDrawerOpenChange={setArmMenuOpen}
           armRole={armRole}
-          viewOnly={forcedView}
-          allowTransferInView={forcedView && allowTransferView}
+          viewOnly={false}
+          allowTransferInView={false}
         />
       </ChatPlatformShell>
     )

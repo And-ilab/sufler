@@ -59,7 +59,9 @@ class SuflerSuggestPipelineTest(TestCase):
         self.assertEqual(result["kb_id"], "cc_production")
         self.assertGreaterEqual(len(result["hints"]), 1)
         hint = result["hints"][0]
-        self.assertIn("Подсказка оператору", hint["text"])
+        self.assertTrue(hint["text"].strip())
+        self.assertNotIn("Подсказка оператору", hint["text"])
+        self.assertIn("СУЗ", hint["text"])
         self.assertTrue(hint["citations"])
         self.assertEqual(hint["citations"][0]["title"], "Оформление карты")
         self.assertTrue(
@@ -79,6 +81,21 @@ class SuflerSuggestPipelineTest(TestCase):
             suggest("   ")
 
     def test_no_relevant_documents_skip_llm(self):
+        # Empty index → unavailable. Irrelevant seeded docs → no_relevant_knowledge.
+        with patch(
+            "orchestrator.sufler.ModelGateway.chat",
+            side_effect=AssertionError("LLM must not be called"),
+        ):
+            empty = suggest(
+                "астрология гороскоп",
+                limit=3,
+                gateway=ModelGateway.from_registry(),
+            )
+        self.assertEqual(empty["hints"], [])
+        self.assertEqual(empty["blocked_reason"], "sufler_unavailable")
+        self.assertEqual(empty["latency_ms"]["llm"], 0.0)
+
+        self.add_chunk(99, "Кредитный договор", "условия потребительского кредита")
         with patch(
             "orchestrator.sufler.ModelGateway.chat",
             side_effect=AssertionError("LLM must not be called"),

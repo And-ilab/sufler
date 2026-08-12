@@ -17,6 +17,7 @@ from audit.schema import AuditSubject
 from audit.service import emit
 from online_chat.mail import send_dialog_transcript
 from online_chat.models import (
+    AssignmentSettings,
     BotConfiguration,
     ClientBlock,
     Dialog,
@@ -24,6 +25,7 @@ from online_chat.models import (
     DialogMessage,
     DialogTranscriptEmail,
     OperatorProfile,
+    format_phone_e164,
     normalize_phone,
 )
 from online_chat.routing_services import (
@@ -32,6 +34,7 @@ from online_chat.routing_services import (
     department_queue_is_full,
     record_event,
     select_department,
+    start_post_close_grace,
     transfer_to_operator,
 )
 
@@ -194,18 +197,12 @@ def dialog_needs_reply(dialog: Dialog) -> bool:
     return last is not None and last.speaker == DialogMessage.Speaker.CLIENT
 
 
-def _wait_seconds(dialog: Dialog) -> int:
-    """SLA wait while a client message awaits operator reply; 0 after operator answers.
-
-    TZ: timer from last unanswered client message; resets when operator works/replies.
-    Unassigned queue: from client message time. After accept of that same message:
-    anchor moves to accepted_at (SLA reset on take). New client messages after accept
-    restart the timer from their created_at.
-    """
+def _wait_anchor(dialog: Dialog):
+    """Absolute timestamp for the SLA stopwatch (None when not waiting)."""
     if dialog.status in {Dialog.Status.CLOSED, Dialog.Status.BLOCKED}:
-        return 0
+        return None
     if not dialog_needs_reply(dialog):
-        return 0
+        return None
     last_client = (
         dialog.messages.filter(
             speaker=DialogMessage.Speaker.CLIENT,
@@ -215,15 +212,45 @@ def _wait_seconds(dialog: Dialog) -> int:
         .first()
     )
     if last_client is None:
-        return 0
+        return None
     anchor = last_client.created_at
     if dialog.accepted_at and last_client.created_at <= dialog.accepted_at:
         anchor = dialog.accepted_at
+    return anchor
+
+
+def _wait_seconds(dialog: Dialog) -> int:
+    """SLA wait while a client message awaits operator reply; 0 after operator answers.
+
+    TZ: timer from last unanswered client message; resets when operator works/replies.
+    Unassigned queue: from client message time. After accept of that same message:
+    anchor moves to accepted_at (SLA reset on take). New client messages after accept
+    restart the timer from their created_at.
+    """
+    anchor = _wait_anchor(dialog)
+    if anchor is None:
+        return 0
     return max(0, int((timezone.now() - anchor).total_seconds()))
+
+
+def is_test_client_dialog(dialog: Dialog) -> bool:
+    """Simulator / seed clients — sufler must stay disabled for these."""
+    external = (dialog.client_external_id or "").strip().casefold()
+    if external.startswith("sim-") or external.startswith("dev-sim"):
+        return True
+    first = (dialog.client_first_name or "").strip().casefold()
+    last = (dialog.client_last_name or "").strip()
+    if first == "клиент" and last.isdigit():
+        return True
+    preview = (dialog.preview or "").casefold()
+    if preview.startswith("тестовое обращение клиента"):
+        return True
+    return False
 
 
 def serialize_dialog(dialog: Dialog, *, include_messages: bool = False) -> dict[str, Any]:
     needs_reply = dialog_needs_reply(dialog)
+    wait_anchor = _wait_anchor(dialog)
     payload: dict[str, Any] = {
         "id": str(dialog.id),
         "ref_code": dialog.ref_code(),
@@ -263,7 +290,13 @@ def serialize_dialog(dialog: Dialog, *, include_messages: bool = False) -> dict[
             dialog.client_last_seen_at.isoformat() if dialog.client_last_seen_at else None
         ),
         "needs_reply": needs_reply,
-        "wait_seconds": _wait_seconds(dialog),
+        "wait_seconds": (
+            max(0, int((timezone.now() - wait_anchor).total_seconds()))
+            if wait_anchor is not None
+            else 0
+        ),
+        "wait_anchor_at": wait_anchor.isoformat() if wait_anchor is not None else None,
+        "is_test_client": is_test_client_dialog(dialog),
         "has_feedback": DialogFeedback.objects.filter(dialog_id=dialog.id).exists(),
     }
     if include_messages:
@@ -332,6 +365,7 @@ def create_dialog_with_message(
     status = Dialog.Status.WAITING
     if initiated_by == Dialog.InitiatedBy.OPERATOR and operator_name.strip():
         status = Dialog.Status.ACTIVE
+    normalized_phone = format_phone_e164(client_phone) if client_phone else ""
 
     department, placement_config, routing_reason = select_department(
         widget_id=widget_id,
@@ -357,7 +391,7 @@ def create_dialog_with_message(
         initiated_by=initiated_by,
         client_first_name=client_first_name.strip(),
         client_last_name=client_last_name.strip(),
-        client_phone=client_phone.strip(),
+        client_phone=normalized_phone or client_phone.strip(),
         client_external_id=client_external_id.strip(),
         entry_url=entry_url.strip(),
         locale=locale.strip() or "ru",
@@ -488,7 +522,11 @@ def append_message(
     if delivery_status == DialogMessage.ChannelDeliveryStatus.PENDING:
         from online_chat.tasks import deliver_channel_message
 
-        deliver_channel_message.delay(str(message.id))
+        message_id = str(message.id)
+        try:
+            deliver_channel_message.delay(message_id)
+        except Exception:  # noqa: BLE001 — broker down: deliver inline
+            deliver_channel_message(message_id)
     if speaker == DialogMessage.Speaker.CLIENT and dialog.bot_active:
         _handle_bot_turn(dialog, cleaned)
     return message
@@ -582,10 +620,22 @@ def transfer_dialog(
         raise ValueError("to_operator_name is required")
     previous = dialog.operator_name or from_operator_name or "оператор"
     dialog = transfer_to_operator(dialog, operator_name=target)
+    target_is_supervisor = OperatorProfile.objects.filter(
+        display_name=target,
+        role=OperatorProfile.Role.SUPERVISOR,
+        is_active=True,
+    ).exists()
+    if previous and previous != target and target_is_supervisor:
+        system_text = (
+            f"К чату присоединился супервизор {target}. "
+            f"Оператор {previous} отключился."
+        )
+    else:
+        system_text = f"Диалог переведён: {previous} → {target}"
     system = DialogMessage.objects.create(
         dialog=dialog,
         speaker=DialogMessage.Speaker.SYSTEM,
-        text=f"Диалог переведён: {previous} → {target}",
+        text=system_text,
         receipt_status=DialogMessage.ReceiptStatus.READ,
     )
     payload = serialize_dialog(dialog)
@@ -604,6 +654,7 @@ def transfer_dialog(
 
 
 def close_dialog(dialog: Dialog, *, topic: str) -> Dialog:
+    previous_operator = dialog.operator
     dialog.mark_closed(topic)
     record_event(dialog, "closed", actor_name=dialog.operator_name, payload={"topic": topic})
     system = DialogMessage.objects.create(
@@ -612,7 +663,18 @@ def close_dialog(dialog: Dialog, *, topic: str) -> Dialog:
         text="Диалог завершён",
         receipt_status=DialogMessage.ReceiptStatus.READ,
     )
+    try:
+        from online_chat.summary_service import ensure_dialog_summaries
+
+        ensure_dialog_summaries(dialog, force=True)
+    except Exception:  # noqa: BLE001
+        logger.exception("dialog_summary_on_close_failed dialog_id=%s", dialog.id)
+    # Manual+auto: grace window for the freed operator before auto-assign fills the slot.
+    hold = start_post_close_grace(previous_operator)
     payload = serialize_dialog(dialog)
+    if hold is not None:
+        payload["assignment_grace_until"] = hold.until.isoformat()
+        payload["assignment_grace_seconds"] = AssignmentSettings.GRACE_SECONDS
     broadcast(ARM_GROUP, "dialog.updated", payload)
     broadcast(
         dialog_group(str(dialog.id)),
@@ -623,6 +685,13 @@ def close_dialog(dialog: Dialog, *, topic: str) -> Dialog:
             "farewell_message": "Спасибо за обращение! Диалог завершён.",
         },
     )
+    if str(dialog.channel or "").lower() == "telegram":
+        try:
+            from online_chat.channel_delivery import send_telegram_close_survey
+
+            send_telegram_close_survey(dialog)
+        except Exception:  # noqa: BLE001
+            logger.exception("telegram_close_survey_failed dialog_id=%s", dialog.id)
     return dialog
 
 
