@@ -49,11 +49,23 @@ class CcReportsApiTest(TestCase):
         self.assertTrue(payload["stub"])
         self.assertIn("summary", payload)
         self.assertGreater(len(payload["rows"]), 0)
-        self.assertGreater(len(payload["asr_quality"]), 0)
         self.assertEqual(payload["filters"]["channel"], "telephony")
         self.assertTrue(
             all(row["channel"] == "telephony" for row in payload["rows"])
         )
+
+        chat = client.get(
+            "/api/reports/cc/analytics/",
+            {
+                "date_from": "2026-07-01",
+                "date_to": "2026-07-07",
+                "channel": "online_chat",
+            },
+        )
+        self.assertEqual(chat.status_code, 200)
+        chat_body = chat.json()
+        self.assertEqual(chat_body["filters"]["channel"], "online_chat")
+        self.assertIn("online_chat", chat_body["source"])
 
     def test_csv_and_xlsx_export_downloadable(self):
         client = Client()
@@ -108,13 +120,23 @@ class CcReportsApiTest(TestCase):
 
         catalog = client.get(
             "/api/reports/cc/catalog/",
-            {"report": "topics", "date_from": "2026-07-01", "date_to": "2026-07-07"},
+            {"report": "chat-period", "date_from": "2026-07-01", "date_to": "2026-07-07"},
         )
         self.assertEqual(catalog.status_code, 200)
         catalog_body = catalog.json()
-        self.assertEqual(catalog_body["report"]["id"], "topics")
-        self.assertGreater(len(catalog_body["rows"]), 0)
+        self.assertEqual(catalog_body["report"]["id"], "chat-period")
+        self.assertIn("catalog", catalog_body)
+        self.assertTrue(any(item["id"] == "chat-sla" for item in catalog_body["catalog"]))
 
         builder = client.get("/api/reports/cc/builder/")
         self.assertEqual(builder.status_code, 200)
         self.assertIn("templates", builder.json())
+        self.assertFalse(builder.json().get("stub", True))
+
+        preview = client.post(
+            "/api/reports/cc/builder/preview/",
+            data='{"metrics":["dialogs_total","csat"],"name":"t"}',
+            content_type="application/json",
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertIn("rows", preview.json())

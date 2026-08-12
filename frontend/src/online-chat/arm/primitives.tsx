@@ -188,29 +188,43 @@ export function IconButton({
   children,
   title,
   onClick,
+  disabled,
+  active,
   'aria-label': ariaLabel,
+  style,
 }: {
   children?: ReactNode
   title?: string
   onClick?: () => void
+  disabled?: boolean
+  active?: boolean
   'aria-label'?: string
+  style?: CSSProperties
 }) {
   return (
     <button
       type="button"
       title={title}
       aria-label={ariaLabel ?? title}
+      disabled={disabled}
       onClick={onClick}
       style={{
-        width: 32,
-        height: 32,
-        border: '1px solid var(--arm-stroke-secondary)',
-        borderRadius: 6,
-        background: 'var(--arm-fill-secondary)',
-        cursor: 'pointer',
+        width: 34,
+        height: 34,
+        border: `1px solid ${active ? 'var(--arm-accent, #0B6B3A)' : 'var(--arm-stroke-secondary)'}`,
+        borderRadius: 8,
+        background: active ? 'var(--arm-fill-tertiary, #E7F0EB)' : 'var(--arm-fill-secondary)',
+        color: 'var(--arm-t-primary)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.45 : 1,
         fontFamily: 'inherit',
         fontSize: 14,
         lineHeight: 1,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        ...style,
       }}
     >
       {children}

@@ -98,7 +98,7 @@ export function SettingsModule({ t, scheme, armRole, onBack }: ArmModuleProps) {
               disabled={assignmentSaving}
               onClick={() => saveAssignmentMode('manual_plus_auto')}
             >
-              Ручной + авто (5 сек)
+              Ручной + авто (10 сек)
             </Button>
           </Row>
           {assignmentNotice ? (

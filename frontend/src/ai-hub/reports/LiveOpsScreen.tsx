@@ -1,13 +1,123 @@
+import { useCallback, useEffect, useState } from 'react'
 import { DataTable } from './charts'
-import { LIVE_DEMO, statusLabelRu } from './demoData'
+import { statusLabelRu } from './demoData'
+import {
+  CcReportsApiError,
+  fetchCcLive,
+  type LiveDashboard,
+} from './api/ccReports'
+import { localizeCell } from './labels'
+
+function formatSec(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return '—'
+  if (value < 60) return `${Math.round(value)} с`
+  const mins = Math.floor(value / 60)
+  const sec = Math.round(value % 60)
+  return `${mins}м ${sec}с`
+}
+
+function formatTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString('ru-RU', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return iso
+  }
+}
 
 export function LiveOpsScreen() {
-  const maxActive = Math.max(1, ...LIVE_DEMO.departments.map((item) => item.active))
+  const [data, setData] = useState<LiveDashboard | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const reload = useCallback(async () => {
+    try {
+      const next = await fetchCcLive()
+      setData(next)
+      setError(null)
+    } catch (err) {
+      setError(
+        err instanceof CcReportsApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Не удалось загрузить оперативную панель',
+      )
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void reload()
+    const timer = window.setInterval(() => {
+      void reload()
+    }, 15000)
+    return () => window.clearInterval(timer)
+  }, [reload])
+
+  const kpis = data?.kpis
+  const departments = data?.departments || []
+  const maxActive = Math.max(1, ...departments.map((item) => item.active))
+  const operators = data?.operators || []
+  const feed = data?.dialog_feed?.length ? data.dialog_feed : []
+  const llmFeed = data?.llm_feed || []
+  const alerts = data?.alerts || []
 
   return (
     <div className="rpt-body" data-testid="cc-live-screen">
+      <div className="rpt-row" style={{ marginBottom: 8 }}>
+        <span className="rpt-muted">
+          {data?.generated_at ? `Обновлено ${formatTime(data.generated_at)}` : 'Оперативные показатели'}
+        </span>
+        <span className="rpt-spacer" />
+        <button type="button" className="rpt-btn" disabled={loading} onClick={() => void reload()}>
+          {loading ? 'Загрузка…' : 'Обновить'}
+        </button>
+        <button
+          type="button"
+          className="rpt-btn"
+          onClick={() => window.location.assign('/online-chat')}
+        >
+          Открыть АРМ
+        </button>
+      </div>
+
+      {error ? (
+        <div className="rpt-card" style={{ marginBottom: 12 }}>
+          <div className="rpt-card__body" style={{ color: '#c62828' }}>
+            {error}
+          </div>
+        </div>
+      ) : null}
+
       <div className="rpt-stats">
-        {LIVE_DEMO.kpis.map((kpi) => (
+        {[
+          { label: 'В работе', value: String(kpis?.in_progress ?? '—'), tone: 'info' },
+          { label: 'В очереди', value: String(kpis?.in_queue ?? '—'), tone: 'warning' },
+          {
+            label: 'Ср. ожидание',
+            value: formatSec(kpis?.avg_wait_sec),
+            tone: 'info',
+          },
+          {
+            label: 'Операторы online',
+            value: String(kpis?.operators_online ?? '—'),
+            tone: 'success',
+          },
+          {
+            label: 'SLA первого ответа',
+            value: kpis?.sla_ok_pct != null ? `${kpis.sla_ok_pct}%` : '—',
+            tone: 'success',
+          },
+          {
+            label: 'Закрыто сегодня',
+            value: String(kpis?.closed_today ?? data?.chat?.closed_today ?? '—'),
+            tone: 'neutral',
+          },
+        ].map((kpi) => (
           <div key={kpi.label} className={`rpt-stat rpt-stat--${kpi.tone}`}>
             <span>{kpi.label}</span>
             <strong>{kpi.value}</strong>
@@ -16,37 +126,47 @@ export function LiveOpsScreen() {
       </div>
 
       <div className="rpt-card">
-        <div className="rpt-card__head">Оповещения</div>
+        <div className="rpt-card__head">Оповещения (пороги)</div>
         <div className="rpt-card__body">
-          <ul className="rpt-alerts">
-            {LIVE_DEMO.alerts.map((alert) => (
-              <li key={alert.title} className={`rpt-alert rpt-alert--${alert.tone}`}>
-                <strong>{alert.title}</strong>
-                <span>{alert.detail}</span>
-              </li>
-            ))}
-          </ul>
+          {alerts.length ? (
+            <ul className="rpt-alerts">
+              {alerts.map((alert) => (
+                <li key={alert.id} className={`rpt-alert rpt-alert--${alert.tone}`}>
+                  <strong>{alert.title}</strong>
+                  <span>{alert.detail}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="rpt-muted">Активных оповещений нет.</p>
+          )}
         </div>
       </div>
 
       <div className="rpt-grid-2">
         <div className="rpt-card">
-          <div className="rpt-card__head">Нагрузка по отделам</div>
+          <div className="rpt-card__head">Нагрузка по отделам / каналам</div>
           <div className="rpt-card__body">
-            <div className="rpt-dept">
-              {LIVE_DEMO.departments.map((dept) => (
-                <div key={dept.name} className="rpt-dept__row">
-                  <span>{dept.name}</span>
-                  <div className="rpt-dept__track">
-                    <div
-                      className="rpt-dept__fill"
-                      style={{ width: `${(dept.active / maxActive) * 100}%` }}
-                    />
+            {departments.length ? (
+              <div className="rpt-dept">
+                {departments.map((dept) => (
+                  <div key={dept.name} className="rpt-dept__row">
+                    <span>{dept.name}</span>
+                    <div className="rpt-dept__track">
+                      <div
+                        className="rpt-dept__fill"
+                        style={{ width: `${(dept.active / maxActive) * 100}%` }}
+                      />
+                    </div>
+                    <strong>
+                      {dept.active}/{dept.queue}
+                    </strong>
                   </div>
-                  <strong>{dept.active}</strong>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <p className="rpt-muted">Нет активных отделов/очередей.</p>
+            )}
           </div>
         </div>
 
@@ -54,14 +174,20 @@ export function LiveOpsScreen() {
           <div className="rpt-card__head">Топ операторов по диалогам</div>
           <div className="rpt-card__body">
             <div style={{ display: 'grid', gap: 8 }}>
-              {LIVE_DEMO.operators
-                .filter((op) => op.active > 0)
+              {operators
+                .filter((op) => op.active_dialogs > 0)
+                .slice(0, 8)
                 .map((op) => (
                   <div key={op.name} className="rpt-row rpt-row--between">
                     <span>{op.name}</span>
-                    <span className="rpt-badge rpt-badge--success">{op.active} активных</span>
+                    <span className="rpt-badge rpt-badge--success">
+                      {op.active_dialogs} активных
+                    </span>
                   </div>
                 ))}
+              {!operators.some((op) => op.active_dialogs > 0) ? (
+                <p className="rpt-muted">Сейчас нет активных диалогов у операторов.</p>
+              ) : null}
             </div>
           </div>
         </div>
@@ -72,29 +198,85 @@ export function LiveOpsScreen() {
         <div className="rpt-card__body">
           <DataTable
             headers={['Оператор', 'Статус', 'Канал', 'Активных']}
-            rows={LIVE_DEMO.operators.map((op) => [
-              op.name,
-              statusLabelRu(op.status),
-              op.channel,
-              String(op.active),
-            ])}
+            rows={
+              operators.length
+                ? operators.map((op) => [
+                    op.name,
+                    statusLabelRu(op.status),
+                    op.channel === 'online_chat' ? 'Онлайн-чат' : op.channel,
+                    String(op.active_dialogs),
+                  ])
+                : [['—', '—', '—', '0']]
+            }
           />
         </div>
       </div>
 
       <div className="rpt-card">
-        <div className="rpt-card__head">Лента обращений</div>
+        <div className="rpt-card__head">Лента диалогов</div>
         <div className="rpt-card__body">
           <DataTable
-            headers={['Время', 'Канал', 'Оператор', 'Тематика', 'Релевантность', 'Оценка']}
-            rows={LIVE_DEMO.feed.map((row) => [
-              row.time,
-              row.channel,
-              row.operator,
-              row.topic,
-              row.relevance,
-              row.feedback,
-            ])}
+            headers={[
+              'Время',
+              'Ref',
+              'Канал',
+              'Клиент',
+              'Оператор',
+              'Статус',
+              'Тематика',
+              'Ожидание',
+              'Оценка',
+            ]}
+            rows={
+              feed.length
+                ? feed.map((row) => [
+                    formatTime(row.at),
+                    row.ref,
+                    row.channel,
+                    row.client,
+                    row.operator,
+                    localizeCell(row.status),
+                    row.topic,
+                    formatSec(row.wait_sec),
+                    localizeCell(row.feedback),
+                  ])
+                : [['—', '—', '—', 'Нет диалогов', '—', '—', '—', '—', '—']]
+            }
+          />
+          {feed[0]?.id ? (
+            <div className="rpt-row" style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                className="rpt-btn rpt-btn--primary"
+                onClick={() =>
+                  window.location.assign(`/online-chat?dialog=${encodeURIComponent(feed[0].id)}`)
+                }
+              >
+                Открыть последний в АРМ
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="rpt-card">
+        <div className="rpt-card__head">Лента подсказок суфлёра</div>
+        <div className="rpt-card__body">
+          <DataTable
+            headers={['Время', 'Канал', 'Оператор', 'Тематика', 'Релевантность', 'Отметка', 'Запрос']}
+            rows={
+              llmFeed.length
+                ? llmFeed.map((row) => [
+                    formatTime(row.at),
+                    row.channel,
+                    row.operator,
+                    row.topic,
+                    row.relevance_pct ? `${row.relevance_pct}%` : '—',
+                    localizeCell(row.feedback),
+                    row.query || '—',
+                  ])
+                : [['—', '—', '—', 'Нет отметок суфлёра', '—', '—', '—']]
+            }
           />
         </div>
       </div>

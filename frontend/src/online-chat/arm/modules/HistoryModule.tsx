@@ -5,7 +5,13 @@ import {
   maskPhone,
   type OnlineChatDialog,
 } from '../../api/onlineChatApi'
+import {
+  ClientSummaryPanel,
+  historyToSummary,
+  type SummaryHistoryData,
+} from '../ClientSummaryCard'
 import { Button, Pill, Row, Text } from '../primitives'
+import { TopicChip } from '../summaryTopics'
 import { ArmModuleFrame, formatDateTime, ModuleEmpty } from './ArmModuleFrame'
 import { DEMO_APPEALS } from './demoData'
 import type { AppealHistoryItem, ArmModuleProps } from './types'
@@ -54,7 +60,7 @@ export function HistoryModule({ t, scheme, onBack }: ArmModuleProps) {
   const [channel, setChannel] = useState('all')
   const [status, setStatus] = useState<'all' | AppealHistoryItem['status']>('all')
   const [selectedId, setSelectedId] = useState<string | null>(DEMO_APPEALS[0]?.id ?? null)
-  const [summaryById, setSummaryById] = useState<Record<string, string>>({})
+  const [summaryById, setSummaryById] = useState<Record<string, SummaryHistoryData>>({})
   const [summaryLoadingId, setSummaryLoadingId] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
@@ -128,22 +134,48 @@ export function HistoryModule({ t, scheme, onBack }: ArmModuleProps) {
         const response = await fetchClientHistory({ dialogId: selected.id })
         setSummaryById((prev) => ({
           ...prev,
-          [selected.id]: response.summary
-            || (response.items?.length
-              ? `Обращений по клиенту: ${response.count}. Последнее: ${response.items[0]?.channel ?? '—'} · ${response.items[0]?.status ?? '—'}.`
-              : 'Нет данных для summary.'),
+          [selected.id]: historyToSummary({
+            items: response.items ?? [],
+            summary: response.summary
+              || (response.items?.length
+                ? `Обращений по клиенту: ${response.count}. Последнее: ${response.items[0]?.channel ?? '—'} · ${response.items[0]?.status ?? '—'}.`
+                : 'Нет данных для summary.'),
+            detailedSummary: response.detailed_summary ?? '',
+            topics: response.summary_topics ?? [],
+            blocks: response.detailed_blocks ?? [],
+            isFirst: response.is_first,
+            previousCount: response.previous_count,
+          }),
         }))
       } else {
         // Demo stubs already carry a prepared text — load on demand only.
+        const text = selected.summary || 'Summary недоступен для этой записи.'
         setSummaryById((prev) => ({
           ...prev,
-          [selected.id]: selected.summary || 'Summary недоступен для этой записи.',
+          [selected.id]: historyToSummary({
+            summary: text,
+            detailedSummary: text,
+            topics: selected.topic ? [selected.topic] : [],
+            blocks: [
+              {
+                date_label: formatDateTime(selected.openedAt),
+                topic: selected.topic || 'Прочее',
+                essence: text,
+                channel: selected.channel,
+                operator_name: selected.operatorName,
+              },
+            ],
+            isFirst: false,
+          }),
         }))
       }
     } catch {
       setSummaryById((prev) => ({
         ...prev,
-        [selected.id]: 'Не удалось загрузить summary.',
+        [selected.id]: historyToSummary({
+          summary: 'Не удалось загрузить summary.',
+          detailedSummary: 'Не удалось загрузить summary.',
+        }),
       }))
     } finally {
       setSummaryLoadingId(null)
@@ -267,9 +299,9 @@ export function HistoryModule({ t, scheme, onBack }: ArmModuleProps) {
               <Text style={{ fontSize: 13, color: t.text.secondary, marginTop: 4 }}>
                 {selected.phoneMasked} · № {selected.id.slice(0, 8).toUpperCase()}
               </Text>
-              <Row style={{ gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+              <Row style={{ gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
                 <Pill size="sm">{selected.channel}</Pill>
-                <Pill size="sm" tone="info">{selected.topic}</Pill>
+                <TopicChip t={t} topic={selected.topic} size="sm" />
                 <Pill size="sm" tone={STATUS_TONE[selected.status]}>{STATUS_LABEL[selected.status]}</Pill>
               </Row>
               <div style={{ marginTop: 18, display: 'grid', gap: 12 }}>
@@ -289,10 +321,10 @@ export function HistoryModule({ t, scheme, onBack }: ArmModuleProps) {
                 }}
               >
                 <Text weight="semibold" style={{ fontSize: 12, color: t.text.secondary, marginBottom: 8 }}>
-                  Summary
+                  Summary клиента
                 </Text>
                 {loadedSummary ? (
-                  <Text style={{ fontSize: 13, lineHeight: 1.55 }}>{loadedSummary}</Text>
+                  <ClientSummaryPanel t={t} data={loadedSummary} />
                 ) : (
                   <Button
                     variant="secondary"

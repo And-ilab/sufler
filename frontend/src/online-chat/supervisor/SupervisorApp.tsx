@@ -172,7 +172,7 @@ export function SupervisorApp({ demoMode = false }: SupervisorAppProps) {
                       <td>
                         <a
                           className="chat-button is-secondary"
-                          href={`/online-chat?mode=view&operator=${encodeURIComponent(operator.name)}&transfer=1`}
+                          href={`/online-chat/operators?mode=view&operator=${encodeURIComponent(operator.name)}&transfer=1`}
                           target="_blank"
                           rel="noreferrer"
                           aria-label={`Просмотр АРМ оператора ${operator.name}`}

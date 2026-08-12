@@ -18,7 +18,7 @@ from orchestrator.sufler import SuflerOrchestratorError, suggest
 from orchestrator.test_dialog import run_test_prompt
 
 
-def _parse_suggest_body(body: bytes) -> tuple[str, int, str]:
+def _parse_suggest_body(body: bytes) -> tuple[str, int, str, str]:
     try:
         payload = json.loads(body or b"{}")
     except json.JSONDecodeError as exc:
@@ -30,7 +30,7 @@ def _parse_suggest_body(body: bytes) -> tuple[str, int, str]:
     text = payload.get("text", payload.get("query"))
     if not isinstance(text, str) or not text.strip():
         raise SuflerOrchestratorError("text must be a non-empty string")
-    limit: Any = payload.get("limit", 5)
+    limit: Any = payload.get("limit", 3)
     if isinstance(limit, bool) or not isinstance(limit, int):
         raise SuflerOrchestratorError("limit must be an integer")
     history = payload.get("client_history", payload.get("history", ""))
@@ -38,7 +38,12 @@ def _parse_suggest_body(body: bytes) -> tuple[str, int, str]:
         history = ""
     if not isinstance(history, str):
         raise SuflerOrchestratorError("client_history must be a string")
-    return text, limit, history
+    dialog_context = payload.get("dialog_context", "")
+    if dialog_context is None:
+        dialog_context = ""
+    if not isinstance(dialog_context, str):
+        raise SuflerOrchestratorError("dialog_context must be a string")
+    return text, limit, history, dialog_context
 
 
 @require_http_methods(["POST"])
@@ -51,12 +56,15 @@ def _parse_suggest_body(body: bytes) -> tuple[str, int, str]:
 def sufler_suggest(request: HttpRequest) -> JsonResponse:
     """POST /api/v1/sufler/suggest — FR-CC-03 / FR-CC-14."""
     try:
-        text, limit, client_history = _parse_suggest_body(request.body)
+        text, limit, client_history, dialog_context = _parse_suggest_body(
+            request.body
+        )
         result = suggest(
             text,
             limit=limit,
             request_id=getattr(request, "audit_request_id", None),
             client_history=client_history,
+            dialog_context=dialog_context,
         )
     except SuflerOrchestratorError as exc:
         return JsonResponse(

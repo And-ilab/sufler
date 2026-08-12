@@ -60,12 +60,13 @@ export function OperatorPicker({
   }, [])
 
   const hrefFor = (name: string) => {
+    // Stay under /online-chat/operators so the «Операторы» tab remains active.
     const params = new URLSearchParams({
       mode: 'view',
       operator: name,
     })
     if (allowTransfer) params.set('transfer', '1')
-    return `/online-chat?${params.toString()}`
+    return `/online-chat/operators?${params.toString()}`
   }
 
   return (

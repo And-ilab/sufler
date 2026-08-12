@@ -258,6 +258,8 @@ class Dialog(models.Model):
     bot_turns = models.PositiveIntegerField(default=0)
     preview = models.CharField(max_length=500, blank=True, default="")
     close_topic = models.CharField(max_length=120, blank=True, default="")
+    summary_short = models.TextField(blank=True, default="")
+    summary_detailed = models.TextField(blank=True, default="")
     client_online = models.BooleanField(default=True, db_index=True)
     client_last_seen_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -490,9 +492,9 @@ class AssignmentSettings(models.Model):
 
     class Mode(models.TextChoices):
         STRICT_AUTO = "strict_auto", "Только автоназначение"
-        MANUAL_PLUS_AUTO = "manual_plus_auto", "Ручной выбор + авто (5 сек)"
+        MANUAL_PLUS_AUTO = "manual_plus_auto", "Ручной выбор + авто (10 сек)"
 
-    GRACE_SECONDS = 5
+    GRACE_SECONDS = 10
 
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     mode = models.CharField(

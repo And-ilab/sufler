@@ -48,14 +48,76 @@ python tools/seed_manual_kb.py   # или через docker compose exec backend
 1. Виджет: «Какой суточный лимит снятия наличных в банкоматах Беларусбанка?»
 2. Telegram (тот же телефон): «Какая комиссия за снятие в банкоматах других банков?»
 
-### Telegram webhook через ngrok
+### Telegram (long polling, без ngrok)
+
+Для тестового контура бот ходит в Telegram через **getUpdates** (сервис `telegram-poller`). HTTPS и ngrok не нужны.
+
+В `infra/.env`:
 
 ```bash
-ngrok http 8001
-curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=https://XXXX.ngrok-free.app/api/v1/channels/telegram/webhook/"
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_MODE=polling
 ```
 
+Поднять / перезапустить poller:
+
+```bash
+cd infra
+docker compose up -d telegram-poller
+docker compose logs -f telegram-poller
+```
+
+При старте poller вызывает `deleteWebhook` (если раньше стоял webhook через ngrok) и начинает long poll. Напишите боту `/start` — в логах должно появиться `telegram_poll handled`.
+
 Сценарий бота: приветствие → вопрос → ФИО → телефон → диалог в общей очереди АРМ.
+
+Опционально без Docker:
+
+```bash
+cd backend
+export TELEGRAM_BOT_TOKEN=... TELEGRAM_MODE=polling
+python manage.py poll_telegram
+```
+
+Webhook + ngrok по-прежнему поддерживаются: `TELEGRAM_MODE=webhook` и `tools/set_telegram_webhook.py` (см. ниже).
+
+### Telegram webhook через ngrok (альтернатива)
+
+Важно: сам по себе ngrok **ничего не регистрирует** в Telegram. Нужны `TELEGRAM_MODE=webhook` и `setWebhook`.
+
+```bash
+# 1) туннель на backend (порт из BACKEND_PORT_HOST, обычно 8001)
+ngrok http 8001
+
+# 2) зарегистрировать webhook (подставьте HTTPS URL из ngrok)
+cd ..   # корень репозитория
+export TELEGRAM_BOT_TOKEN='...'   # тот же, что в infra/.env
+# в .env: TELEGRAM_MODE=webhook  (и остановить telegram-poller)
+python3 tools/set_telegram_webhook.py https://XXXX.ngrok-free.app
+
+# или одной командой:
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=https://XXXX.ngrok-free.app/api/v1/channels/telegram/webhook/&drop_pending_updates=true"
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
+```
+
+Проверка: после `/start` в ngrok должен появиться `POST /api/v1/channels/telegram/webhook/`.
+
+Сценарий бота: приветствие → вопрос → ФИО → телефон → диалог в общей очереди АРМ.
+
+### База знаний для суфлёра (`cc_production`)
+
+Суфлёр читает индекс `cc_production` (таблица `CCProductionChunk`), а не файлы из `local/kb/manual`.
+Если chunks = 0 или relevance < threshold — подсказки пустые («нет релевантных статей»).
+
+Локальный демо-сид (3 статьи + порог 0.45 под stub-эмбеддинги):
+
+```bash
+cd infra
+docker compose cp ../tools/seed_cc_demo_kb.py backend:/tmp/seed_cc_demo_kb.py
+docker compose exec backend python /tmp/seed_cc_demo_kb.py
+```
+
+Проверка: виджет → вопрос про лимит снятия → в АРМ суфлёр должен вернуть подсказку.
 
 Телефон нормализуется к единому виду (`8029…` / `29…` → `+37529…`); иностранные номера сохраняются как `+<digits>`.
 
@@ -64,7 +126,7 @@ curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=https://XXX
 В меню АРМ → «Настройки»:
 
 - **Только авто** — автоназначение по FIFO (`last_client_message_at`);
-- **Ручной + авто (5 сек)** — после закрытия диалога 5 секунд на ручной выбор, иначе авто.
+- **Ручной + авто (10 сек)** — после закрытия диалога 10 секунд на ручной выбор, иначе авто.
 
 Кнопка «Взять диалог» доступна в общей очереди (лимит 3/3 по ТЗ соблюдается).
 

@@ -14,6 +14,7 @@ from django.core.validators import validate_email
 from django.db.models import Avg, Count, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
@@ -583,7 +584,7 @@ def assignment_settings(request: HttpRequest) -> HttpResponse:
                         },
                         {
                             "id": AssignmentSettings.Mode.MANUAL_PLUS_AUTO,
-                            "label": "Ручной выбор + авто (5 сек после закрытия)",
+                            "label": "Ручной выбор + авто (10 сек после закрытия)",
                         },
                     ],
                 },
@@ -1500,26 +1501,162 @@ def analytics(request: HttpRequest) -> HttpResponse:
     })
 
 
+_CHANNEL_LABELS = {
+    "widget": "Виджет сайта",
+    "telegram": "Telegram",
+    "viber": "Viber",
+    "api": "API",
+    "email": "E-mail",
+}
+
+
+def _channel_label(channel: str) -> str:
+    key = (channel or "").strip().lower()
+    return _CHANNEL_LABELS.get(key, channel or "неизвестный канал")
+
+
+def _phones_linked(left: str, right: str) -> bool:
+    """Same client phone: exact normalized, national BY mobile, or 1-digit typo."""
+    a = normalize_phone(left)
+    b = normalize_phone(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    # Belarus mobile without country code: 29/25/33/44 + 7 digits.
+    if len(a) >= 9 and len(b) >= 9 and a[-9:] == b[-9:]:
+        return True
+    # One-digit typo tolerance for the same-length numbers (widget ↔ TG re-entry).
+    if len(a) == len(b) and len(a) >= 10:
+        diffs = sum(1 for x, y in zip(a, b) if x != y)
+        if diffs == 1:
+            return True
+    # Soft fallback for truncated numbers.
+    return len(a) >= 7 and len(b) >= 7 and a[-7:] == b[-7:]
+
+
+def _name_token_set(first_name: str, last_name: str) -> frozenset[str]:
+    parts = []
+    for raw in (first_name or "", last_name or ""):
+        for token in re.split(r"[\s\-]+", raw.strip().casefold()):
+            if len(token) >= 2:
+                parts.append(token)
+    return frozenset(parts)
+
+
+def _names_linked(
+    first_a: str,
+    last_a: str,
+    first_b: str,
+    last_b: str,
+) -> bool:
+    """Same person even if widget/TG swapped имя/фамилия fields."""
+    left = _name_token_set(first_a, last_a)
+    right = _name_token_set(first_b, last_b)
+    return len(left) >= 2 and left == right
+
+
+def _history_identity_query(
+    *,
+    phone: str = "",
+    external_id: str = "",
+    first_name: str = "",
+    last_name: str = "",
+) -> Q:
+    """Match dialogs by phone (primary), external id, and FIO tokens."""
+    normalized = normalize_phone(phone)
+    phones: set[str] = {normalized} if normalized else set()
+    external_ids: set[str] = {external_id.strip()} if external_id.strip() else set()
+    name_key = _name_token_set(first_name, last_name)
+    matched_ids: set[Any] = set()
+
+    # Expand TG chat_id ↔ phone ↔ widget phone ↔ FIO (order-independent).
+    for _ in range(3):
+        before = (frozenset(phones), frozenset(external_ids), frozenset(matched_ids))
+        for item in Dialog.objects.only(
+            "id",
+            "client_phone",
+            "client_external_id",
+            "client_first_name",
+            "client_last_name",
+        ).iterator(chunk_size=500):
+            phone_hit = bool(phones) and any(
+                _phones_linked(item.client_phone, p) for p in phones
+            )
+            external_hit = bool(
+                item.client_external_id and item.client_external_id in external_ids
+            )
+            same_fio = bool(name_key) and _names_linked(
+                first_name,
+                last_name,
+                item.client_first_name,
+                item.client_last_name,
+            )
+            candidate_phone = normalize_phone(item.client_phone)
+            # FIO helps when phone was mistyped once or fields were swapped.
+            # Do not merge all namesakes: require phone/external already known,
+            # or both sides anonymous.
+            if same_fio and not phone_hit and not external_hit:
+                if phones or external_ids:
+                    if candidate_phone and not any(
+                        _phones_linked(candidate_phone, p) for p in phones
+                    ):
+                        same_fio = False
+                else:
+                    same_fio = not candidate_phone and not (
+                        item.client_external_id or ""
+                    ).strip()
+            if not (phone_hit or external_hit or same_fio):
+                continue
+            matched_ids.add(item.id)
+            phone_norm = normalize_phone(item.client_phone)
+            if phone_norm:
+                phones.add(phone_norm)
+            if item.client_external_id:
+                external_ids.add(item.client_external_id)
+        after = (frozenset(phones), frozenset(external_ids), frozenset(matched_ids))
+        if after == before:
+            break
+
+    if not matched_ids and not phones and not external_ids:
+        return Q()
+
+    query = Q()
+    if matched_ids:
+        query |= Q(id__in=list(matched_ids))
+    if phones:
+        query |= Q(
+            id__in=[
+                item.id
+                for item in Dialog.objects.only("id", "client_phone")
+                if any(_phones_linked(item.client_phone, p) for p in phones)
+            ]
+        )
+    if external_ids:
+        query |= Q(client_external_id__in=list(external_ids))
+    return query if query else Q(pk__in=[])
+
+
 @require_http_methods(["GET"])
 def client_history(request: HttpRequest) -> HttpResponse:
     dialog_id = (request.GET.get("dialog_id") or "").strip()
     phone = (request.GET.get("phone") or "").strip()
     external_id = (request.GET.get("external_id") or "").strip()
+    current = None
+    first_name = ""
+    last_name = ""
     if dialog_id:
         current = get_object_or_404(Dialog, pk=dialog_id)
         phone = phone or current.client_phone
         external_id = external_id or current.client_external_id
-    query = Q()
-    normalized = normalize_phone(phone)
-    if normalized:
-        candidate_ids = [
-            item.id
-            for item in Dialog.objects.only("id", "client_phone")
-            if normalize_phone(item.client_phone) == normalized
-        ]
-        query |= Q(id__in=candidate_ids)
-    if external_id:
-        query |= Q(client_external_id=external_id)
+        first_name = current.client_first_name
+        last_name = current.client_last_name
+    query = _history_identity_query(
+        phone=phone,
+        external_id=external_id,
+        first_name=first_name,
+        last_name=last_name,
+    )
     if not query:
         return JsonResponse({"ok": True, "items": [], "count": 0, "summary": ""})
     dialogs = (
@@ -1531,6 +1668,7 @@ def client_history(request: HttpRequest) -> HttpResponse:
         {
             "id": str(item.id),
             "channel": item.channel,
+            "channel_label": _channel_label(item.channel),
             "status": item.status,
             "outcome": item.outcome,
             "topic": item.close_topic,
@@ -1542,48 +1680,52 @@ def client_history(request: HttpRequest) -> HttpResponse:
         }
         for item in dialogs
     ]
-    topics = [item["topic"] for item in items if item["topic"]]
-    channels = sorted({item["channel"] for item in items})
-    previews = [item["preview"] for item in items[:5] if item["preview"]]
-    if len(items) <= 1:
-        summary = (
-            "Это первое обращение клиента — ранее клиент не обращался."
+    previous_dialogs = [
+        item for item in dialogs if current is None or item.id != current.id
+    ]
+    previous_items = [
+        item for item in items if current is None or item["id"] != str(current.id)
+    ]
+    current_channel = _channel_label(current.channel) if current else (
+        items[0]["channel_label"] if items else ""
+    )
+
+    from online_chat.summary_service import build_history_summaries
+
+    packed = build_history_summaries(list(previous_dialogs))
+    # previous_items is the source of truth for "first vs repeat".
+    is_first = len(previous_items) == 0
+    if is_first and current_channel:
+        packed["detailed_summary"] = (
+            f"Первое обращение клиента.\nКанал: {current_channel}."
         )
-        if previews:
-            summary += f" Текущий вопрос: {previews[0]}"
-        repeat_hint = ""
-        detailed = (
-            "Ранее клиент не обращался. История пуста — это первое обращение."
-        )
-        if items:
-            detailed += (
-                f"\n• [{items[0]['channel']}] {items[0]['preview'] or '—'} "
-                f"({items[0]['topic'] or 'без темы'})"
+        packed["summary"] = "Первое обращение клиента."
+    blocks = packed.get("detailed_blocks") or []
+    for block in blocks:
+        raw_channel = block.get("channel") or ""
+        block["channel"] = _channel_label(raw_channel) if raw_channel else "—"
+    if blocks:
+        packed["detailed_summary"] = "\n\n".join(
+            (
+                f"{block['date_label']}\n"
+                f"Тема: {block['topic']}\n"
+                f"{block['essence']}\n"
+                f"Канал: {block['channel']} · Оператор: {block['operator_name']}"
             )
-    else:
-        summary = (
-            f"Обращений: {len(items)}. Каналы: {', '.join(channels) or '—'}. "
-            f"Последние темы: {', '.join(topics[:3]) or 'не определены'}."
-        )
-        if previews:
-            summary += " Недавние вопросы: " + " | ".join(previews[:3])
-        if topics:
-            repeat_hint = f"Повторное обращение. Ранее: {', '.join(topics[:3])}."
-        else:
-            repeat_hint = "Повторный клиент — в истории есть предыдущие диалоги."
-        detailed = "\n".join(
-            f"• [{item['channel']}] {item['preview'] or '—'} "
-            f"({item['topic'] or 'без темы'})"
-            for item in items[:8]
+            for block in blocks
         )
     return JsonResponse(
         {
             "ok": True,
             "items": items,
             "count": len(items),
-            "summary": summary,
-            "detailed_summary": detailed,
-            "repeat_hint": repeat_hint,
+            "previous_count": len(previous_items),
+            "summary": packed["summary"],
+            "detailed_summary": packed["detailed_summary"],
+            "summary_topics": packed.get("summary_topics") or [],
+            "detailed_blocks": blocks,
+            "is_first": is_first,
+            "repeat_hint": "",
         }
     )
 

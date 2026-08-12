@@ -177,18 +177,50 @@ class ApiTests(TestCase):
             text="Первое обращение",
             widget_id="public-widget",
             client_phone="+375 29 111-22-33",
+            client_first_name="Анна",
+            client_last_name="Козлова",
         )
         current, _ = create_dialog_with_message(
             text="Повторное обращение",
             widget_id="public-widget",
             client_phone="375291112233",
+            client_first_name="Анна",
+            client_last_name="Козлова",
         )
         response = self.client.get(
             reverse("online_chat_client_history"),
             {"dialog_id": str(current.id)},
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["count"], 2)
+        body = response.json()
+        self.assertEqual(body["count"], 2)
+        self.assertEqual(body["previous_count"], 1)
+        self.assertFalse(body["is_first"])
+        self.assertNotIn("Первое обращение клиента", body["summary"])
+
+    def test_client_history_links_phone_with_one_digit_typo(self) -> None:
+        create_dialog_with_message(
+            text="Лимит по карте",
+            widget_id="public-widget",
+            client_phone="+375291234567",
+            client_first_name="Никита",
+            client_last_name="Краснов",
+        )
+        current, _ = create_dialog_with_message(
+            text="Повторно про лимит",
+            widget_id="public-widget",
+            client_phone="+375291234967",  # one digit differs
+            client_first_name="краснов",
+            client_last_name="никита",  # swapped FIO fields
+        )
+        response = self.client.get(
+            reverse("online_chat_client_history"),
+            {"dialog_id": str(current.id)},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["previous_count"], 1)
+        self.assertFalse(body["is_first"])
 
     def test_offline_dialog_becomes_lost_after_timeout(self) -> None:
         dialog, _ = create_dialog_with_message(

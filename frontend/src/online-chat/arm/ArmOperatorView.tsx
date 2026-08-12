@@ -23,7 +23,6 @@ import {
   submitSuflerHintFeedback,
   transferDialogRemote,
   uploadOperatorAttachment,
-  type ClientHistoryItem,
   type OnlineChatDialog,
   type OnlineChatMessage,
   type ReceiptStatus,
@@ -59,6 +58,13 @@ import {
 } from './primitives'
 import { ArmModulesHost, isArmWorkspaceModule, loadReplyTemplates } from './modules'
 import type { ArmModuleId } from './modules'
+import {
+  ClientSummaryCard,
+  EMPTY_SUMMARY_HISTORY,
+  historyToSummary,
+  type SummaryHistoryData,
+} from './ClientSummaryCard'
+import { TopicSelect } from './TopicSelect'
 
 const CANVAS_MOCKUP_VERSION = 'v1.4.74'
 
@@ -499,6 +505,8 @@ type QueueItem = {
   /** Seconds at fetch time; used with waitFetchedAt for 1s SLA ticks. */
   waitBaseSeconds?: number;
   waitFetchedAt?: number;
+  /** Absolute ISO anchor from backend — preferred for smooth SLA ticks. */
+  waitAnchorAt?: string;
   urgent: boolean;
   active?: boolean;
   result?: "offline" | "closed" | "declined";
@@ -514,9 +522,17 @@ type QueueItem = {
   initiatedBy?: string;
   refCode?: string;
   needsReply?: boolean;
+  isTestClient?: boolean;
+  entryUrl?: string;
 };
 
 function liveWaitSeconds(item: QueueItem, nowMs: number): number | null {
+  if (item.waitAnchorAt) {
+    const anchorMs = Date.parse(item.waitAnchorAt);
+    if (!Number.isNaN(anchorMs)) {
+      return Math.max(0, Math.floor((nowMs - anchorMs) / 1000));
+    }
+  }
   if (item.waitBaseSeconds == null || item.waitFetchedAt == null) return null;
   const elapsed = Math.max(0, Math.floor((nowMs - item.waitFetchedAt) / 1000));
   return item.waitBaseSeconds + elapsed;
@@ -541,23 +557,51 @@ function slaToneColor(tone?: SlaTone): string {
   return "#2E7D32";
 }
 
-function SlaWaitPill({ wait, slaTone }: { wait: string; slaTone?: SlaTone }): JSX.Element {
+function SlaWaitPill({
+  wait,
+  slaTone,
+  label = "",
+}: {
+  wait: string;
+  slaTone?: SlaTone;
+  label?: string;
+}): JSX.Element {
   const color = slaToneColor(slaTone);
   return (
     <span
+      title="SLA ожидания ответа"
       style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
         fontSize: 11,
-        padding: "2px 6px",
-        borderRadius: 4,
-        background: `${color}18`,
+        padding: "3px 8px",
+        borderRadius: 999,
+        background: `linear-gradient(180deg, ${color}22 0%, ${color}14 100%)`,
         color,
-        border: `1px solid ${color}40`,
-        fontWeight: 600,
-        lineHeight: 1.3,
+        border: `1px solid ${color}55`,
+        fontWeight: 700,
+        lineHeight: 1.2,
         flexShrink: 0,
+        fontVariantNumeric: "tabular-nums",
+        letterSpacing: "0.02em",
+        boxShadow: `inset 0 0 0 1px ${color}10`,
+        transition: "color 160ms ease, border-color 160ms ease, background 160ms ease",
       }}
     >
-      {wait}
+      <span
+        aria-hidden
+        style={{
+          width: 7,
+          height: 7,
+          borderRadius: "50%",
+          background: color,
+          boxShadow: `0 0 0 2px ${color}33`,
+          flexShrink: 0,
+        }}
+      />
+      <span style={{ opacity: 0.85, fontWeight: 600 }}>{label || "SLA"}</span>
+      <span style={{ minWidth: "3.2em", textAlign: "right" }}>{wait}</span>
     </span>
   );
 }
@@ -581,10 +625,12 @@ function dialogToQueueItem(
     wait: trackWait ? formatWaitMmSs(waitSeconds) : "—",
     waitBaseSeconds: trackWait ? waitSeconds : undefined,
     waitFetchedAt: trackWait ? fetchedAt : undefined,
+    waitAnchorAt: trackWait ? dialog.wait_anchor_at || undefined : undefined,
     urgent: trackWait && slaTone === "critical",
     slaTone: trackWait ? slaTone : undefined,
     active: options?.active,
     live: true,
+    isTestClient: !!dialog.is_test_client,
     phone: dialog.client_phone,
     firstName: dialog.client_first_name,
     lastName: dialog.client_last_name,
@@ -593,6 +639,7 @@ function dialogToQueueItem(
     initiatedBy: dialog.initiated_by,
     refCode: dialogRefCode(dialog),
     needsReply,
+    entryUrl: dialog.entry_url || undefined,
   };
 }
 
@@ -802,7 +849,7 @@ function queueSectionsForRole(role: ArmRole): QueueSectionDef[] {
   // «Общая очередь» всегда последняя; «Диалоги коллег» — после «В диалоге со мной».
   const withoutShared = QUEUE_SECTIONS.filter((section) => section.id !== "shared");
   const shared = QUEUE_SECTIONS.find((section) => section.id === "shared")!;
-  if (role === "operator" || role === "supervisor") {
+  if (role === "operator" || role === "supervisor" || role === "admin") {
     return [
       withoutShared[0],
       withoutShared[1],
@@ -1028,10 +1075,12 @@ function SuflerFeedbackRow({
 function AutoFadeNotice({
   message,
   onDone,
+  tone = "success",
   style,
 }: {
   message: string;
-  onDone: () => void;
+  onDone?: () => void;
+  tone?: "success" | "info" | "warning";
   style?: CSSProperties;
 }): JSX.Element {
   const [hiding, setHiding] = useState(false);
@@ -1040,8 +1089,8 @@ function AutoFadeNotice({
 
   useEffect(() => {
     setHiding(false);
-    const fadeTimer = window.setTimeout(() => setHiding(true), 2600);
-    const clearTimer = window.setTimeout(() => onDoneRef.current(), 3500);
+    const fadeTimer = window.setTimeout(() => setHiding(true), 4200);
+    const clearTimer = window.setTimeout(() => onDoneRef.current?.(), 5000);
     return () => {
       window.clearTimeout(fadeTimer);
       window.clearTimeout(clearTimer);
@@ -1050,12 +1099,88 @@ function AutoFadeNotice({
 
   return (
     <Callout
-      tone="success"
+      tone={tone}
       className={`arm-fade-notice${hiding ? " arm-fade-notice--hiding" : ""}`}
-      style={{ marginTop: 8, fontSize: 12, ...style }}
+      style={{
+        margin: 0,
+        fontSize: 12,
+        boxShadow: "0 8px 22px rgba(16, 40, 28, 0.14)",
+        pointerEvents: "auto",
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 8,
+        ...style,
+      }}
     >
-      {message}
+      <span style={{ flex: 1, minWidth: 0, lineHeight: 1.45 }}>{message}</span>
+      <button
+        type="button"
+        aria-label="Закрыть уведомление"
+        title="Закрыть"
+        onClick={(event) => {
+          event.stopPropagation();
+          onDoneRef.current?.();
+        }}
+        style={{
+          flexShrink: 0,
+          width: 22,
+          height: 22,
+          border: "none",
+          borderRadius: 6,
+          background: "transparent",
+          cursor: "pointer",
+          color: "inherit",
+          opacity: 0.7,
+          fontSize: 14,
+          lineHeight: 1,
+          padding: 0,
+          fontFamily: "inherit",
+        }}
+      >
+        ✕
+      </button>
     </Callout>
+  );
+}
+
+/** Status toasts that float and never shift the composer / empty-state layout. */
+function ComposerOverlayNotices({
+  notices,
+  placement = "above",
+}: {
+  notices: Array<{ id: string; message: string; tone?: "success" | "info" | "warning"; onDone?: () => void }>;
+  placement?: "above" | "bottom";
+}): JSX.Element | null {
+  if (notices.length === 0) return null;
+  return (
+    <div
+      aria-live="polite"
+      style={{
+        position: "absolute",
+        left: 12,
+        right: 12,
+        ...(placement === "above"
+          ? { bottom: "100%", marginBottom: 8 }
+          : { bottom: 16 }),
+        zIndex: 30,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        pointerEvents: "none",
+        maxWidth: 480,
+        marginLeft: "auto",
+        marginRight: "auto",
+      }}
+    >
+      {notices.map((notice) => (
+        <AutoFadeNotice
+          key={`${notice.id}:${notice.message}`}
+          message={notice.message}
+          tone={notice.tone}
+          onDone={notice.onDone}
+        />
+      ))}
+    </div>
   );
 }
 type RelevanceTier = "high" | "mediumStrong" | "mediumLight" | "low";
@@ -1067,9 +1192,10 @@ function parseRelevancePercent(relevance: number | string): number {
 }
 
 function relevanceTierFromPercent(pct: number): RelevanceTier {
-  if (pct >= 90) return "high";
-  if (pct >= 85) return "mediumStrong";
-  if (pct >= 80) return "mediumLight";
+  // High = green, mediumStrong = orange, mediumLight = amber, low = red-ish.
+  if (pct >= 75) return "high";
+  if (pct >= 50) return "mediumStrong";
+  if (pct >= 35) return "mediumLight";
   return "low";
 }
 
@@ -1081,35 +1207,35 @@ type RelevanceShadeStyle = {
   borderLeft: string;
 };
 
-/** Shared relevance palette: ≥90% green, 85–89% amber-strong, 80–84% amber-light, <80% neutral. */
+/** Relevance palette: high green · mid orange · mid-low amber · low red. */
 const RELEVANCE_SHADE_COLORS = {
   high: {
     borderLight: "#2E7D3270",
     borderDark: "#3FA26688",
   },
   mediumStrong: {
-    bgLight: "#E8A02030",
-    bgDark: "#E8A03042",
-    borderLight: "#C0602880",
-    borderDark: "#F0904080",
-    borderLeftLight: "#C06028CC",
-    borderLeftDark: "#F0A040D9",
+    bgLight: "#F5A62328",
+    bgDark: "#F5A62340",
+    borderLight: "#E67E2288",
+    borderDark: "#F39C1288",
+    borderLeftLight: "#E67E22EE",
+    borderLeftDark: "#F39C12EE",
   },
   mediumLight: {
-    bgLight: "#F0D88018",
-    bgDark: "#E8C03024",
-    borderLight: "#B8883850",
-    borderDark: "#C8984860",
-    borderLeftLight: "#B88860A0",
-    borderLeftDark: "#C8A060B0",
+    bgLight: "#FFB30022",
+    bgDark: "#FFB30035",
+    borderLight: "#FB8C0080",
+    borderDark: "#FFA72680",
+    borderLeftLight: "#FB8C00CC",
+    borderLeftDark: "#FFA726CC",
   },
   low: {
-    bgLight: "#ECEFF120",
-    bgDark: "#546E7A28",
-    borderLight: "#78909C66",
-    borderDark: "#90A4AE77",
-    borderLeftLight: "#78909C",
-    borderLeftDark: "#90A4AE",
+    bgLight: "#E5393520",
+    bgDark: "#E5393535",
+    borderLight: "#C6282888",
+    borderDark: "#EF535088",
+    borderLeftLight: "#C62828EE",
+    borderLeftDark: "#EF5350EE",
   },
 } as const;
 
@@ -1150,7 +1276,7 @@ function relevanceShade(t: ArmTheme, relevance: number | string): RelevanceShade
   const c = RELEVANCE_SHADE_COLORS.low;
   return {
     tier,
-    tone: "neutral",
+    tone: "warning",
     background: isLight ? c.bgLight : c.bgDark,
     border: isLight ? c.borderLight : c.borderDark,
     borderLeft: isLight ? c.borderLeftLight : c.borderLeftDark,
@@ -1166,50 +1292,7 @@ function neutralCardSurface(t: ArmTheme, isExpanded: boolean): { background: str
   };
 }
 
-type SpellError = {
-  word: string;
-  suggestion: string;
-  start: number;
-  end: number;
-};
-
-/** Demo-словарь для макета: типичные опечатки оператора в теме лимитов ATM. */
-const SPELL_DEMO_CORRECTIONS: Record<string, string> = {
-  лимты: "лимиты",
-  дебитовой: "дебетовой",
-  минскаму: "минскому",
-  суточны: "суточный",
-  банкомате: "банкоматах",
-  овет: "ответ",
-};
-
-function findSpellErrors(text: string): SpellError[] {
-  const errors: SpellError[] = [];
-  const wordRegex = /[а-яёА-ЯЁ]+/g;
-  let match: RegExpExecArray | null;
-  while ((match = wordRegex.exec(text)) !== null) {
-    const suggestion = SPELL_DEMO_CORRECTIONS[match[0].toLowerCase()];
-    if (suggestion) {
-      errors.push({
-        word: match[0],
-        suggestion,
-        start: match.index,
-        end: match.index + match[0].length,
-      });
-    }
-  }
-  return errors;
-}
-
-function applySpellFixes(text: string, errors: SpellError[]): string {
-  let result = text;
-  for (const err of [...errors].sort((a, b) => b.start - a.start)) {
-    result = result.slice(0, err.start) + err.suggestion + result.slice(err.end);
-  }
-  return result;
-}
-
-/** Демо-полировка текста без орфографических ошибок (нормализация пробелов, заглавная буква). */
+/** Демо-полировка текста (нормализация пробелов, заглавная буква). */
 function polishTextDemo(text: string): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length === 0) return text;
@@ -1288,75 +1371,6 @@ function AiImprovePopover({
   );
 }
 
-function spellErrorColor(t: ArmTheme): string {
-  return t.kind === "light" ? "#c62828" : "#ef5350";
-}
-
-/** Подсветка опечаток и подсказки (протокол 02.07 §2.1.4 — оператор видит текст перед отправкой). */
-function SpellCheckHints({
-  t,
-  text,
-  errors,
-}: {
-  t: ArmTheme;
-  text: string;
-  errors: SpellError[];
-}): JSX.Element | null {
-  if (errors.length === 0) return null;
-  const color = spellErrorColor(t);
-  const segments: Array<{ text: string; error: boolean }> = [];
-  let cursor = 0;
-  for (const err of errors) {
-    if (err.start > cursor) {
-      segments.push({ text: text.slice(cursor, err.start), error: false });
-    }
-    segments.push({ text: text.slice(err.start, err.end), error: true });
-    cursor = err.end;
-  }
-  if (cursor < text.length) {
-    segments.push({ text: text.slice(cursor), error: false });
-  }
-
-  return (
-    <div
-      style={{
-        marginTop: 4,
-        padding: "6px 8px",
-        borderRadius: RADIUS_SM,
-        background: t.fill.quaternary,
-        border: `1px solid ${t.stroke.tertiary}`,
-      }}
-    >
-      <Text style={{ fontSize: 11, color: t.text.tertiary, marginBottom: 4 }}>Проверка орфографии</Text>
-      <Text style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-        {segments.map((seg, index) =>
-          seg.error ? (
-            <span
-              key={index}
-              style={{
-                textDecoration: "underline wavy",
-                textDecorationColor: color,
-                color,
-              }}
-            >
-              {seg.text}
-            </span>
-          ) : (
-            <span key={index}>{seg.text}</span>
-          ),
-        )}
-      </Text>
-      <Stack gap={2} style={{ marginTop: 6 }}>
-        {errors.map((err) => (
-          <Text key={`${err.start}-${err.word}`} style={{ fontSize: 11, color: t.text.secondary }}>
-            {err.word} → {err.suggestion}
-          </Text>
-        ))}
-      </Stack>
-    </div>
-  );
-}
-
 type SuflerHintData = {
   id: string;
   title: string;
@@ -1366,24 +1380,29 @@ type SuflerHintData = {
   relevance: string;
   relevanceTone: "success" | "neutral" | "warning";
   suzTitle: string;
+  permalink?: string;
   highlighted?: boolean;
 };
 
 function mapApiHintToCard(hint: SuflerHint, index: number): SuflerHintData {
   const citation = hint.citations?.[0];
   const title = citation?.title?.trim() || `Подсказка ${hint.rank || index + 1}`;
-  const preview = hint.text.length > 120 ? `${hint.text.slice(0, 117)}…` : hint.text;
+  const answerText = (hint.text || "").trim();
+  const preview = answerText.length > 120 ? `${answerText.slice(0, 117)}…` : answerText;
   const percent = Math.round(hint.relevance_percent ?? hint.relevance_score * 100);
   const tone: SuflerHintData["relevanceTone"] =
-    percent >= 85 ? "success" : percent >= 70 ? "neutral" : "warning";
+    percent >= 75 ? "success" : percent >= 50 ? "neutral" : "warning";
+  const tip = (hint.operator_tip || "").trim();
   return {
     id: `hint-${hint.rank}-${index}`,
     title,
     preview,
-    answerText: hint.text,
+    answerText,
+    operatorTip: tip || undefined,
     relevance: `${percent}%`,
     relevanceTone: tone,
     suzTitle: title,
+    permalink: citation?.permalink?.trim() || undefined,
     highlighted: index === 0,
   };
 }
@@ -1410,52 +1429,13 @@ const ACTIVE_CLIENT: ClientInfoData = {
   dialogNo: "№ 18 944",
   visitorId: "vis-7f3a2b1c",
   visitTime: "09.07.2026, 08:42",
-  entryPath: "/cards/debit",
+  entryPath: "/fizicheskim_licam/cards/",
   entryChannel: "Виджет сайта",
   browser: "Chrome 125",
   device: "Windows 11",
   email: "anna.k@example.com",
   channel: "Сайт",
 };
-
-type SummaryHistoryData = {
-  summary: string;
-  detailedSummary: string;
-  preview: string;
-};
-
-const EMPTY_SUMMARY_HISTORY: SummaryHistoryData = {
-  summary: "История обращений пока не загружена.",
-  detailedSummary: "Откройте диалог клиента, чтобы загрузить единую историю и summary.",
-  preview: "Нет данных",
-};
-
-function historyToSummary(items: ClientHistoryItem[], apiSummary: string): SummaryHistoryData {
-  if (!items.length) {
-    return {
-      summary: "Обращений по этому клиенту не найдено.",
-      detailedSummary: "Нет предыдущих диалогов по телефону / внешнему ID.",
-      preview: "Пусто",
-    };
-  }
-  const latest = items[0];
-  const detailed = items
-    .slice(0, 8)
-    .map((item) => {
-      const date = item.created_at
-        ? new Date(item.created_at).toLocaleString("ru-RU")
-        : "—";
-      const topic = item.topic || "без темы";
-      const operator = item.operator_name || "не назначен";
-      return `${date} · ${item.channel} · ${item.status} · ${topic} — ${operator}`;
-    })
-    .join("\n\n");
-  return {
-    summary: apiSummary || `Обращений: ${items.length}. Последнее: ${latest.channel} · ${latest.status}.`,
-    detailedSummary: detailed,
-    preview: latest.preview || latest.topic || latest.channel,
-  };
-}
 
 function ClientInfoField({
   t,
@@ -1604,70 +1584,6 @@ function ClientInfoCard({
   );
 }
 
-function ClientSummaryCard({
-  t,
-  scheme: _scheme,
-  data,
-  isExpanded,
-  onToggle,
-  disabled: _disabled,
-}: {
-  t: ArmTheme;
-  scheme: SchemePalette;
-  data: SummaryHistoryData;
-  isExpanded: boolean;
-  onToggle: () => void;
-  disabled?: boolean;
-}): JSX.Element {
-  const surface = neutralCardSurface(t, isExpanded);
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label="Summary клиента"
-      aria-expanded={isExpanded}
-      style={{ marginTop: 8, outline: "none", cursor: "pointer" }}
-      onClick={() => onToggle()}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onToggle();
-        }
-      }}
-    >
-      <Card
-        style={{
-          background: surface.background,
-          border: `1px solid ${surface.border}`,
-        }}
-      >
-        <CardBody>
-          {isExpanded ? (
-            <Stack gap={8}>
-              <Text weight="semibold" style={{ fontSize: 11, fontWeight: 700, color: t.text.secondary }}>
-                Краткий summary
-              </Text>
-              <Text style={{ fontSize: 12, lineHeight: 1.5, color: t.text.primary }}>{data.summary}</Text>
-              <div style={{ height: 1, background: t.stroke.tertiary }} />
-              <Text weight="semibold" style={{ fontSize: 11, fontWeight: 700, color: t.text.secondary }}>
-                Детальный summary
-              </Text>
-              <Text style={{ fontSize: 12, lineHeight: 1.55, color: t.text.primary, whiteSpace: "pre-line" }}>
-                {data.detailedSummary}
-              </Text>
-            </Stack>
-          ) : (
-            <Text style={{ fontSize: 12, lineHeight: 1.4, color: t.text.secondary }}>
-              {data.preview}
-            </Text>
-          )}
-        </CardBody>
-      </Card>
-    </div>
-  );
-}
-
 function SuflerHintCard({
   t,
   scheme,
@@ -1732,9 +1648,29 @@ function SuflerHintCard({
             >
               Вставить в ответ
             </Button>
-            <Button variant="ghost" size="sm" onClick={(e) => e.stopPropagation()}>
-              {hint.suzTitle} ↗
-            </Button>
+            {hint.permalink ? (
+              <a
+                href={hint.permalink}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontSize: 12,
+                  color: scheme.accent,
+                  textDecoration: "none",
+                  padding: "4px 8px",
+                }}
+              >
+                {hint.suzTitle} ↗
+              </a>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={(e) => e.stopPropagation()} disabled>
+                {hint.suzTitle}
+              </Button>
+            )}
           </Row>
           {isExpanded && hint.operatorTip ? (
             <div
@@ -2038,7 +1974,47 @@ function ColumnResizeHandle({
 }
 const QUEUE_CARD_COLLAPSE_SIZE = 22;
 const QUEUE_CARD_COLLAPSE_INSET = 8;
+const QUEUE_CARD_ACTION_GAP = 4;
 const QUEUE_CARD_RIGHT_PAD = QUEUE_CARD_COLLAPSE_SIZE + QUEUE_CARD_COLLAPSE_INSET + 6;
+const QUEUE_CARD_RIGHT_PAD_WITH_TAKE =
+  QUEUE_CARD_COLLAPSE_INSET +
+  QUEUE_CARD_COLLAPSE_SIZE +
+  QUEUE_CARD_ACTION_GAP +
+  QUEUE_CARD_COLLAPSE_SIZE +
+  6;
+
+/** «Взять диалог / на себя» — рука, не «скачать». */
+function TakeDialogIcon({ size = 18 }: { size?: number }): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M7 11.5V7a1.5 1.5 0 0 1 3 0v4"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10 10.5V5.75a1.5 1.5 0 0 1 3 0V11"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+      <path
+        d="M13 10.75V7a1.5 1.5 0 0 1 3 0v5.5"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+      <path
+        d="M16 12.5v1.25a1.25 1.25 0 0 0 2.5 0V12.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-2.75A5.25 5.25 0 0 1 7.5 15.75V13a1.75 1.75 0 0 1 3.5 0v-.75"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 function QueueCardCollapseButton({
   t,
@@ -2079,6 +2055,71 @@ function QueueCardCollapseButton({
       }}
     >
       —
+    </button>
+  );
+}
+
+function QueueCardTakeButton({
+  t,
+  scheme,
+  disabled,
+  busy,
+  onAccept,
+}: {
+  t: ArmTheme;
+  scheme: SchemePalette;
+  disabled?: boolean;
+  busy?: boolean;
+  onAccept: () => void;
+}): JSX.Element {
+  const inactive = disabled || busy;
+  return (
+    <button
+      type="button"
+      title={
+        busy
+          ? "Принимаем…"
+          : disabled
+            ? "Лимит активных диалогов достигнут"
+            : "Взять диалог из общей очереди"
+      }
+      aria-label="Взять диалог"
+      disabled={inactive}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (inactive) return;
+        onAccept();
+      }}
+      style={{
+        position: "absolute",
+        top: QUEUE_CARD_COLLAPSE_INSET,
+        right:
+          QUEUE_CARD_COLLAPSE_INSET +
+          QUEUE_CARD_COLLAPSE_SIZE +
+          QUEUE_CARD_ACTION_GAP,
+        width: QUEUE_CARD_COLLAPSE_SIZE,
+        height: QUEUE_CARD_COLLAPSE_SIZE,
+        border: `1px solid ${inactive ? t.stroke.secondary : scheme.accent}`,
+        borderRadius: RADIUS_SM,
+        background: inactive ? t.fill.secondary : scheme.accent,
+        color: inactive ? t.text.tertiary : "#fff",
+        lineHeight: 1,
+        cursor: inactive ? "not-allowed" : "pointer",
+        opacity: disabled && !busy ? 0.45 : 1,
+        padding: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "inherit",
+        flexShrink: 0,
+        zIndex: 1,
+      }}
+    >
+      {busy ? (
+        <span style={{ fontSize: 11, fontWeight: 700 }}>…</span>
+      ) : (
+        <TakeDialogIcon size={14} />
+      )}
     </button>
   );
 }
@@ -2267,7 +2308,8 @@ function QueueCard({
 }): JSX.Element {
   const resolved = resolveQueueWait(item, nowMs);
   const showTimer = resolved.wait && resolved.wait !== "—";
-  const hasMetaRow = showTimer || item.readOnly || !!onAccept;
+  const hasMetaRow = showTimer || item.readOnly;
+  const rightPad = onAccept ? QUEUE_CARD_RIGHT_PAD_WITH_TAKE : QUEUE_CARD_RIGHT_PAD;
 
   return (
     <div
@@ -2283,7 +2325,7 @@ function QueueCard({
       }}
       style={{
         position: "relative",
-        padding: `10px ${QUEUE_CARD_RIGHT_PAD}px 10px 12px`,
+        padding: `10px ${rightPad}px 10px 12px`,
         borderRadius: RADIUS_SM,
         border: `1px solid ${selected ? scheme.accent : t.stroke.secondary}`,
         background: selected ? t.fill.tertiary : t.bg.editor,
@@ -2291,6 +2333,15 @@ function QueueCard({
         transition: "background 160ms ease",
       }}
     >
+      {onAccept ? (
+        <QueueCardTakeButton
+          t={t}
+          scheme={scheme}
+          disabled={acceptDisabled}
+          busy={acceptBusy}
+          onAccept={onAccept}
+        />
+      ) : null}
       <QueueCardCollapseButton t={t} onCollapse={onCollapse} />
       {hasMetaRow ? (
         <Row
@@ -2315,30 +2366,6 @@ function QueueCard({
             <Pill tone="info" size="sm">
               только просмотр
             </Pill>
-          ) : null}
-          {onAccept ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={acceptDisabled || acceptBusy}
-              title={
-                acceptDisabled
-                  ? "Лимит активных диалогов достигнут"
-                  : "Взять диалог из общей очереди"
-              }
-              onClick={(e) => {
-                e.stopPropagation();
-                if (acceptDisabled || acceptBusy) return;
-                onAccept();
-              }}
-              style={
-                acceptDisabled
-                  ? { opacity: 0.45, cursor: "not-allowed" }
-                  : undefined
-              }
-            >
-              {acceptBusy ? "…" : "Взять"}
-            </Button>
           ) : null}
         </Row>
       ) : null}
@@ -2894,6 +2921,7 @@ export function ArmOperatorView({
   armRole: armRoleProp = "operator",
   viewOnly = false,
   allowTransferInView = false,
+  actorName = "",
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
@@ -2911,16 +2939,21 @@ export function ArmOperatorView({
   onViewModeChange: (next: ArmView) => void;
   closeTopic: string;
   onCloseTopicChange: (next: string) => void;
-  /** Current ARM operator display name (accept + message labels). */
+  /** Observed / current ARM operator display name (queue filter + labels). */
   operatorName?: string;
   statsDrawerOpen?: boolean;
   onStatsDrawerOpenChange?: (open: boolean) => void;
   armRole?: ArmRole;
   viewOnly?: boolean;
   allowTransferInView?: boolean;
+  /** Logged-in user who may take over (supervisor). Falls back to operatorName. */
+  actorName?: string;
 }): JSX.Element {
-  const operatorInitials = initialsFromDisplayName(operatorName);
   const armRole: ArmRole = armRoleProp;
+  const actingName = (actorName || operatorName).trim() || operatorName;
+  const operatorInitials = initialsFromDisplayName(
+    viewOnly ? actingName : operatorName,
+  );
   const menuContext: ArmMenuContext = viewOnly ? "view" : "operate";
   const [closedDialogIds, setClosedDialogIds] = useState<Record<string, boolean>>({});
   const [blockedDialogIds, setBlockedDialogIds] = useState<Record<string, boolean>>({});
@@ -2954,6 +2987,8 @@ export function ArmOperatorView({
   const [acceptingDialogId, setAcceptingDialogId] = useState<string | null>(null);
   const [operatorCapacity, setOperatorCapacity] = useState(3);
   const suflerTurnKeyRef = useRef<string>("");
+  /** Snapshot summary once per dialog — must not change mid-conversation. */
+  const summaryByDialogRef = useRef<Record<string, SummaryHistoryData>>({});
   const [editMessageTarget, setEditMessageTarget] = useState<OnlineChatMessage | null>(null);
   const [editMessageText, setEditMessageText] = useState("");
   const [deleteMessageTarget, setDeleteMessageTarget] = useState<OnlineChatMessage | null>(null);
@@ -2968,7 +3003,8 @@ export function ArmOperatorView({
   selectedQueueRef.current = selectedQueue;
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    // Sub-second ticks keep the second boundary crisp without UI stutter on refresh.
+    const timer = window.setInterval(() => setNowMs(Date.now()), 250);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -3017,6 +3053,23 @@ export function ArmOperatorView({
             readOnly: true,
             operatorName: dialog.operator_name ?? operatorName,
           })),
+        );
+      } else if (armRole === "supervisor") {
+        // Supervisor own ARM: only dialogs already owned by supervisor (take-over / transfer).
+        // Orphan / unassigned actives must not appear as writable "mine".
+        const mineActive = activeDialogs.filter(
+          (dialog) => dialog.operator_name === operatorName,
+        );
+        const awaitingReply = mineActive.filter((dialog) => dialog.needs_reply);
+        const mineIdle = mineActive.filter((dialog) => !dialog.needs_reply);
+        setLiveWaiting(
+          awaitingReply.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
+        );
+        setLiveMine(mineIdle.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })));
+        setLiveColleagues(
+          activeDialogs
+            .filter((dialog) => dialog.operator_name && dialog.operator_name !== operatorName)
+            .map((dialog) => ({ ...dialogToQueueItem(dialog), readOnly: true })),
         );
       } else {
         const mineActive = activeDialogs.filter(
@@ -3079,7 +3132,7 @@ export function ArmOperatorView({
     } finally {
       setQueuesReady(true);
     }
-  }, [operatorName, viewOnly]);
+  }, [operatorName, viewOnly, armRole]);
 
   useEffect(() => {
     void refreshLiveQueues();
@@ -3238,10 +3291,30 @@ export function ArmOperatorView({
     null;
   const hasActiveDialog = !!active;
   const isSharedQueuePeek =
-    !viewOnly && !!active?.live && liveShared.some((item) => item.id === active.id);
+    !!active?.live && liveShared.some((item) => item.id === active.id);
   sharedPeekRef.current = isSharedQueuePeek;
-  const isReadOnly = viewOnly || viewMode === "colleague" || isSharedQueuePeek;
-  const canTransferDespiteView = (viewOnly || viewMode === "colleague") && allowTransferInView;
+  // Supervisor may write only in dialogs they already own (take-over / transfer).
+  const supervisorOwnsActive =
+    armRole === "supervisor" &&
+    !!active?.live &&
+    !!active.operatorName &&
+    active.operatorName === actingName;
+  const isReadOnly =
+    viewOnly ||
+    viewMode === "colleague" ||
+    isSharedQueuePeek ||
+    (armRole === "supervisor" && !supervisorOwnsActive) ||
+    (!!active && active.live === false);
+  const canTakeOverDialog =
+    armRole === "supervisor" &&
+    isReadOnly &&
+    !!active?.live &&
+    !isSharedQueuePeek &&
+    !!active.operatorName &&
+    active.operatorName !== actingName;
+  const canTransferDespiteView =
+    canTakeOverDialog ||
+    ((viewOnly || viewMode === "colleague") && allowTransferInView);
   const isClientBlocked = !!(active && blockedDialogIds[active.id]);
   const composerLocked = isReadOnly || isClientBlocked || !hasActiveDialog;
 
@@ -3259,6 +3332,7 @@ export function ArmOperatorView({
         dialogNo: active.refCode ? `№ ${active.refCode}` : `№ ${dialogRefCode({ id: active.id })}`,
         email: "—",
         channel: active.channel,
+        entryPath: active.entryUrl || ACTIVE_CLIENT.entryPath,
         entryChannel: "Виджет сайта",
         visitorId: active.id.slice(0, 12),
       }
@@ -3324,18 +3398,30 @@ export function ArmOperatorView({
       setSummaryHistory(EMPTY_SUMMARY_HISTORY);
       return;
     }
+    const cached = summaryByDialogRef.current[active.id];
+    // Do not keep a stale "first appeal" snapshot — retry until history is found.
+    if (cached && !cached.isFirst) {
+      setSummaryHistory(cached);
+      return;
+    }
     let cancelled = false;
-    void fetchClientHistory({ dialogId: active.id })
+    void fetchClientHistory({
+      dialogId: active.id,
+      phone: active.phone || undefined,
+    })
       .then((response) => {
         if (cancelled) return;
-        const base = historyToSummary(response.items ?? [], response.summary ?? "");
-        setSummaryHistory({
-          ...base,
-          detailedSummary: response.detailed_summary || base.detailedSummary,
-          summary: response.repeat_hint
-            ? `${response.repeat_hint} ${response.summary || base.summary}`.trim()
-            : base.summary,
+        const next = historyToSummary({
+          items: response.items ?? [],
+          summary: response.summary ?? "",
+          detailedSummary: response.detailed_summary ?? "",
+          topics: response.summary_topics ?? [],
+          blocks: response.detailed_blocks ?? [],
+          isFirst: response.is_first,
+          previousCount: response.previous_count,
         });
+        summaryByDialogRef.current[active.id] = next;
+        setSummaryHistory(next);
       })
       .catch(() => {
         if (!cancelled) setSummaryHistory(EMPTY_SUMMARY_HISTORY);
@@ -3343,10 +3429,35 @@ export function ArmOperatorView({
     return () => {
       cancelled = true;
     };
-  }, [active?.id, active?.live]);
+  }, [active?.id, active?.live, active?.phone]);
+
+  const latestClientMessage = useMemo(() => {
+    return [...liveMessages]
+      .reverse()
+      .find((item) => item.speaker === "client" && item.text.trim()) ?? null;
+  }, [liveMessages]);
+
+  const dialogContextForSufler = useMemo(() => {
+    const lines = liveMessages
+      .filter((item) => !item.is_deleted && item.text.trim())
+      .slice(-12)
+      .map((item) => {
+        const who =
+          item.speaker === "client"
+            ? "Клиент"
+            : item.speaker === "operator"
+              ? "Оператор"
+              : item.speaker === "bot"
+                ? "Бот"
+                : "Система";
+        return `${who}: ${item.text.trim()}`;
+      });
+    return lines.join("\n");
+  }, [liveMessages]);
 
   useEffect(() => {
-    if (!active?.live || isReadOnly) {
+    // Sufler is strictly scoped to the active dialog id (no cross-dialog leakage).
+    if (!active?.live) {
       suflerTurnKeyRef.current = "";
       setLiveSuflerHints([]);
       setLiveSuflerRaw([]);
@@ -3354,43 +3465,66 @@ export function ArmOperatorView({
       setSuflerLoading(false);
       return;
     }
-    const latestClient = [...liveMessages]
-      .reverse()
-      .find((item) => item.speaker === "client" && item.text.trim());
-    if (!latestClient) {
+    if (active.isTestClient) {
+      suflerTurnKeyRef.current = `${active.id}:test`;
+      setLiveSuflerHints([]);
+      setLiveSuflerRaw([]);
+      setSuflerLoading(false);
+      setSuflerError("Ошибка суфлёра. Повторите попытку позже.");
+      return;
+    }
+    if (!latestClientMessage) {
       suflerTurnKeyRef.current = "";
       setLiveSuflerHints([]);
       setLiveSuflerRaw([]);
+      setSuflerError("");
+      setSuflerLoading(false);
       return;
     }
-    const turnKey = `${active.id}:${latestClient.id}`;
+    const turnKey = `${active.id}:${latestClientMessage.id}`;
     if (suflerTurnKeyRef.current === turnKey) {
       return;
     }
-    suflerTurnKeyRef.current = turnKey;
-    let cancelled = false;
+    const requestKey = turnKey;
+    suflerTurnKeyRef.current = requestKey;
     setSuflerLoading(true);
     setSuflerError("");
-    setSuflerQuery(latestClient.text);
-    const historyContext = summaryHistory.summary || summaryHistory.detailedSummary || "";
-    void requestSuflerSuggest(latestClient.text, 5, {
+    setSuflerQuery(latestClientMessage.text);
+    // Only summary of THIS client identity + transcript of THIS dialog.
+    const historyContext = summaryHistory.summary || "";
+    const timeoutId = window.setTimeout(() => {
+      if (suflerTurnKeyRef.current === requestKey) {
+        setSuflerLoading(false);
+        setSuflerError("Ошибка суфлёра. Повторите попытку позже.");
+      }
+    }, 25000);
+    void requestSuflerSuggest(latestClientMessage.text, 3, {
       clientHistory: historyContext,
+      dialogContext: dialogContextForSufler,
     })
       .then((result) => {
-        if (cancelled) return;
+        if (suflerTurnKeyRef.current !== requestKey) return;
+        window.clearTimeout(timeoutId);
         setSuflerRequestId(result.request_id || "");
-        setLiveSuflerRaw(result.hints || []);
-        setLiveSuflerHints((result.hints || []).map(mapApiHintToCard));
-        if (!result.hints?.length) {
+        // Extra UI guard: drop anything ≤20% even if backend slips.
+        const usable = (result.hints || []).filter(
+          (hint) => (hint.relevance_percent ?? hint.relevance_score * 100) > 20,
+        );
+        setLiveSuflerRaw(usable);
+        setLiveSuflerHints(usable.map(mapApiHintToCard));
+        if (!usable.length) {
           setSuflerError(
             result.blocked_reason === "no_relevant_knowledge"
-              ? "Нет релевантных статей в базе знаний — ответьте вручную."
-              : "Подсказки недоступны — ответьте вручную.",
+              ? "Нет подсказок с релевантностью выше 20% — ответьте вручную."
+              : "Ошибка суфлёра. Повторите попытку позже.",
           );
+        } else {
+          setSuflerError("");
         }
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
+        if (suflerTurnKeyRef.current !== requestKey) return;
+        window.clearTimeout(timeoutId);
         setLiveSuflerHints([]);
         setLiveSuflerRaw([]);
         setSuflerError(
@@ -3400,17 +3534,21 @@ export function ArmOperatorView({
         );
       })
       .finally(() => {
-        if (!cancelled) setSuflerLoading(false);
+        if (suflerTurnKeyRef.current === requestKey) {
+          window.clearTimeout(timeoutId);
+          setSuflerLoading(false);
+        }
       });
     return () => {
-      cancelled = true;
+      window.clearTimeout(timeoutId);
     };
-    // Intentionally depend on message ids / dialog — not summary text (avoids flicker).
+    // Depend on stable client message id — not liveMessages array identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active?.id, active?.live, isReadOnly, liveMessages]);
+  }, [active?.id, active?.live, active?.isTestClient, latestClientMessage?.id, latestClientMessage?.text]);
 
   useEffect(() => {
     if (assignmentGraceUntil == null) return;
+    setGraceNoticeDismissed(false);
     if (assignmentGraceUntil <= Date.now()) {
       setAssignmentGraceUntil(null);
       return;
@@ -3433,16 +3571,6 @@ export function ArmOperatorView({
       onViewModeChange("active");
     }
   };
-
-  useEffect(() => {
-    if (armRole === "admin") {
-      const isColleagueItem = COLLEAGUE_DIALOGUES.some((item) => item.id === selectedQueue);
-      if (isColleagueItem || viewMode === "colleague") {
-        onViewModeChange("active");
-        onSelectQueue(MY_DIALOGUES[0]?.id ?? QUEUE[0].id);
-      }
-    }
-  }, [armRole, selectedQueue, viewMode, onViewModeChange, onSelectQueue]);
 
   const [armOpen, setArmOpen] = useState(true);
   const [leftWidth, setLeftWidth] = useState(ARM_LEFT_WIDTH_DEFAULT);
@@ -3497,8 +3625,8 @@ export function ArmOperatorView({
   const [expandedHintIds, setExpandedHintIds] = useState<Record<string, boolean>>({});
   const [expandedClientCard, setExpandedClientCard] = useState(false);
   const [expandedSummaryCard, setExpandedSummaryCard] = useState(false);
-  const [spellWarning, setSpellWarning] = useState(false);
   const [composerNotice, setComposerNotice] = useState<string | null>(null);
+  const [graceNoticeDismissed, setGraceNoticeDismissed] = useState(false);
   const [aiImproveModal, setAiImproveModal] = useState<AiImproveModalState | null>(null);
   const [closeDialogConfirmOpen, setCloseDialogConfirmOpen] = useState(false);
   const [blockClientConfirmOpen, setBlockClientConfirmOpen] = useState(false);
@@ -3509,10 +3637,10 @@ export function ArmOperatorView({
       if (liveWaiting.length > 0) next.waiting = true;
       if (liveInitiated.length > 0) next.initiated = true;
       if (liveShared.length > 0) next.shared = true;
-      if (viewOnly && liveColleagues.length > 0) next.colleagues = true;
+      if (liveColleagues.length > 0) next.colleagues = true;
       return next;
     });
-  }, [liveWaiting.length, liveInitiated.length, liveShared.length, liveColleagues.length, viewOnly]);
+  }, [liveWaiting.length, liveInitiated.length, liveShared.length, liveColleagues.length]);
 
   useEffect(() => {
     if (!viewOnly || liveColleagues.length === 0) return;
@@ -3538,10 +3666,30 @@ export function ArmOperatorView({
 
   useEffect(() => {
     if (!liveMode) return;
-    if (selectedQueue && remainingDialogs.some((item) => item.id === selectedQueue)) return;
+    const syncViewModeForId = (id: string) => {
+      const section = findSectionForQueueItem(id, visibleSections);
+      if (section?.id === "colleagues") {
+        if (viewMode !== "colleague") onViewModeChange("colleague");
+      }
+    };
+    if (selectedQueue && remainingDialogs.some((item) => item.id === selectedQueue)) {
+      syncViewModeForId(selectedQueue);
+      return;
+    }
     const firstLive = remainingDialogs.find((item) => item.live);
-    if (firstLive) onSelectQueue(firstLive.id);
-  }, [liveMode, selectedQueue, remainingDialogs, onSelectQueue]);
+    if (!firstLive) return;
+    onSelectQueue(firstLive.id);
+    const section = findSectionForQueueItem(firstLive.id, visibleSections);
+    onViewModeChange(section?.id === "colleagues" ? "colleague" : "active");
+  }, [
+    liveMode,
+    selectedQueue,
+    remainingDialogs,
+    onSelectQueue,
+    onViewModeChange,
+    visibleSections,
+    viewMode,
+  ]);
 
   const clearComposerNotice = () => setComposerNotice(null);
 
@@ -3615,7 +3763,7 @@ export function ArmOperatorView({
       return;
     }
     setAcceptingDialogId(id);
-    void acceptDialog(id, operatorName)
+    void acceptDialog(id, actingName)
       .then(() => {
         setAssignmentGraceUntil(null);
         onSelectQueue(id);
@@ -3631,8 +3779,8 @@ export function ArmOperatorView({
   };
 
   const handleTakeOverDialog = () => {
-    if (!active?.live || !allowTransferInView) return;
-      void transferDialogRemote(active.id, operatorName, active.operatorName || "")
+    if (!active?.live || !canTakeOverDialog) return;
+    void transferDialogRemote(active.id, actingName, active.operatorName || "")
       .then(() => {
         setComposerNotice(`Диалог с ${active.name} взят на себя.`);
         window.location.assign("/online-chat");
@@ -3690,7 +3838,6 @@ export function ArmOperatorView({
           onReplyChange("");
           setPendingAttachment(null);
           setQuoteMessage(null);
-          setSpellWarning(false);
           setComposerNotice(
             file
               ? text
@@ -3708,7 +3855,6 @@ export function ArmOperatorView({
     onReplyChange("");
     setPendingAttachment(null);
     setQuoteMessage(null);
-    setSpellWarning(false);
     setComposerNotice(notice);
   };
 
@@ -3795,6 +3941,50 @@ export function ArmOperatorView({
     assignmentGraceUntil != null
       ? Math.max(0, Math.ceil((assignmentGraceUntil - nowMs) / 1000))
       : 0;
+  const showGraceNotice = graceSecondsLeft > 0 && !graceNoticeDismissed;
+
+  const showTakeToolbarButton =
+    !!active?.live &&
+    !viewOnly &&
+    (armRole === "supervisor" || isSharedQueuePeek);
+  const takeToolbarEnabled =
+    showTakeToolbarButton &&
+    !acceptingDialogId &&
+    ((canTakeOverDialog) ||
+      (isSharedQueuePeek && !atCapacity && !supervisorOwnsActive));
+  const takeToolbarLabel = canTakeOverDialog
+    ? "Взять на себя"
+    : isSharedQueuePeek
+      ? atCapacity
+        ? `Лимит ${myActiveCount}/${operatorCapacity}`
+        : "Взять диалог"
+      : "Взять на себя";
+  const handleTakeToolbar = () => {
+    if (canTakeOverDialog) {
+      handleTakeOverDialog();
+      return;
+    }
+    if (isSharedQueuePeek) {
+      handleAcceptSharedDialog();
+    }
+  };
+
+  const overlayNotices = [
+    ...(showGraceNotice
+      ? [{
+          id: "grace",
+          message: `У вас ${graceSecondsLeft} сек., чтобы вручную выбрать диалог из общей очереди. Затем следующий будет назначен автоматически.`,
+          tone: "info" as const,
+          onDone: () => setGraceNoticeDismissed(true),
+        }]
+      : []),
+    ...(composerNotice
+      ? [{ id: "composer", message: composerNotice, tone: "success" as const, onDone: clearComposerNotice }]
+      : []),
+    ...(toast
+      ? [{ id: "toast", message: toast, tone: "success" as const, onDone: onClearToast }]
+      : []),
+  ];
 
   const handleConfirmTransferDialog = () => {
     if (!active?.live) return;
@@ -3900,14 +4090,11 @@ export function ArmOperatorView({
       });
   };
 
-  const spellErrors = reply.trim().length > 0 ? findSpellErrors(reply) : [];
-
   const handleAiImprove = () => {
     setComposerNotice(null);
     const trimmed = reply.trim();
     if (trimmed.length === 0) return;
-    const errors = findSpellErrors(reply);
-    const improved = errors.length > 0 ? applySpellFixes(reply, errors) : polishTextDemo(reply);
+    const improved = polishTextDemo(reply);
     setAiImproveModal({ original: reply, improved });
   };
 
@@ -3915,7 +4102,6 @@ export function ArmOperatorView({
     if (!aiImproveModal) return;
     onReplyChange(aiImproveModal.improved);
     setAiImproveModal(null);
-    setSpellWarning(false);
   };
 
   const handleDismissAiImprove = () => {
@@ -4196,12 +4382,18 @@ export function ArmOperatorView({
                               onSelect={() => handleSelectQueue(q.id)}
                               onCollapse={() => collapseCard(q.id)}
                               onAccept={
-                                section.id === "shared" && !viewOnly
+                                section.id === "shared" &&
+                                !viewOnly &&
+                                armRole !== "supervisor"
                                   ? () => handleAcceptSharedDialog(q.id, q.name)
                                   : undefined
                               }
                               acceptDisabled={
-                                section.id === "shared" && !viewOnly ? atCapacity : undefined
+                                section.id === "shared" &&
+                                !viewOnly &&
+                                armRole !== "supervisor"
+                                  ? atCapacity
+                                  : undefined
                               }
                               acceptBusy={acceptingDialogId === q.id}
                             />
@@ -4249,6 +4441,7 @@ export function ArmOperatorView({
                 justifyContent: "center",
                 padding: 24,
                 gap: 12,
+                position: "relative",
               }}
             >
               <Text style={{ color: t.text.secondary, fontSize: 14, textAlign: "center", maxWidth: 420 }}>
@@ -4264,11 +4457,10 @@ export function ArmOperatorView({
                   Открыть симулятор
                 </a>
               ) : null}
-              {composerNotice ? (
-                <div style={{ width: "100%", maxWidth: 420 }}>
-                  <AutoFadeNotice message={composerNotice} onDone={clearComposerNotice} />
-                </div>
-              ) : null}
+              <ComposerOverlayNotices
+                placement="bottom"
+                notices={overlayNotices}
+              />
             </div>
           ) : (
             <>
@@ -4301,9 +4493,10 @@ export function ArmOperatorView({
                   }}
                 >
                   <Callout tone="warning" style={{ fontSize: 12, maxWidth: 420, width: "100%" }}>
-                    {allowTransferInView
-                      ? "Режим просмотра: без ответа клиенту. Можно перевести диалог."
-                      : "Режим просмотра: диалоги оператора только для наблюдения, без действий от его лица."}
+                    {`Просмотр АРМ оператора ${operatorName}.`}
+                    {canTakeOverDialog
+                      ? " Без ответа клиенту — можно взять диалог на себя."
+                      : " Только наблюдение, без действий от лица оператора."}
                   </Callout>
                 </div>
               ) : (
@@ -4313,7 +4506,7 @@ export function ArmOperatorView({
                 {(() => {
                   const resolved = resolveQueueWait(active, nowMs);
                   return resolved.slaTone ? (
-                    <SlaWaitPill wait={`SLA ${resolved.wait}`} slaTone={resolved.slaTone} />
+                    <SlaWaitPill wait={resolved.wait} slaTone={resolved.slaTone} />
                   ) : (
                     <Pill tone={resolved.urgent ? "warning" : "neutral"} size="sm">
                       SLA {resolved.wait}
@@ -4336,14 +4529,14 @@ export function ArmOperatorView({
           <div style={{ padding: "8px 16px", borderBottom: `1px solid ${t.stroke.tertiary}`, flexShrink: 0 }}>
             <Row style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <Text style={{ fontSize: 12, color: t.text.secondary }}>Тематика закрытия:</Text>
-              <div style={{ minWidth: 220, flex: "1 1 220px", maxWidth: 320 }}>
-                <Select
-                  value={closeTopic}
-                  onChange={onCloseTopicChange}
-                  disabled={isReadOnly}
-                  options={CLOSE_TOPICS.map((topic) => ({ value: topic, label: topic }))}
-                />
-              </div>
+              <TopicSelect
+                t={t}
+                value={closeTopic}
+                options={CLOSE_TOPICS}
+                onChange={onCloseTopicChange}
+                disabled={isReadOnly}
+                style={{ flex: "1 1 220px", maxWidth: 340 }}
+              />
               <Spacer />
               <Button
                 variant="ghost"
@@ -4423,7 +4616,9 @@ export function ArmOperatorView({
                         isDeleted={message.is_deleted}
                         editedAt={message.edited_at}
                         receiptStatus={
-                          message.is_deleted
+                          // Read receipts only for website widget — other channels have no read API.
+                          message.is_deleted ||
+                          (active.channel !== "Сайт" && active.channel !== "widget")
                             ? undefined
                             : message.receipt_status === "read" ||
                                 readMessageIdsRef.current.has(message.id)
@@ -4454,7 +4649,11 @@ export function ArmOperatorView({
                         avatarInitials="Б"
                         text={message.text}
                         time={messageTimeLabel(message.created_at)}
-                        receiptStatus={message.receipt_status}
+                        receiptStatus={
+                          active.channel === "Сайт" || active.channel === "widget"
+                            ? message.receipt_status
+                            : undefined
+                        }
                       />
                     );
                   }
@@ -4524,12 +4723,14 @@ export function ArmOperatorView({
           </div>
           <div
             style={{
+              position: "relative",
               padding: 12,
               borderTop: `1px solid ${t.stroke.secondary}`,
               flexShrink: 0,
               background: t.bg.elevated,
             }}
           >
+            <ComposerOverlayNotices notices={overlayNotices} />
             <input
               ref={fileInputRef}
               type="file"
@@ -4541,16 +4742,25 @@ export function ArmOperatorView({
               }}
             />
             <Row style={{ gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center", position: "relative" }}>
-              <Button
-                variant={showTemplates ? "primary" : "secondary"}
+              <IconButton
+                title="Шаблоны ответов"
+                aria-label="Шаблоны ответов"
                 disabled={composerLocked}
+                active={showTemplates}
                 onClick={() => {
                   setComposerTemplates(loadReplyTemplates());
                   setShowTemplates((open) => !open);
                 }}
               >
-                Шаблоны
-              </Button>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </IconButton>
               {showTemplates && !composerLocked ? (
                 <div
                   role="listbox"
@@ -4563,6 +4773,9 @@ export function ArmOperatorView({
                     zIndex: 20,
                     width: 360,
                     maxWidth: "min(360px, calc(100vw - 48px))",
+                    maxHeight: "min(320px, 45vh)",
+                    display: "flex",
+                    flexDirection: "column",
                     background: t.bg.elevated,
                     border: `1px solid ${scheme.accentWeak}`,
                     borderRadius: 12,
@@ -4580,6 +4793,7 @@ export function ArmOperatorView({
                       padding: "2px 6px 10px",
                       borderBottom: `1px solid ${t.stroke.secondary}`,
                       marginBottom: 8,
+                      flexShrink: 0,
                     }}
                   >
                     <div>
@@ -4599,7 +4813,7 @@ export function ArmOperatorView({
                       ✕
                     </Button>
                   </div>
-                  <Stack gap={4}>
+                  <Stack gap={4} style={{ overflowY: "auto", minHeight: 0, flex: 1, paddingRight: 2 }}>
                     {composerTemplates.map((template, index) => (
                       <button
                         key={template.id}
@@ -4667,20 +4881,45 @@ export function ArmOperatorView({
                   </Stack>
                 </div>
               ) : null}
-              <Button
-                variant="secondary"
-                disabled={composerLocked}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Файл
-              </Button>
-              <Button
-                variant="secondary"
+              <IconButton
+                title="Перевести диалог"
+                aria-label="Перевести диалог"
                 disabled={!active?.live || (composerLocked && !canTransferDespiteView)}
                 onClick={openTransferDialog}
               >
-                Перевести
-              </Button>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M17 8H7l3.5-3.5M7 16h10l-3.5 3.5"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </IconButton>
+              {showTakeToolbarButton ? (
+                <IconButton
+                  title={
+                    acceptingDialogId === active?.id
+                      ? "Принимаем…"
+                      : takeToolbarLabel
+                  }
+                  aria-label={takeToolbarLabel}
+                  disabled={!takeToolbarEnabled || acceptingDialogId === active?.id}
+                  onClick={handleTakeToolbar}
+                  style={
+                    takeToolbarEnabled
+                      ? {
+                          background: scheme.accent,
+                          borderColor: scheme.accent,
+                          color: "#fff",
+                        }
+                      : undefined
+                  }
+                >
+                  <TakeDialogIcon size={18} />
+                </IconButton>
+              ) : null}
             </Row>
             {clientDraft && active?.live && !composerLocked ? (
               <Callout tone="info" style={{ marginBottom: 8, fontSize: 12 }}>
@@ -4689,40 +4928,16 @@ export function ArmOperatorView({
             ) : null}
             {isSharedQueuePeek ? (
               <Callout tone="info" style={{ marginBottom: 8, fontSize: 12 }}>
-                Просмотр общей очереди: ответ недоступен, пока диалог не принят.
-                Нажмите «Взять» на карточке в списке слева
-                {atCapacity ? ` (лимит ${myActiveCount}/${operatorCapacity})` : ""}.
-                <div style={{ marginTop: 8 }}>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    disabled={!!acceptingDialogId || viewOnly || atCapacity}
-                    onClick={() => handleAcceptSharedDialog()}
-                    style={atCapacity ? { opacity: 0.45 } : undefined}
-                  >
-                    {acceptingDialogId === active?.id
-                      ? "Принимаем…"
-                      : atCapacity
-                        ? `Лимит ${myActiveCount}/${operatorCapacity}`
-                        : "Взять диалог"}
-                  </Button>
-                </div>
+                {armRole === "supervisor"
+                  ? "Просмотр общей очереди. Чтобы отвечать клиенту, нажмите «Взять диалог»."
+                  : `Просмотр общей очереди: ответ недоступен, пока диалог не принят${
+                      atCapacity ? ` (лимит ${myActiveCount}/${operatorCapacity})` : ""
+                    }.`}
               </Callout>
             ) : null}
-            {graceSecondsLeft > 0 ? (
+            {canTakeOverDialog ? (
               <Callout tone="info" style={{ marginBottom: 8, fontSize: 12 }}>
-                У вас {graceSecondsLeft} сек., чтобы вручную выбрать диалог из общей очереди.
-                Затем следующий диалог будет назначен автоматически.
-              </Callout>
-            ) : null}
-            {viewOnly && allowTransferInView && active?.live ? (
-              <Callout tone="info" style={{ marginBottom: 8, fontSize: 12 }}>
-                Режим просмотра АРМ оператора.
-                <div style={{ marginTop: 8 }}>
-                  <Button size="sm" variant="primary" onClick={handleTakeOverDialog}>
-                    Взять на себя
-                  </Button>
-                </div>
+                Режим просмотра чужого диалога. Чтобы отвечать, нажмите «Взять на себя».
               </Callout>
             ) : null}
             {quoteMessage ? (
@@ -4770,30 +4985,63 @@ export function ArmOperatorView({
             ) : null}
             <div style={{ position: "relative", opacity: composerLocked ? 0.55 : 1 }}>
               <Stack gap={8}>
-                <TextArea
-                  placeholder={
-                    isClientBlocked
-                      ? "Клиент заблокирован — ответ недоступен"
-                      : isSharedQueuePeek
-                        ? "Общая очередь — только просмотр"
-                        : pendingAttachment
-                          ? "Добавьте текст к файлу (необязательно)…"
-                          : "Введите ответ клиенту…"
-                  }
-                  style={{ width: "100%", minHeight: 72, overflow: "auto", resize: "vertical" }}
-                  rows={3}
-                  value={reply}
-                  onChange={(v) => {
-                    onReplyChange(v);
-                    setSpellWarning(false);
-                    setComposerNotice(null);
-                    if (aiImproveModal && v !== aiImproveModal.original) {
-                      setAiImproveModal(null);
+                <div style={{ position: "relative" }}>
+                  <TextArea
+                    placeholder={
+                      isClientBlocked
+                        ? "Клиент заблокирован — ответ недоступен"
+                        : isSharedQueuePeek
+                          ? "Общая очередь — только просмотр"
+                          : pendingAttachment
+                            ? "Добавьте текст к файлу (необязательно)…"
+                            : "Введите ответ клиенту…"
                     }
-                  }}
-                  disabled={composerLocked}
-                />
-                {!composerLocked ? <SpellCheckHints t={t} text={reply} errors={spellErrors} /> : null}
+                    style={{
+                      width: "100%",
+                      minHeight: 72,
+                      overflow: "auto",
+                      resize: "vertical",
+                      paddingLeft: 36,
+                      paddingTop: 10,
+                      boxSizing: "border-box",
+                    }}
+                    rows={3}
+                    value={reply}
+                    onChange={(v) => {
+                      onReplyChange(v);
+                      setComposerNotice(null);
+                      if (aiImproveModal && v !== aiImproveModal.original) {
+                        setAiImproveModal(null);
+                      }
+                    }}
+                    disabled={composerLocked}
+                  />
+                  <IconButton
+                    title="Прикрепить файл"
+                    aria-label="Прикрепить файл"
+                    disabled={composerLocked}
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{
+                      position: "absolute",
+                      left: 6,
+                      top: 6,
+                      width: 28,
+                      height: 28,
+                      border: "none",
+                      background: "transparent",
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <path
+                        d="M21 12.5V17a5 5 0 0 1-10 0V7a3 3 0 1 1 6 0v9.5a1.5 1.5 0 0 1-3 0V8"
+                        stroke="currentColor"
+                        strokeWidth="2.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </IconButton>
+                </div>
                 <div style={{ position: "relative" }}>
                   {aiImproveModal && !composerLocked ? (
                     <AiImprovePopover
@@ -4820,13 +5068,7 @@ export function ArmOperatorView({
                     <Button
                       variant="primary"
                       disabled={composerLocked || (reply.trim().length === 0 && !pendingAttachment)}
-                      onClick={() => {
-                        if (spellErrors.length > 0 && reply.trim()) {
-                          setSpellWarning(true);
-                          return;
-                        }
-                        deliverReply("Сообщение отправлено.");
-                      }}
+                      onClick={() => deliverReply("Сообщение отправлено.")}
                     >
                       Отправить
                     </Button>
@@ -4834,38 +5076,6 @@ export function ArmOperatorView({
                 </div>
               </Stack>
             </div>
-            {spellWarning && spellErrors.length > 0 && !composerLocked ? (
-              <Callout tone="warning" style={{ marginTop: 8, fontSize: 12 }}>
-                <Text style={{ fontSize: 12, marginBottom: 8 }}>
-                  Обнаружены орфографические ошибки ({spellErrors.length}). Исправить или отправить всё равно?
-                </Text>
-                <Row gap={8} wrap>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      onReplyChange(applySpellFixes(reply, spellErrors));
-                      setSpellWarning(false);
-                    }}
-                  >
-                    Исправить
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      deliverReply("Сообщение отправлено (орфография не исправлена).");
-                    }}
-                  >
-                    Отправить всё равно
-                  </Button>
-                </Row>
-              </Callout>
-            ) : null}
-            {composerNotice ? (
-              <AutoFadeNotice message={composerNotice} onDone={clearComposerNotice} />
-            ) : null}
-            {toast ? <AutoFadeNotice message={toast} onDone={onClearToast} /> : null}
           </div>
             </>
           )}
@@ -4900,6 +5110,11 @@ export function ArmOperatorView({
           }}
         >
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 12 }}>
+          {viewOnly ? (
+            <Callout tone="info" style={{ marginBottom: 12, fontSize: 12 }}>
+              Просмотр АРМ оператора {operatorName}
+            </Callout>
+          ) : null}
           <H3 style={{ fontSize: 15, fontWeight: 700 }}>Summary клиента</H3>
           <ClientSummaryCard
             t={t}

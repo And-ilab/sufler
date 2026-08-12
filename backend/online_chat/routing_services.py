@@ -274,8 +274,17 @@ def update_operator_presence(operator: OperatorProfile, presence: str) -> Operat
 
 @transaction.atomic
 def transfer_to_operator(
-    dialog: Dialog, *, operator_id: object | None = None, operator_name: str = ""
+    dialog: Dialog,
+    *,
+    operator_id: object | None = None,
+    operator_name: str = "",
+    enforce_capacity: bool = False,
 ) -> Dialog:
+    """Hand dialog to another operator/supervisor.
+
+    Transfers may exceed soft capacity (supervisor/manual routing). Auto-accept
+    still enforces capacity via ``accept_waiting_dialog``.
+    """
     dialog = Dialog.objects.select_for_update().get(pk=dialog.pk)
     target = None
     if operator_id:
@@ -289,7 +298,11 @@ def transfer_to_operator(
     name = target.display_name if target else operator_name.strip()
     if not name:
         raise ValueError("target operator is required")
-    if target and not operator_has_capacity(target, exclude_dialog_id=dialog.pk):
+    if (
+        enforce_capacity
+        and target
+        and not operator_has_capacity(target, exclude_dialog_id=dialog.pk)
+    ):
         raise ValueError("operator capacity reached")
     previous = dialog.operator_name
     dialog.operator = target

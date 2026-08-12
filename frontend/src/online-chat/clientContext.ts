@@ -35,7 +35,7 @@ export const ACTIVE_CLIENT: ClientInfoData = {
   dialogNo: '№ 18 944',
   visitorId: 'vis-7f3a2b1c',
   visitTime: '09.07.2026, 08:42',
-  entryPath: '/cards/debit',
+  entryPath: '/fizicheskim_licam/cards/',
   entryChannel: 'Виджет сайта',
   browser: 'Chrome 125',
   device: 'Windows 11',

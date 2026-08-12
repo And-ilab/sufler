@@ -93,14 +93,15 @@ def handle_telegram_client_text(
             text=cleaned,
             external_message_id=external_message_id,
         )
-        return _reply(
-            chat_id,
-            "Сообщение передано оператору.",
-            routed_to="arm_queue",
-            event_id=str(uuid.uuid4()),
-            dialog_id=str(existing.id),
-            message_id=str(message.id),
-        )
+        # No Telegram ack — client already sees their own message in the chat.
+        return {
+            "ok": True,
+            "channel": "telegram",
+            "routed_to": "arm_queue",
+            "event_id": str(uuid.uuid4()),
+            "dialog_id": str(existing.id),
+            "message_id": str(message.id),
+        }
 
     session, created = TelegramOnboardingSession.objects.get_or_create(
         chat_id=chat_id,
@@ -109,11 +110,25 @@ def handle_telegram_client_text(
 
     is_start = cleaned.casefold() in {"/start", "start", "начать"}
     if is_start or session.step == TelegramOnboardingSession.Step.DONE:
+        # Keep last phone/FIO for identity continuity across repeat contacts.
+        # Only the question is cleared — phone is re-confirmed later.
+        last_dialog = (
+            Dialog.objects.filter(
+                channel="telegram",
+                client_external_id=chat_id,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if last_dialog:
+            if not session.phone and last_dialog.client_phone:
+                session.phone = last_dialog.client_phone
+            if not session.first_name and last_dialog.client_first_name:
+                session.first_name = last_dialog.client_first_name
+            if not session.last_name and last_dialog.client_last_name:
+                session.last_name = last_dialog.client_last_name
         session.step = TelegramOnboardingSession.Step.AWAIT_QUESTION
         session.question = ""
-        session.first_name = ""
-        session.last_name = ""
-        session.phone = ""
         session.save(
             update_fields=[
                 "step",

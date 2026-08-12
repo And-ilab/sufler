@@ -102,7 +102,44 @@ def _store(
 
 
 def handle_telegram_update(payload: Mapping[str, Any]) -> dict[str, Any]:
+    from online_chat.channel_delivery import answer_telegram_callback, send_telegram_text
+    from online_chat.models import Dialog
+    from online_chat.services import save_feedback
     from online_chat.telegram_onboarding import handle_telegram_client_text
+
+    callback = payload.get("callback_query")
+    if isinstance(callback, Mapping):
+        data = str(callback.get("data") or "")
+        callback_id = str(callback.get("id") or "")
+        parts = data.split(":")
+        if len(parts) == 3 and parts[0] == "rate":
+            dialog_id, rating_raw = parts[1], parts[2]
+            try:
+                rating = int(rating_raw)
+            except ValueError:
+                rating = 0
+            dialog = Dialog.objects.filter(pk=dialog_id).first()
+            if dialog is None or rating < 1 or rating > 5:
+                answer_telegram_callback(callback_id, "Не удалось сохранить оценку.")
+                return {"ok": True, "channel": "telegram", "routed_to": "rating_ignored"}
+            save_feedback(dialog, rating=rating, comment="telegram_inline")
+            answer_telegram_callback(callback_id, "Спасибо за оценку!")
+            chat = (callback.get("message") or {}).get("chat") or {}
+            chat_id = str(chat.get("id") or dialog.client_external_id or "")
+            if chat_id:
+                send_telegram_text(
+                    chat_id,
+                    f"Спасибо! Ваша оценка: {rating}/5. Хорошего дня!",
+                )
+            return {
+                "ok": True,
+                "channel": "telegram",
+                "routed_to": "rating_saved",
+                "dialog_id": str(dialog.id),
+                "rating": rating,
+            }
+        answer_telegram_callback(callback_id)
+        return {"ok": True, "channel": "telegram", "routed_to": "callback_ignored"}
 
     message = payload.get("message") or payload.get("edited_message") or {}
     if not isinstance(message, Mapping):

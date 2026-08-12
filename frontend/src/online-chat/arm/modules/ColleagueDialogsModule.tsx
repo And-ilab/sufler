@@ -104,7 +104,7 @@ export function ColleagueDialogsModule({
     if (!selected) return
     const params = new URLSearchParams({ mode: 'view', operator: selected.name })
     if (armRole === 'supervisor') params.set('transfer', '1')
-    window.location.assign(`/online-chat?${params.toString()}`)
+    window.location.assign(`/online-chat/operators?${params.toString()}`)
   }
 
   return (

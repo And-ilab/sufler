@@ -27,6 +27,7 @@ export type OnlineChatDialog = {
   department_id?: string | null
   department_name?: string | null
   preview: string
+  entry_url?: string
   close_topic: string
   created_at: string
   updated_at: string
@@ -34,7 +35,11 @@ export type OnlineChatDialog = {
   closed_at: string | null
   client_last_seen_at?: string | null
   wait_seconds: number
+  /** Absolute ISO timestamp for client-side SLA stopwatch (no drift on refresh). */
+  wait_anchor_at?: string | null
   needs_reply?: boolean
+  /** Simulator / seed client — sufler must stay disabled. */
+  is_test_client?: boolean
   has_feedback?: boolean
   messages?: OnlineChatMessage[]
 }
@@ -52,12 +57,24 @@ export type ClientHistoryItem = {
   message_count?: number
 }
 
+export type ClientHistorySummaryBlock = {
+  date_label: string
+  topic: string
+  essence?: string
+  channel?: string
+  operator_name?: string
+}
+
 export type ClientHistoryResponse = {
   ok: boolean
   items: ClientHistoryItem[]
   count: number
+  previous_count?: number
   summary: string
   detailed_summary?: string
+  summary_topics?: string[]
+  detailed_blocks?: ClientHistorySummaryBlock[]
+  is_first?: boolean
   repeat_hint?: string
 }
 

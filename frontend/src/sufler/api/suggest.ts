@@ -8,6 +8,7 @@ export interface SuflerHintCitation {
 export interface SuflerHint {
   rank: number
   text: string
+  operator_tip?: string
   relevance_score: number
   relevance_percent: number
   citations: SuflerHintCitation[]
@@ -46,8 +47,8 @@ function friendlySuggestError(raw: string, status: number): string {
   ) {
     return 'Ошибка суфлёра. Повторите попытку позже.'
   }
-  if (code.includes('no_relevant_knowledge')) {
-    return 'Нет релевантных статей в базе знаний — ответьте вручную.'
+  if (code.includes('no_relevant_knowledge') || code.includes('sufler_unavailable')) {
+    return 'Ошибка суфлёра. Повторите попытку позже.'
   }
   if (!raw || raw === 'validation_error' || /^[a-z0-9_]+$/i.test(raw)) {
     return 'Ошибка суфлёра. Повторите попытку позже.'
@@ -57,8 +58,8 @@ function friendlySuggestError(raw: string, status: number): string {
 
 export async function requestSuflerSuggest(
   text: string,
-  limit = 5,
-  options?: { clientHistory?: string },
+  limit = 3,
+  options?: { clientHistory?: string; dialogContext?: string },
 ): Promise<SuggestResponse> {
   // Online-chat ARM is often opened without a prior admin/login bootstrap.
   try {
@@ -78,6 +79,7 @@ export async function requestSuflerSuggest(
       text,
       limit,
       client_history: options?.clientHistory ?? '',
+      dialog_context: options?.dialogContext ?? '',
     }),
   })
   const body = await response.json().catch(() => ({} as { error?: string; details?: { request?: string[] } }))
