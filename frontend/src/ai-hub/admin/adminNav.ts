@@ -20,6 +20,7 @@ export type AdminScreen =
   | 'scenario_test'
   | 'scenario_bindings'
   | 'sufler_policies'
+  | 'ocr'
   | 'doc_types'
   | 'doc_export'
   | 'ocr_reports'
@@ -107,6 +108,14 @@ export const ADMIN_NAV: readonly AdminNavItem[] = [
   { id: 'sufler_policies', label: 'Политики суфлёра', group: 'СУФЛЁР / КЦ', roleCodes: CC_ADMINS, demoRoles: ['cc_admin', 'kb_admin', 'auditor'] },
   { id: 'cc_reports', label: 'Отчётность КЦ', group: 'СУФЛЁР / КЦ', roleCodes: CC_REPORTS_ROLES, demoRoles: ['cc_admin', 'auditor'] },
   { id: 'asr_qa', label: 'QA записей ASR', group: 'СУФЛЁР / КЦ', roleCodes: CC_REPORTS_ROLES, demoRoles: ['cc_admin', 'auditor'] },
+  {
+    id: 'ocr',
+    label: 'OCR',
+    group: 'ДОКУМЕНТЫ',
+    featured: true,
+    roleCodes: [...new Set([...ALL_ADMINS, ...OCR_REPORTS_ROLES])],
+    demoRoles: ALL_DEMO_ROLES,
+  },
   { id: 'doc_types', label: 'Типы документов', group: 'ДОКУМЕНТЫ', roleCodes: OCR_ADMINS, demoRoles: ['doc_admin', 'auditor'] },
   { id: 'doc_export', label: 'Экспорт документов', group: 'ДОКУМЕНТЫ', roleCodes: OCR_ADMINS, demoRoles: ['doc_admin', 'auditor'] },
   { id: 'ocr_reports', label: 'Отчётность OCR', group: 'ДОКУМЕНТЫ', roleCodes: OCR_REPORTS_ROLES, demoRoles: ['doc_admin', 'auditor'] },

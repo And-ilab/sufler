@@ -16,6 +16,8 @@ import {
 } from './api/knowledgeBases'
 import {
   extractChatAttachment,
+  fieldConfidencePercent,
+  fieldDisplayValue,
   type ChatAttachmentPayload,
 } from './api/attachments'
 import {
@@ -30,8 +32,67 @@ import {
 import { useAssistantChat } from './useAssistantChat'
 import './AssistantChat.css'
 
-const ATTACH_ACCEPT = '.pdf,.doc,.docx,.txt,.rtf'
+const ATTACH_ACCEPT = '.pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png,.tiff,.tif'
+const OCR_ACCEPT = '.pdf,.jpg,.jpeg,.png,.tiff,.tif'
 const ATTACH_MAX_FILES = 5
+
+const OCR_FIELD_LABELS: Record<string, string> = {
+  full_name: 'ФИО',
+  surname: 'Фамилия',
+  given_name: 'Имя',
+  patronymic: 'Отчество',
+  series: 'Серия',
+  number: 'Номер',
+  issue_date: 'Дата выдачи',
+  birth_date: 'Дата рождения',
+  document_number: 'Номер документа',
+  date: 'Дата',
+  payer: 'Плательщик',
+  beneficiary: 'Получатель',
+  amount: 'Сумма',
+  purpose: 'Назначение',
+  currency: 'Валюта',
+}
+
+const OCR_CONFIDENCE_TONE = (pct: number | null): 'success' | 'warning' | 'danger' | 'neutral' => {
+  if (pct == null) return 'neutral'
+  if (pct >= 85) return 'success'
+  if (pct >= 60) return 'warning'
+  return 'danger'
+}
+
+interface OcrPanelField {
+  id: string
+  label: string
+  value: string
+  confidence: number | null
+}
+
+interface OcrPanelState {
+  open: boolean
+  busy: boolean
+  error: string
+  fileName: string
+  previewUrl: string | null
+  documentType: string
+  validationStatus: string | null
+  jobId: string
+  fields: OcrPanelField[]
+  rawText: string
+}
+
+const EMPTY_OCR_PANEL: OcrPanelState = {
+  open: false,
+  busy: false,
+  error: '',
+  fileName: '',
+  previewUrl: null,
+  documentType: '',
+  validationStatus: null,
+  jobId: '',
+  fields: [],
+  rawText: '',
+}
 
 function toolBadgeStatus(state: ToolRunState): StatusBadgeStatus {
   if (state === 'done') return 'success'
@@ -74,19 +135,29 @@ function FeedbackBar({
   onFeedback: (id: string, kind: FeedbackKind) => void
 }) {
   if (message.role !== 'assistant' || message.pending) return null
+  if (message.feedback) {
+    return (
+      <div
+        className="asst-feedback asst-feedback--saved"
+        aria-label="Оценка ответа"
+        data-testid={`feedback-${message.id}`}
+      >
+        <span className="asst-feedback__saved" data-testid={`feedback-saved-${message.id}`}>
+          Оценка сохранена
+        </span>
+      </div>
+    )
+  }
   return (
     <div className="asst-feedback" aria-label="Оценить ответ" data-testid={`feedback-${message.id}`}>
       {(Object.keys(FEEDBACK_LABELS) as FeedbackKind[]).map((kind) => {
         const meta = FEEDBACK_LABELS[kind]
-        const active = message.feedback === kind
         return (
           <Button
             key={kind}
             type="button"
-            variant={active ? 'primary' : 'ghost'}
+            variant="ghost"
             title={meta.title}
-            disabled={Boolean(message.feedback)}
-            aria-pressed={active}
             data-testid={`feedback-${kind}-${message.id}`}
             onClick={() => onFeedback(message.id, kind)}
           >
@@ -94,27 +165,84 @@ function FeedbackBar({
           </Button>
         )
       })}
-      {message.feedback ? (
-        <span className="asst-feedback__saved">Оценка сохранена</span>
-      ) : null}
     </div>
   )
 }
 
 function sourceHref(source: AssistantSource): string | null {
+  const articleId =
+    source.article_id != null && String(source.article_id).trim()
+      ? String(source.article_id)
+      : (/:(\d+):/.exec(source.id)?.[1] || '')
+  if (source.kb_slug && articleId) {
+    return (
+      `/api/v1/assistant/sources/download`
+      + `?kb_slug=${encodeURIComponent(source.kb_slug)}`
+      + `&article_id=${encodeURIComponent(articleId)}`
+    )
+  }
   const link = (source.permalink || '').trim()
   if (!link || link === '#') return null
-  if (link.includes('hub.local')) {
-    // Dev placeholder — keep as document anchor for UI continuity.
-    return link
-  }
   return link
 }
 
 function SourceItem({ source }: { source: AssistantSource }) {
   const [open, setOpen] = useState(false)
+  const [fileError, setFileError] = useState('')
   const href = sourceHref(source)
   const hasQuote = Boolean(source.snippet?.trim())
+  const isDownloadApi = Boolean(href?.includes('/api/v1/assistant/sources/download'))
+
+  const openSourceFile = async () => {
+    if (!href) return
+    setFileError('')
+    if (!isDownloadApi) {
+      window.open(href, '_blank', 'noopener,noreferrer')
+      return
+    }
+    try {
+      const response = await fetch(href, { credentials: 'include' })
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`
+        try {
+          const payload = (await response.json()) as {
+            details?: { file?: string[]; request?: string[] }
+            error?: string
+          }
+          detail =
+            payload.details?.file?.[0]
+            || payload.details?.request?.[0]
+            || payload.error
+            || detail
+        } catch {
+          /* ignore */
+        }
+        throw new Error(detail)
+      }
+      const blob = await response.blob()
+      const header = response.headers.get('Content-Disposition') || ''
+      const matched = /filename="?([^"]+)"?/i.exec(header)
+      const filename =
+        matched?.[1]
+        || source.title
+        || 'document'
+      const objectUrl = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = filename
+      anchor.rel = 'noopener'
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      // Also try open in new tab (PDF/txt); browsers may still download office files.
+      window.setTimeout(() => {
+        window.open(objectUrl, '_blank', 'noopener,noreferrer')
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+      }, 50)
+    } catch (err) {
+      setFileError(err instanceof Error ? err.message : 'Не удалось открыть файл')
+    }
+  }
 
   return (
     <li className="asst-source-item" data-testid={`source-item-${source.id}`}>
@@ -126,9 +254,12 @@ function SourceItem({ source }: { source: AssistantSource }) {
           <a
             className="asst-source-item__link"
             href={href}
-            target="_blank"
-            rel="noreferrer"
-            title="Открыть статью / документ"
+            title="Открыть файл источника"
+            data-testid={`source-link-${source.id}`}
+            onClick={(event) => {
+              event.preventDefault()
+              void openSourceFile()
+            }}
           >
             {source.title}
           </a>
@@ -146,6 +277,9 @@ function SourceItem({ source }: { source: AssistantSource }) {
           </Button>
         ) : null}
       </div>
+      {fileError ? (
+        <p className="asst-source-item__error" role="alert">{fileError}</p>
+      ) : null}
       {open && hasQuote ? (
         <blockquote className="asst-source-item__quote" data-testid={`source-quote-text-${source.id}`}>
           {source.snippet}
@@ -250,6 +384,14 @@ function MessageLenta({
   )
 }
 
+const TOOL_DESCRIPTIONS: Record<ToolId, string> = {
+  code: 'Черновик фрагмента кода по запросу из чата.',
+  sql: 'Read-only запросы к разрешённым витринам. Изменения запрещены.',
+  rpa: 'Запуск роботов только после явного подтверждения оператора.',
+  document: 'Сформировать или разобрать документ (в т.ч. OCR-поля).',
+  translate: 'Перевод фрагмента ответа или вложения RU ↔ EN.',
+}
+
 function ToolsPanel({
   tools,
   open,
@@ -261,55 +403,207 @@ function ToolsPanel({
   onClose: () => void
   onRun: (id: ToolId) => void
 }) {
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose, open])
+
   if (!open) return null
 
   return (
     <div
-      id="asst-tools-panel"
-      className="asst-tools"
-      data-testid="asst-tools-panel"
-      role="region"
-      aria-label="Инструменты ассистента"
+      className="asst-tools is-open"
+      data-testid="asst-tools-shell"
+      role="presentation"
     >
-      <div className="asst-tools__header">
-        <strong>Инструменты ассистента</strong>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={onClose}
-          aria-label="Закрыть инструменты"
-          data-testid="asst-tools-close"
-        >
-          ×
-        </Button>
-      </div>
-      <p className="asst-tools__hint">
-        Для SQL и RPA требуется role-based доступ и аудит действий. SQL — только read-only.
-      </p>
-      <div className="asst-tools__actions">
-        {tools.map((tool) => (
-          <button
-            key={tool.id}
+      <button
+        type="button"
+        className="asst-tools__backdrop"
+        aria-label="Закрыть инструменты"
+        onClick={onClose}
+      />
+      <aside
+        id="asst-tools-panel"
+        className="asst-tools__drawer"
+        data-testid="asst-tools-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Инструменты ассистента"
+      >
+        <header className="asst-tools__header">
+          <div>
+            <strong>Инструменты ассистента</strong>
+            <span>SQL и RPA — только с RBAC и аудитом. SQL — read-only.</span>
+          </div>
+          <Button
             type="button"
-            className="asst-tools__action"
-            disabled={tool.state === 'running'}
-            data-testid={`tool-run-${tool.id}`}
-            onClick={() => onRun(tool.id)}
+            variant="ghost"
+            onClick={onClose}
+            aria-label="Закрыть инструменты"
+            data-testid="asst-tools-close"
           >
-            <span className="asst-tools__action-label">{tool.label}</span>
-            <StatusBadge
-              status={toolBadgeStatus(tool.state)}
-              data-testid={`tool-state-${tool.id}`}
-              title={tool.detail || toolStateLabel(tool.state)}
-            >
-              {toolStateLabel(tool.state)}
-            </StatusBadge>
-            {tool.detail ? (
-              <small className="asst-tools__action-detail">{tool.detail}</small>
-            ) : null}
-          </button>
-        ))}
-      </div>
+            ×
+          </Button>
+        </header>
+
+        <div className="asst-tools__body">
+          <ul className="asst-tools__actions" data-testid="asst-tools-list">
+            {tools.map((tool) => (
+              <li key={tool.id}>
+                <button
+                  type="button"
+                  className="asst-tools__action"
+                  disabled={tool.state === 'running'}
+                  data-testid={`tool-run-${tool.id}`}
+                  onClick={() => onRun(tool.id)}
+                >
+                  <span className="asst-tools__action-main">
+                    <span className="asst-tools__action-label">{tool.label}</span>
+                    <small className="asst-tools__action-desc">
+                      {TOOL_DESCRIPTIONS[tool.id]}
+                    </small>
+                    {tool.detail ? (
+                      <small className="asst-tools__action-detail">{tool.detail}</small>
+                    ) : null}
+                  </span>
+                  <StatusBadge
+                    status={toolBadgeStatus(tool.state)}
+                    data-testid={`tool-state-${tool.id}`}
+                    title={tool.detail || toolStateLabel(tool.state)}
+                  >
+                    {/* visual.spec: tool-state-sql must contain «SQL» */}
+                    {tool.id === 'sql'
+                      ? `SQL · ${toolStateLabel(tool.state)}`
+                      : toolStateLabel(tool.state)}
+                  </StatusBadge>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+function OcrResultDrawer({
+  panel,
+  onClose,
+}: {
+  panel: OcrPanelState
+  onClose: () => void
+}) {
+  useEffect(() => {
+    if (!panel.open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose, panel.open])
+
+  return (
+    <div
+      className={`asst-ocr-panel${panel.open ? ' is-open' : ''}`}
+      data-testid="asst-ocr-panel"
+      aria-hidden={!panel.open}
+    >
+      <button
+        type="button"
+        className="asst-ocr-panel__backdrop"
+        aria-label="Закрыть результат OCR"
+        tabIndex={panel.open ? 0 : -1}
+        onClick={onClose}
+      />
+      <aside
+        id="asst-ocr-drawer"
+        className="asst-ocr-panel__drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Результат распознавания документа"
+        data-testid="asst-ocr-drawer"
+      >
+        <header className="asst-ocr-panel__header">
+          <div>
+            <strong>Распознавание OCR</strong>
+            <span>{panel.fileName || 'Документ'}</span>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+            aria-label="Закрыть OCR"
+            data-testid="asst-ocr-close"
+          >
+            ×
+          </Button>
+        </header>
+        <div className="asst-ocr-panel__body">
+          {panel.busy ? (
+            <p className="asst-ocr-panel__status" data-testid="asst-ocr-busy">
+              Распознаём документ…
+            </p>
+          ) : null}
+          {panel.error ? (
+            <p className="asst-ocr-panel__error" role="alert" data-testid="asst-ocr-error">
+              {panel.error}
+            </p>
+          ) : null}
+          {panel.previewUrl ? (
+            <div className="asst-ocr-panel__preview">
+              <img
+                src={panel.previewUrl}
+                alt={`Скан ${panel.fileName}`}
+                data-testid="asst-ocr-preview"
+              />
+            </div>
+          ) : null}
+          {!panel.busy && !panel.error ? (
+            <>
+              <div className="asst-ocr-panel__meta">
+                <strong>OCR · {panel.documentType || 'unknown'}</strong>
+                <StatusBadge
+                  status={
+                    panel.validationStatus === 'valid' ? 'success' : 'warning'
+                  }
+                >
+                  {panel.validationStatus || 'pending_review'}
+                </StatusBadge>
+              </div>
+              {panel.fields.length ? (
+                <ul className="asst-ocr-panel__fields" data-testid="asst-ocr-fields">
+                  {panel.fields.map((field) => (
+                    <li key={field.id} data-testid={`ocr-field-${field.id}`}>
+                      <span>{field.label}</span>
+                      <strong>{field.value || '—'}</strong>
+                      <StatusBadge status={OCR_CONFIDENCE_TONE(field.confidence)}>
+                        {field.confidence == null ? '—' : `${field.confidence}%`}
+                      </StatusBadge>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="asst-ocr-panel__empty">
+                  Поля не найдены. Ниже — сырой текст, который прочитал OCR.
+                </p>
+              )}
+              {panel.rawText ? (
+                <details className="asst-ocr-panel__raw">
+                  <summary>Текст OCR</summary>
+                  <pre data-testid="asst-ocr-raw">{panel.rawText}</pre>
+                </details>
+              ) : null}
+              {panel.jobId ? (
+                <small className="asst-ocr-panel__job">job {panel.jobId}</small>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      </aside>
     </div>
   )
 }
@@ -451,8 +745,11 @@ export function AssistantChat({
   const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([])
   const [attachBusy, setAttachBusy] = useState(false)
   const [attachError, setAttachError] = useState('')
+  const [ocrPanel, setOcrPanel] = useState<OcrPanelState>(EMPTY_OCR_PANEL)
   const kbRootRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const ocrFileInputRef = useRef<HTMLInputElement>(null)
+  const ocrPreviewUrlRef = useRef<string | null>(null)
   const [kbCatalog, setKbCatalog] = useState<AssistantKbOption[]>(
     () => (knowledgeBasesProp ? [...knowledgeBasesProp] : []),
   )
@@ -628,6 +925,18 @@ export function AssistantChat({
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [kbOpen])
 
+  const revokeOcrPreview = () => {
+    if (ocrPreviewUrlRef.current) {
+      URL.revokeObjectURL(ocrPreviewUrlRef.current)
+      ocrPreviewUrlRef.current = null
+    }
+  }
+
+  const closeOcrPanel = () => {
+    revokeOcrPreview()
+    setOcrPanel(EMPTY_OCR_PANEL)
+  }
+
   const onPickFiles = async (fileList: FileList | null) => {
     if (!fileList?.length || readOnly) return
     const remaining = Math.max(0, ATTACH_MAX_FILES - attachments.length)
@@ -654,6 +963,64 @@ export function AssistantChat({
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
+
+  const onPickOcr = async (fileList: FileList | null) => {
+    if (!fileList?.length || readOnly) return
+    const file = fileList[0]
+    revokeOcrPreview()
+    const previewUrl = file.type.startsWith('image/')
+      ? URL.createObjectURL(file)
+      : null
+    ocrPreviewUrlRef.current = previewUrl
+    setHistoryOpen(false)
+    setToolsOpen(false)
+    setKbOpen(false)
+    setOcrPanel({
+      ...EMPTY_OCR_PANEL,
+      open: true,
+      busy: true,
+      fileName: file.name,
+      previewUrl,
+    })
+    try {
+      await ensureDevSession()
+      const payload = await extractChatAttachment(file, {
+        forceOcr: true,
+        documentType: 'passport',
+      })
+      const ocr = payload.ocr
+      const fields = Object.entries(ocr?.fields || {}).map(([id, raw]) => ({
+        id,
+        label: OCR_FIELD_LABELS[id] || id,
+        value: fieldDisplayValue(raw),
+        confidence: fieldConfidencePercent(raw),
+      }))
+      setOcrPanel({
+        open: true,
+        busy: false,
+        error: '',
+        fileName: file.name,
+        previewUrl,
+        documentType: ocr?.document_type || 'unknown',
+        validationStatus: ocr?.validation_status || null,
+        jobId: ocr?.job_id || '',
+        fields,
+        rawText: payload.text || '',
+      })
+    } catch (error) {
+      setOcrPanel((current) => ({
+        ...current,
+        open: true,
+        busy: false,
+        error:
+          error instanceof Error ? error.message : 'Не удалось распознать документ',
+      }))
+    } finally {
+      if (ocrFileInputRef.current) ocrFileInputRef.current.value = ''
+    }
+  }
+
+  useEffect(() => () => revokeOcrPreview(), [])
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
@@ -840,13 +1207,7 @@ export function AssistantChat({
         onDelete={deleteDialog}
       />
 
-      <MessageLenta
-        messages={messages}
-        streaming={streaming}
-        readOnly={readOnly}
-        onFeedback={setFeedback}
-        onStop={stopStreaming}
-      />
+      <OcrResultDrawer panel={ocrPanel} onClose={closeOcrPanel} />
 
       {!readOnly ? (
         <ToolsPanel
@@ -856,6 +1217,14 @@ export function AssistantChat({
           onRun={runTool}
         />
       ) : null}
+
+      <MessageLenta
+        messages={messages}
+        streaming={streaming}
+        readOnly={readOnly}
+        onFeedback={setFeedback}
+        onStop={stopStreaming}
+      />
 
       {error && !readOnly ? (
         <Card className="asst-error" role="alert">
@@ -875,27 +1244,6 @@ export function AssistantChat({
 
       <form className="asst-composer" onSubmit={onSubmit} data-testid="asst-composer">
         <div className="asst-composer__extras">
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="asst-composer__file"
-            accept={ATTACH_ACCEPT}
-            multiple
-            hidden
-            disabled={readOnly || attachBusy || streaming}
-            onChange={(event) => void onPickFiles(event.target.files)}
-            data-testid="asst-attach-input"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={readOnly || attachBusy || streaming || attachments.length >= ATTACH_MAX_FILES}
-            onClick={() => fileInputRef.current?.click()}
-            data-testid="asst-attach"
-            title="PDF, DOC, DOCX, TXT, RTF · до 10 МБ"
-          >
-            {attachBusy ? 'Читаю файл…' : 'Прикрепить'}
-          </Button>
           <Button
             type="button"
             variant={toolsOpen ? 'secondary' : 'ghost'}
@@ -905,10 +1253,21 @@ export function AssistantChat({
             onClick={() => {
               setToolsOpen((value) => !value)
               setKbOpen(false)
+              setHistoryOpen(false)
             }}
             data-testid="asst-composer-tools"
           >
             Инструменты
+          </Button>
+          <Button
+            type="button"
+            variant={ocrPanel.open ? 'secondary' : 'ghost'}
+            disabled={readOnly || ocrPanel.busy}
+            onClick={() => ocrFileInputRef.current?.click()}
+            data-testid="asst-composer-ocr"
+            title="Распознать документ — результат откроется слева, без отправки в чат"
+          >
+            {ocrPanel.busy ? 'OCR…' : 'OCR'}
           </Button>
         </div>
         {attachments.length > 0 ? (
@@ -936,23 +1295,84 @@ export function AssistantChat({
             {attachError}
           </p>
         ) : null}
-        <label htmlFor="asst-draft">Сообщение ассистенту</label>
-        <textarea
-          id="asst-draft"
-          value={draft}
-          maxLength={maxChars}
-          placeholder={
-            readOnly
-              ? 'Отправка сообщений недоступна для аналитика'
-              : attachments.length
-                ? 'Добавьте вопрос к файлу или отправьте для саммари…'
-                : 'Задайте вопрос…'
-          }
-          data-testid="asst-draft"
-          disabled={readOnly}
-          readOnly={readOnly}
-          onChange={(event) => setDraft(event.target.value)}
+        <label className="visually-hidden" htmlFor="asst-draft">
+          Сообщение ассистенту
+        </label>
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="asst-composer__file"
+          accept={ATTACH_ACCEPT}
+          multiple
+          hidden
+          disabled={readOnly || attachBusy || streaming}
+          onChange={(event) => void onPickFiles(event.target.files)}
+          data-testid="asst-attach-input"
         />
+        <input
+          ref={ocrFileInputRef}
+          type="file"
+          className="asst-composer__file"
+          accept={OCR_ACCEPT}
+          hidden
+          disabled={readOnly || ocrPanel.busy}
+          onChange={(event) => void onPickOcr(event.target.files)}
+          data-testid="asst-ocr-input"
+        />
+        <div className="asst-composer__field">
+          <textarea
+            id="asst-draft"
+            value={draft}
+            maxLength={maxChars}
+            placeholder={
+              readOnly
+                ? 'Отправка сообщений недоступна для аналитика'
+                : attachments.length
+                  ? 'Добавьте вопрос к файлу или отправьте для саммари…'
+                  : 'Задайте вопрос…'
+            }
+            data-testid="asst-draft"
+            disabled={readOnly}
+            readOnly={readOnly}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <button
+            type="button"
+            className="asst-composer__attach"
+            disabled={readOnly || attachBusy || streaming || attachments.length >= ATTACH_MAX_FILES}
+            onClick={() => fileInputRef.current?.click()}
+            data-testid="asst-attach"
+            title={
+              attachBusy
+                ? 'Читаю файл…'
+                : 'Прикрепить файл · PDF, DOC, DOCX, TXT, RTF, JPG, PNG · до 10 МБ'
+            }
+            aria-label={attachBusy ? 'Читаю файл' : 'Прикрепить файл'}
+          >
+            {attachBusy ? (
+              <span className="asst-composer__attach-busy" aria-hidden>
+                …
+              </span>
+            ) : (
+              <svg
+                className="asst-composer__attach-icon"
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden
+              >
+                <path
+                  d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.42-7.42l8.49-8.49a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l7.78-7.78"
+                  stroke="currentColor"
+                  strokeWidth="1.85"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+          </button>
+        </div>
         <div className="asst-composer__footer">
           <span data-testid="asst-char-count">
             {charCount} / {maxChars} символов

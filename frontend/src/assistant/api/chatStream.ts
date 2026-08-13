@@ -8,6 +8,7 @@ export interface ChatSource {
   relevance_percent?: number
   snippet?: string
   kb_slug?: string
+  article_id?: number | string
 }
 
 export interface ChatStreamChunk {

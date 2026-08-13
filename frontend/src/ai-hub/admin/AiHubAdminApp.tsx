@@ -16,6 +16,8 @@ import { QuPreviewScreen } from './QuPreviewScreen'
 import { KbAdminScreen } from './KbAdminScreen'
 import { PromptsAssistantScreen } from './PromptsAssistantScreen'
 import { CapabilitiesScreen } from './CapabilitiesScreen'
+import { DocTypesScreen } from './DocTypesScreen'
+import { OcrDocumentsPanel } from '../ocr/OcrDocumentsPanel'
 import type { ModelParamsData } from './api/modelRegistry'
 import {
   ADMIN_GROUPS,
@@ -147,6 +149,12 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
     subtitle: 'Релевантность, автоответы и ограничения подсказок.',
     status: 'Политика v4',
     cards: [['Порог контекста', '0.62', 'Реестр моделей'], ['Детерминированный ответ', '0.84', 'Реестр моделей'], ['Макс. подсказок', '3', 'На один запрос']],
+  },
+  ocr: {
+    title: 'OCR',
+    subtitle: 'Загрузка документов, очередь распознавания и проверка полей (HITL).',
+    status: 'Модуль OCR',
+    cards: [['Очередь', 'Задачи', 'В работе'], ['Загрузка', 'PDF / JPG / PNG', 'Пакетно'], ['Проверка', 'HITL', 'Поля и %']],
   },
   doc_types: {
     title: 'Типы документов',
@@ -464,6 +472,12 @@ export function AiHubAdminApp({
             <PromptsAssistantScreen canEdit={canEdit} />
           ) : screen === 'capabilities' ? (
             <CapabilitiesScreen canEdit={canEdit} />
+          ) : screen === 'ocr' ? (
+            <div className="admin-ocr-screen" data-testid="admin-ocr-screen">
+              <OcrDocumentsPanel />
+            </div>
+          ) : screen === 'doc_types' ? (
+            <DocTypesScreen canEdit={canEdit} />
           ) : (
             <>
               <section className="admin-stats" aria-label={`Сводка экрана ${copy.title}`}>
@@ -507,7 +521,7 @@ export function AiHubAdminApp({
           )}
         </main>
 
-        {screen !== 'qu_admin' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && (
+        {screen !== 'qu_admin' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && screen !== 'doc_types' && screen !== 'ocr' && (
         <footer className="admin-save-footer" data-testid="admin-save-footer">
           <span>
             {screen === 'model_params'

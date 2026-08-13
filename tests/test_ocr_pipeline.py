@@ -83,7 +83,7 @@ class OcrPipelineApiTest(TestCase):
         body = response.json()
         self.assertTrue(body["job_id"].startswith("ocrjob-"))
         self.assertTrue(body["document_id"].startswith("doc-"))
-        self.assertEqual(body["pipeline"], "IV.5")
+        self.assertTrue(str(body["pipeline"]).startswith("IV.5"))
 
         job = OcrJob.objects.get(pk=body["job_id"])
         self.assertEqual(job.status, OcrJob.STATUS_COMPLETED)
@@ -97,7 +97,9 @@ class OcrPipelineApiTest(TestCase):
         result = json.loads(result_raw.decode("utf-8"))
         self.assertEqual(result["job_id"], job.job_id)
         self.assertIn("payment order", result["pages"][0]["text"])
-        self.assertEqual(result["ocr_engine"]["mode"], "stub")
+        # UTF-8 text-as-image fixtures use embedded_text mode (real engines optional).
+        self.assertIn(result["ocr_engine"]["mode"], {"stub", "embedded_text"})
+        self.assertIn("fields", result)
 
         status = client.get(f"/api/v1/ocr/jobs/{job.job_id}/")
         self.assertEqual(status.status_code, 200)

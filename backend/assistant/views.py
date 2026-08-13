@@ -6,7 +6,14 @@ import json
 from pathlib import Path
 from typing import Mapping
 
-from django.http import HttpRequest, HttpResponse, JsonResponse, StreamingHttpResponse
+from django.http import (
+    FileResponse,
+    HttpRequest,
+    HttpResponse,
+    JsonResponse,
+    StreamingHttpResponse,
+)
+from django.utils.encoding import iri_to_uri
 from django.views.decorators.http import require_http_methods
 
 from assistant.ass_reports import (
@@ -27,13 +34,36 @@ from assistant.local_llm import get_models_status, select_model
 from assistant.openapi import build_openapi_document
 from auth.decorators import require_permissions
 from auth.roles import PERM_ASSISTANT_REPORTS, PERM_ASSISTANT_USE
-from hub.assistant_admin import list_chat_knowledge_bases
+from hub.assistant_admin import (
+    list_chat_knowledge_bases,
+    resolve_assistant_original_path,
+)
 from hub.kb_admin import KnowledgeBaseError, extract_document_text
+from hub.models import AssistantKnowledgeBaseDocument
 
 CHAT_ATTACHMENT_EXTENSIONS = frozenset(
     {".pdf", ".doc", ".docx", ".txt", ".rtf"}
 )
+CHAT_OCR_EXTENSIONS = frozenset(
+    {".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".tif"}
+)
 CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+FIELD_LABELS_RU = {
+    "full_name": "ФИО",
+    "surname": "Фамилия",
+    "given_name": "Имя",
+    "patronymic": "Отчество",
+    "series": "Серия",
+    "number": "Номер",
+    "issue_date": "Дата выдачи",
+    "document_number": "Номер документа",
+    "date": "Дата",
+    "payer": "Плательщик",
+    "beneficiary": "Получатель",
+    "amount": "Сумма",
+    "purpose": "Назначение",
+    "currency": "Валюта",
+}
 
 
 def _validation_error(exc: AssistantChatError) -> JsonResponse:
@@ -116,6 +146,33 @@ def assistant_models(request: HttpRequest) -> JsonResponse:
         )
 
 
+def _format_ocr_chat_text(result: Mapping) -> str:
+    doc_type = str(result.get("document_type") or "unknown")
+    fields = result.get("fields") or {}
+    lines = [f"Распознан документ: {doc_type}"]
+    if isinstance(fields, Mapping):
+        for key, payload in fields.items():
+            label = FIELD_LABELS_RU.get(str(key), str(key))
+            if isinstance(payload, Mapping) and "value" in payload:
+                value = payload.get("value")
+                conf = payload.get("confidence")
+                if conf is not None:
+                    pct = int(round(float(conf) * 100))
+                    lines.append(f"— {label}: {value} ({pct}%)")
+                else:
+                    lines.append(f"— {label}: {value}")
+            else:
+                lines.append(f"— {label}: {payload}")
+    status = result.get("validation_status") or (
+        (result.get("validation") or {}).get("status")
+        if isinstance(result.get("validation"), Mapping)
+        else ""
+    )
+    if status:
+        lines.append(f"Статус проверки: {status}")
+    return "\n".join(lines)
+
+
 @require_http_methods(["POST"])
 @require_permissions(PERM_ASSISTANT_USE, api=True)
 def assistant_attachment_extract(request: HttpRequest) -> JsonResponse:
@@ -131,8 +188,24 @@ def assistant_attachment_extract(request: HttpRequest) -> JsonResponse:
         )
     filename = Path(getattr(uploaded, "name", "") or "file").name
     extension = Path(filename).suffix.lower()
-    if extension not in CHAT_ATTACHMENT_EXTENSIONS:
-        allowed = ", ".join(sorted(CHAT_ATTACHMENT_EXTENSIONS))
+    # Images / scan PDFs → OCR pipeline; office docs → text extract.
+    if extension in CHAT_OCR_EXTENSIONS and extension not in {
+        ".doc",
+        ".docx",
+        ".txt",
+        ".rtf",
+    }:
+        # Prefer OCR for image scans; PDF may be either path.
+        want_ocr = extension != ".pdf" or str(
+            request.POST.get("mode") or request.GET.get("mode") or "auto"
+        ).lower() in {"ocr", "auto"}
+        if want_ocr and extension != ".pdf":
+            return assistant_attachment_ocr(request)
+
+    if extension not in CHAT_ATTACHMENT_EXTENSIONS | CHAT_OCR_EXTENSIONS:
+        allowed = ", ".join(
+            sorted(CHAT_ATTACHMENT_EXTENSIONS | CHAT_OCR_EXTENSIONS)
+        )
         return JsonResponse(
             {
                 "error": "validation_error",
@@ -155,6 +228,52 @@ def assistant_attachment_extract(request: HttpRequest) -> JsonResponse:
             },
             status=400,
         )
+    # PDF with scan intent or image-like content: OCR.
+    if extension in CHAT_OCR_EXTENSIONS:
+        mode = str(
+            request.POST.get("mode") or request.GET.get("mode") or "auto"
+        ).lower()
+        if mode == "ocr" or extension != ".pdf":
+            from ocr.pipeline import OcrPipelineError, recognize_bytes_inline
+
+            try:
+                recognized = recognize_bytes_inline(
+                    data,
+                    filename=filename,
+                    content_type=getattr(uploaded, "content_type", "") or "",
+                    created_by=getattr(request.user, "username", "") or "",
+                    document_type_hint=str(
+                        request.POST.get("document_type") or ""
+                    ),
+                )
+            except OcrPipelineError as exc:
+                return JsonResponse(
+                    {
+                        "error": "validation_error",
+                        "details": {"file": [str(exc)]},
+                    },
+                    status=400,
+                )
+            result = recognized["result"]
+            content_type = getattr(uploaded, "content_type", "") or ""
+            return JsonResponse(
+                {
+                    "name": filename,
+                    "type": extension.lstrip(".") or "ocr",
+                    "content_type": content_type,
+                    "size_bytes": len(data),
+                    "text": _format_ocr_chat_text(result),
+                    "ocr": {
+                        "job_id": recognized["job"]["job_id"],
+                        "document_id": recognized["job"]["document_id"],
+                        "document_type": result.get("document_type"),
+                        "fields": result.get("fields") or {},
+                        "validation_status": result.get("validation_status"),
+                        "pages": result.get("pages") or [],
+                    },
+                }
+            )
+
     try:
         text = extract_document_text(filename, data)
     except KnowledgeBaseError as exc:
@@ -176,6 +295,162 @@ def assistant_attachment_extract(request: HttpRequest) -> JsonResponse:
             "text": text,
         }
     )
+
+
+@require_http_methods(["POST"])
+@require_permissions(PERM_ASSISTANT_USE, api=True)
+def assistant_attachment_ocr(request: HttpRequest) -> JsonResponse:
+    """POST /api/v1/assistant/attachments/ocr — sync OCR + field extraction."""
+    uploaded = request.FILES.get("file")
+    if uploaded is None:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"file": ["file is required"]},
+            },
+            status=400,
+        )
+    filename = Path(getattr(uploaded, "name", "") or "file").name
+    extension = Path(filename).suffix.lower()
+    if extension not in CHAT_OCR_EXTENSIONS:
+        allowed = ", ".join(sorted(CHAT_OCR_EXTENSIONS))
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {
+                    "file": [f"unsupported type; allowed: {allowed}"],
+                },
+            },
+            status=400,
+        )
+    data = uploaded.read()
+    if len(data) > CHAT_ATTACHMENT_MAX_BYTES:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {
+                    "file": [
+                        f"file too large; max {CHAT_ATTACHMENT_MAX_BYTES} bytes"
+                    ],
+                },
+            },
+            status=400,
+        )
+    from ocr.pipeline import OcrPipelineError, recognize_bytes_inline
+
+    try:
+        recognized = recognize_bytes_inline(
+            data,
+            filename=filename,
+            content_type=getattr(uploaded, "content_type", "") or "",
+            created_by=getattr(request.user, "username", "") or "",
+            document_type_hint=str(request.POST.get("document_type") or ""),
+        )
+    except OcrPipelineError as exc:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"file": [str(exc)]},
+            },
+            status=400,
+        )
+    result = recognized["result"]
+    content_type = getattr(uploaded, "content_type", "") or ""
+    return JsonResponse(
+        {
+            "name": filename,
+            "type": extension.lstrip(".") or "ocr",
+            "content_type": content_type,
+            "size_bytes": len(data),
+            "text": _format_ocr_chat_text(result),
+            "ocr": {
+                "job_id": recognized["job"]["job_id"],
+                "document_id": recognized["job"]["document_id"],
+                "document_type": result.get("document_type"),
+                "fields": result.get("fields") or {},
+                "validation_status": result.get("validation_status"),
+                "pages": result.get("pages") or [],
+            },
+        }
+    )
+
+
+@require_http_methods(["GET"])
+@require_permissions(PERM_ASSISTANT_USE, api=True)
+def assistant_source_download(request: HttpRequest) -> HttpResponse:
+    """GET /api/v1/assistant/sources/download — open cited KB file from chat."""
+    kb_slug = str(request.GET.get("kb_slug") or "").strip()
+    article_raw = str(request.GET.get("article_id") or "").strip()
+    if not kb_slug or not article_raw:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {
+                    "request": ["kb_slug and article_id are required"],
+                },
+            },
+            status=400,
+        )
+    try:
+        article_id = int(article_raw)
+    except ValueError:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"article_id": ["must be an integer"]},
+            },
+            status=400,
+        )
+    try:
+        document = AssistantKnowledgeBaseDocument.objects.select_related(
+            "knowledge_base"
+        ).get(
+            article_id=article_id,
+            knowledge_base__slug=kb_slug,
+        )
+    except AssistantKnowledgeBaseDocument.DoesNotExist:
+        return JsonResponse({"error": "not_found"}, status=404)
+
+    filename = Path(document.filename).name or "document.bin"
+    original = resolve_assistant_original_path(document)
+    if original is not None:
+        content_type = document.content_type or "application/octet-stream"
+        response = FileResponse(
+            original.open("rb"),
+            as_attachment=True,
+            filename=filename,
+            content_type=content_type,
+        )
+        response["X-Source-Filename"] = iri_to_uri(filename)
+        return response
+
+    # Legacy docs without stored original: serve extracted text for open/view.
+    text = (document.extracted_text or "").strip()
+    if not text:
+        return JsonResponse(
+            {
+                "error": "not_found",
+                "details": {
+                    "file": [
+                        "Original file is not stored; re-upload the document "
+                        "to enable download from chat sources."
+                    ],
+                },
+            },
+            status=404,
+        )
+    stem = Path(filename).stem or "document"
+    fallback_name = f"{stem}.txt"
+    response = HttpResponse(
+        text.encode("utf-8"),
+        content_type="text/plain; charset=utf-8",
+    )
+    response["Content-Disposition"] = (
+        f'attachment; filename="{fallback_name}"'
+    )
+    response["X-Source-Filename"] = iri_to_uri(fallback_name)
+    response["X-Source-Fallback"] = "extracted_text"
+    return response
 
 
 @require_http_methods(["POST"])
