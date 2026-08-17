@@ -84,9 +84,10 @@ def send_telegram_text(
 def send_telegram_close_survey(dialog: Any) -> DeliveryResult:
     """After operator closes a Telegram dialog — farewell + 1..5 rating buttons."""
     chat_id = str(getattr(dialog, "client_external_id", "") or "").strip()
-    dialog_id = str(getattr(dialog, "id", "") or "")
+    dialog_id = str(getattr(dialog, "id", "") or "").replace("-", "")
     if not chat_id or not dialog_id:
         return DeliveryResult(False, detail="telegram_no_chat")
+    # callback_data max 64 bytes — compact uuid without dashes.
     keyboard = {
         "inline_keyboard": [
             [
@@ -95,12 +96,16 @@ def send_telegram_close_survey(dialog: Any) -> DeliveryResult:
             ]
         ]
     }
-    return send_telegram_text(
+    result = send_telegram_text(
         chat_id,
         "Диалог завершён. Спасибо за обращение!\n"
         "Оцените, пожалуйста, работу оператора:",
         reply_markup=keyboard,
     )
+    if not result.sent:
+        logger = __import__("logging").getLogger(__name__)
+        logger.warning("telegram_close_survey_failed chat=%s detail=%s", chat_id, result.detail)
+    return result
 
 
 def answer_telegram_callback(callback_query_id: str, text: str = "") -> DeliveryResult:

@@ -28,7 +28,7 @@ import {
 } from './online-chat/managementAccess'
 import { OperatorPicker } from './online-chat/OperatorPicker'
 import { ChatSimulatorApp } from './online-chat/simulator/ChatSimulatorApp'
-import { ChatPlatformShell } from './online-chat/shell/ChatPlatformShell'
+import { ChatPlatformShellWithAvatar } from './online-chat/shell/ChatPlatformShellWithAvatar'
 import { SupervisorApp } from './online-chat/supervisor/SupervisorApp'
 import { ArmMenuHost } from './online-chat/arm/ArmMenuHost'
 import type { ThemeKind } from './online-chat/arm/theme'
@@ -248,16 +248,16 @@ function App() {
     }
     if (isSupervisorRoute) {
       return (
-        <ChatPlatformShell {...shellProps} showMenuButton={false}>
+        <ChatPlatformShellWithAvatar {...shellProps} showMenuButton={false}>
           <SupervisorApp demoMode={import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'} />
-        </ChatPlatformShell>
+        </ChatPlatformShellWithAvatar>
       )
     }
     if (isOperatorsRoute) {
       // Viewing a specific operator ARM stays on the Operators tab.
       if (forcedView && operatorFromQuery) {
         return (
-          <ChatPlatformShell {...shellProps}>
+          <ChatPlatformShellWithAvatar {...shellProps}>
             <ChatArmApp
               demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
               operatorName={operatorFromQuery}
@@ -269,11 +269,11 @@ function App() {
               viewOnly
               allowTransferInView={allowTransferView}
             />
-          </ChatPlatformShell>
+          </ChatPlatformShellWithAvatar>
         )
       }
       return (
-        <ChatPlatformShell {...shellProps}>
+        <ChatPlatformShellWithAvatar {...shellProps}>
           <ArmMenuHost
             open={armMenuOpen}
             onOpenChange={setArmMenuOpen}
@@ -284,21 +284,21 @@ function App() {
           >
             <OperatorPicker allowTransfer={allowTransferView} />
           </ArmMenuHost>
-        </ChatPlatformShell>
+        </ChatPlatformShellWithAvatar>
       )
     }
     if (isAdminRoute) {
       return (
-        <ChatPlatformShell {...shellProps} showMenuButton={false}>
+        <ChatPlatformShellWithAvatar {...shellProps} showMenuButton={false}>
           <ChatAdminApp />
-        </ChatPlatformShell>
+        </ChatPlatformShellWithAvatar>
       )
     }
     if (isSimulatorRoute) {
       return (
-        <ChatPlatformShell {...shellProps} showMenuButton={false}>
+        <ChatPlatformShellWithAvatar {...shellProps} showMenuButton={false}>
           <ChatSimulatorApp />
-        </ChatPlatformShell>
+        </ChatPlatformShellWithAvatar>
       )
     }
 
@@ -314,7 +314,7 @@ function App() {
         return null
       }
       return (
-        <ChatPlatformShell {...shellProps}>
+        <ChatPlatformShellWithAvatar {...shellProps}>
           <ArmMenuHost
             open={armMenuOpen}
             onOpenChange={setArmMenuOpen}
@@ -325,7 +325,7 @@ function App() {
           >
             <OperatorPicker allowTransfer={allowTransferView} />
           </ArmMenuHost>
-        </ChatPlatformShell>
+        </ChatPlatformShellWithAvatar>
       )
     }
 
@@ -339,11 +339,11 @@ function App() {
     }
 
     return (
-      <ChatPlatformShell {...shellProps}>
+      <ChatPlatformShellWithAvatar {...shellProps}>
         <ChatArmApp
           demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
           operatorName={simOperate ? operatorFromQuery : viewerName}
-          actorName={viewerName}
+          actorName={simOperate ? operatorFromQuery : viewerName}
           themeKind={chatThemeKind}
           statsDrawerOpen={armMenuOpen}
           onStatsDrawerOpenChange={setArmMenuOpen}
@@ -351,7 +351,7 @@ function App() {
           viewOnly={false}
           allowTransferInView={false}
         />
-      </ChatPlatformShell>
+      </ChatPlatformShellWithAvatar>
     )
   }
 
@@ -431,7 +431,9 @@ function App() {
       ? 'asr-qa' as const
       : route.includes('/live')
         ? 'live' as const
-        : 'overview' as const
+        : route.includes('/sufler')
+          ? 'sufler' as const
+          : 'chat' as const
     return (
       <AiHubReportsApp
         username={auth.username ?? undefined}

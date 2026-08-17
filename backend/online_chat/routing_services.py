@@ -110,7 +110,12 @@ def _held_operator_ids() -> set[Any]:
 
 
 def start_post_close_grace(operator: OperatorProfile | None) -> OperatorAssignmentHold | None:
-    """In manual+auto mode, give the operator 5s to pick before auto-assign."""
+    """In manual+auto mode, give the operator time to pick before auto-assign.
+
+    Grace applies when closing freed a slot that was at capacity. If the operator
+    already had spare capacity (limit raised / underloaded), skip the hold so
+    auto-assign can fill immediately.
+    """
     if operator is None:
         return None
     settings = AssignmentSettings.get_solo()
@@ -118,18 +123,44 @@ def start_post_close_grace(operator: OperatorProfile | None) -> OperatorAssignme
         return None
     if operator.role == OperatorProfile.Role.SUPERVISOR:
         return None
+    # Dialog is already closed → current active count is post-close.
+    active_now = Dialog.objects.filter(
+        operator=operator,
+        status=Dialog.Status.ACTIVE,
+    ).count()
+    capacity = max(1, int(getattr(operator, "max_active_dialogs", None) or 1))
+    # Before close they had active_now + 1. Need grace only if that was >= capacity.
+    if active_now + 1 < capacity:
+        return None
     until = timezone.now() + timedelta(seconds=AssignmentSettings.GRACE_SECONDS)
     OperatorAssignmentHold.objects.filter(operator=operator, until__gt=timezone.now()).delete()
     hold = OperatorAssignmentHold.objects.create(operator=operator, until=until)
+    operator_id = str(operator.id)
+    delay = AssignmentSettings.GRACE_SECONDS + 1
+    scheduled = False
     try:
         from online_chat.tasks import run_assignments_after_delay
 
         run_assignments_after_delay.apply_async(
-            countdown=AssignmentSettings.GRACE_SECONDS + 1,
-            kwargs={"operator_id": str(operator.id)},
+            countdown=delay,
+            kwargs={"operator_id": operator_id},
         )
-    except Exception:  # noqa: BLE001 — celery may be unavailable in some tests
-        pass
+        scheduled = True
+    except Exception:  # noqa: BLE001 — celery may be unavailable
+        scheduled = False
+    if not scheduled:
+        # Local / no-worker fallback so grace still ends with auto-assign.
+        import threading
+
+        def _fallback() -> None:
+            try:
+                from online_chat.tasks import run_assignments_after_delay
+
+                run_assignments_after_delay(operator_id=operator_id)
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Timer(delay, _fallback).start()
     return hold
 
 

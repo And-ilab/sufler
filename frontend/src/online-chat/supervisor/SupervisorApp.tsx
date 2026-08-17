@@ -146,10 +146,12 @@ export function SupervisorApp({ demoMode: _demoMode = false }: SupervisorAppProp
 
         <section className="chat-management__grid" aria-label="Ключевые показатели">
           {[
-            ['В очереди', kpis.waiting ?? 0],
+            ['В очереди (онлайн)', kpis.waiting_online ?? kpis.waiting ?? 0],
+            ['В очереди (офлайн)', kpis.waiting_offline ?? 0],
             ['Активные диалоги', kpis.active ?? 0],
             ['Операторы онлайн', kpis.online_operators ?? 0],
-            ['Среднее ожидание', formatSeconds(kpis.average_wait_seconds)],
+            ['Ср. ожидание online', formatSeconds(kpis.average_wait_online_seconds ?? kpis.average_wait_seconds)],
+            ['Ср. ожидание offline', formatSeconds(kpis.average_wait_offline_seconds)],
             ['SLA первого ответа', kpis.sla_percent == null ? '—' : `${kpis.sla_percent}%`],
             ['Закрыто сегодня', kpis.closed_today ?? 0],
           ].map(([label, value]) => (
@@ -208,7 +210,11 @@ export function SupervisorApp({ demoMode: _demoMode = false }: SupervisorAppProp
                   <th>Нагрузка</th>
                   <th>Закрыто сегодня</th>
                   <th>Ср. первый ответ</th>
+                  <th>Время в диалогах</th>
+                  <th>Ср. на диалог</th>
+                  <th>Каналы сейчас</th>
                   <th>Отдел</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -247,7 +253,32 @@ export function SupervisorApp({ demoMode: _demoMode = false }: SupervisorAppProp
                       <td>{load} / {operator.capacity}</td>
                       <td>{operator.closed_today ?? 0}</td>
                       <td>{formatSeconds(operator.avg_first_response_seconds)}</td>
+                      <td>{formatSeconds(operator.time_in_dialogs_seconds)}</td>
+                      <td>{formatSeconds(operator.avg_dialog_seconds)}</td>
+                      <td>
+                        {operator.channels_breakdown && Object.keys(operator.channels_breakdown).length
+                          ? Object.entries(operator.channels_breakdown)
+                              .map(([channel, count]) => `${channel}: ${count}`)
+                              .join(', ')
+                          : '—'}
+                      </td>
                       <td>{operatorDepartment(operator)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="is-secondary"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            window.open(
+                              `/online-chat?historyOperator=${encodeURIComponent(operator.name)}`,
+                              '_blank',
+                              'noopener,noreferrer',
+                            )
+                          }}
+                        >
+                          Диалоги
+                        </button>
+                      </td>
                     </tr>
                   )
                 })}
@@ -280,8 +311,12 @@ export function SupervisorApp({ demoMode: _demoMode = false }: SupervisorAppProp
                   </header>
                   <div className="chat-management__queue-metrics">
                     <div>
-                      <span>Ожидают</span>
-                      <strong>{waiting}</strong>
+                      <span>Online</span>
+                      <strong>{queue.waiting_online ?? waiting}</strong>
+                    </div>
+                    <div>
+                      <span>Offline</span>
+                      <strong>{queue.waiting_offline ?? 0}</strong>
                     </div>
                     <div>
                       <span>В работе</span>

@@ -1,6 +1,7 @@
 from django.urls import path
 
 from online_chat.views import (
+    ad_pending_operators,
     analytics,
     assignment_settings,
     base_message_detail,
@@ -81,6 +82,7 @@ urlpatterns = [
         name="online_chat_routing_rule",
     ),
     path("supervisor/overview/", supervisor_overview, name="online_chat_supervisor"),
+    path("ad/pending-operators/", ad_pending_operators, name="online_chat_ad_pending"),
     path("assignment-settings/", assignment_settings, name="online_chat_assignment_settings"),
     path("sla-settings/", sla_settings, name="online_chat_sla_settings"),
     path("sufler-feedback/", sufler_hint_feedback, name="online_chat_sufler_feedback"),

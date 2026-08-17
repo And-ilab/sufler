@@ -40,7 +40,7 @@ from online_chat.models import (
     ServiceLevelSettings,
     SuflerHintFeedback,
     WidgetPlacement,
-    normalize_phone,
+    normalize_form_fields,
 )
 from online_chat.storage import get_chat_object_store
 from online_chat.routing_services import (
@@ -66,6 +66,8 @@ from online_chat.services import (
     serialize_dialog,
     serialize_feedback,
     serialize_message,
+    history_identity_query,
+    channel_label,
     serialize_transcript_email,
     set_client_presence,
     transfer_dialog,
@@ -219,6 +221,39 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
             qs = qs.filter(department_id=request.GET["department_id"])
         if request.GET.get("channel"):
             qs = qs.filter(channel=request.GET["channel"])
+        if request.GET.get("outcome"):
+            qs = qs.filter(outcome=request.GET["outcome"])
+        if request.GET.get("close_topic"):
+            qs = qs.filter(close_topic__icontains=request.GET["close_topic"].strip())
+        has_feedback = (request.GET.get("has_feedback") or "").strip().lower()
+        if has_feedback in {"1", "true", "yes"}:
+            qs = qs.filter(feedback__isnull=False).distinct()
+        elif has_feedback in {"0", "false", "no"}:
+            qs = qs.filter(feedback__isnull=True)
+        date_from = (request.GET.get("date_from") or "").strip()
+        date_to = (request.GET.get("date_to") or "").strip()
+        if date_from:
+            qs = qs.filter(created_at__date__gte=date_from)
+        if date_to:
+            qs = qs.filter(created_at__date__lte=date_to)
+        q_raw = (request.GET.get("q") or "").strip()
+        if q_raw:
+            from django.db.models import Q
+            tokens = [token for token in re.split(r"\s+", q_raw) if token]
+            for token in tokens:
+                token_q = (
+                    Q(client_first_name__icontains=token)
+                    | Q(client_last_name__icontains=token)
+                    | Q(client_phone__icontains=token)
+                    | Q(operator_name__icontains=token)
+                    | Q(close_topic__icontains=token)
+                    | Q(preview__icontains=token)
+                    | Q(channel__icontains=token)
+                    | Q(id__icontains=token)
+                    | Q(messages__text__icontains=token)
+                )
+                qs = qs.filter(token_q)
+            qs = qs.distinct()
         # Waiting queue: oldest first so the newest writer is at the bottom in UI.
         if status == Dialog.Status.WAITING:
             qs = qs.annotate(
@@ -287,8 +322,20 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET"])
 def dialog_detail(request: HttpRequest, dialog_id: str) -> HttpResponse:
     dialog = get_object_or_404(Dialog, pk=dialog_id)
+    include_history = (request.GET.get("include_history") or "").strip().casefold() in {
+        "1",
+        "true",
+        "yes",
+    }
     return JsonResponse(
-        {"ok": True, "dialog": serialize_dialog(dialog, include_messages=True)},
+        {
+            "ok": True,
+            "dialog": serialize_dialog(
+                dialog,
+                include_messages=True,
+                include_history=include_history,
+            ),
+        },
     )
 
 
@@ -476,7 +523,14 @@ def dialog_accept(request: HttpRequest, dialog_id: str) -> HttpResponse:
         else:
             dialog = accept_dialog(dialog, operator_name)
         return JsonResponse(
-            {"ok": True, "dialog": serialize_dialog(dialog, include_messages=True)},
+            {
+                "ok": True,
+                "dialog": serialize_dialog(
+                    dialog,
+                    include_messages=True,
+                    include_history=True,
+                ),
+            },
         )
     except (OnlineChatApiError, ValueError) as exc:
         return _error(OnlineChatApiError(str(exc)), status=409 if isinstance(exc, ValueError) else 400)
@@ -890,6 +944,8 @@ def _operator_dict(item: OperatorProfile) -> dict[str, Any]:
         "department_name": (
             first_department.name if first_department and is_operator else ""
         ),
+        "photo_url": getattr(item, "photo_url", "") or "",
+        "skill_tags": list(getattr(item, "skill_tags", None) or []),
         "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat(),
     }
 
@@ -903,7 +959,7 @@ def _placement_dict(item: WidgetPlacement, *, public: bool = False) -> dict[str,
         "is_active": item.is_active, "theme": item.theme, "config": item.config,
         "welcome_message": item.welcome_message, "queue_message": item.queue_message,
         "offline_message": item.offline_message, "require_phone": item.require_phone,
-        "form_fields": item.form_fields,
+        "form_fields": normalize_form_fields(item.form_fields, require_phone=False),
         "theme_accent": item.theme.get("accent", "#007A43"),
     }
     if not public:
@@ -953,7 +1009,10 @@ def _channel_dict(item: ChannelConnection) -> dict[str, Any]:
     safe_config = _safe_config(item.config)
     form_fields = []
     if isinstance(safe_config, dict) and isinstance(safe_config.get("form_fields"), list):
-        form_fields = safe_config.get("form_fields") or []
+        form_fields = normalize_form_fields(
+            safe_config.get("form_fields") or [],
+            require_phone=False,
+        )
     return {
         "id": str(item.id), "channel": item.channel, "name": item.name,
         "kind": item.channel,
@@ -1050,6 +1109,7 @@ def _base_message_dict(item: BaseMessage) -> dict[str, Any]:
         "channels": item.channels,
         "send_phase": item.send_phase,
         "sort_order": item.sort_order,
+        "delay_seconds": item.delay_seconds,
         "placement_id": str(item.placement_id) if item.placement_id else None,
         "is_active": item.is_active,
         "created_at": item.created_at.isoformat(),
@@ -1135,9 +1195,13 @@ def _base_message_values(
             BaseMessage.SendPhase.BEFORE_BOT: BaseMessage.MessageType.WELCOME,
             BaseMessage.SendPhase.OFFLINE: BaseMessage.MessageType.OFFLINE,
             BaseMessage.SendPhase.AFTER_BOT: BaseMessage.MessageType.BROADCAST,
+            BaseMessage.SendPhase.MID_DIALOG: BaseMessage.MessageType.BROADCAST,
+            BaseMessage.SendPhase.HOLD: BaseMessage.MessageType.BROADCAST,
         }[send_phase]
     if "sort_order" in data:
         item.sort_order = _int_field(data, "sort_order")
+    if "delay_seconds" in data:
+        item.delay_seconds = max(0, _int_field(data, "delay_seconds"))
     if "placement_id" in data:
         placement_id = data.get("placement_id")
         item.placement = (
@@ -1309,6 +1373,8 @@ def operators_collection(request: HttpRequest) -> HttpResponse:
             max_active_dialogs=data.get("max_active_dialogs", data.get("capacity", 3)),
             auto_assign=_bool_field(data, "auto_assign", True),
             is_active=_bool_field(data, "is_active", True),
+            photo_url=_str_field(data, "photo_url"),
+            skill_tags=_json_field(data, "skill_tags", list, []) if "skill_tags" in data else [],
         )
         if "department_id" in data and "department_ids" not in data:
             data = {**data, "department_ids": [data["department_id"]] if data["department_id"] else []}
@@ -1346,6 +1412,13 @@ def operator_detail(request: HttpRequest, item_id: str) -> HttpResponse:
         for field in ("auto_assign", "is_active"):
             if field in data:
                 setattr(item, field, _bool_field(data, field))
+        if "photo_url" in data:
+            item.photo_url = _str_field(data, "photo_url")
+        if "skill_tags" in data:
+            tags = _json_field(data, "skill_tags", list, [])
+            if any(not isinstance(value, str) for value in tags):
+                raise OnlineChatApiError("skill_tags must be a list of strings")
+            item.skill_tags = [value.strip() for value in tags if value.strip()]
         item.save()
         if "department_id" in data and "department_ids" not in data:
             data = {**data, "department_ids": [data["department_id"]] if data["department_id"] else []}
@@ -1392,6 +1465,11 @@ def _placement_values(data: Mapping[str, Any], item: WidgetPlacement | None = No
     ):
         if field in data:
             setattr(item, field, _json_field(data, field, expected, default))
+    if "form_fields" in data:
+        item.form_fields = normalize_form_fields(
+            item.form_fields,
+            require_phone=False,
+        )
     if "theme_accent" in data:
         theme = dict(item.theme or {})
         theme["accent"] = _str_field(data, "theme_accent")
@@ -1457,8 +1535,10 @@ def _channel_values(data: Mapping[str, Any], item: ChannelConnection | None = No
         item.config = _json_field(data, "config", dict, {})
     if "form_fields" in data:
         config = dict(item.config or {})
-        fields = data.get("form_fields")
-        config["form_fields"] = fields if isinstance(fields, list) else []
+        config["form_fields"] = normalize_form_fields(
+            data.get("form_fields"),
+            require_phone=False,
+        )
         item.config = config
     if "endpoint" in data:
         config = dict(item.config or {})
@@ -1593,23 +1673,39 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
     from datetime import timedelta
 
 
-    statuses = dict(Dialog.objects.values_list("status").annotate(count=Count("id")))
+    statuses = {
+        row["status"]: row["c"]
+        for row in Dialog.objects.values("status").annotate(c=Count("id"))
+    }
     now = timezone.now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    waiting_dialogs = list(
+
+    waiting_all = list(
         Dialog.objects.filter(status=Dialog.Status.WAITING).only(
-            "id", "created_at", "accepted_at", "status"
+            "id", "created_at", "outcome", "client_online"
         )
     )
-    wait_seconds = [
-        max(0, int((now - item.created_at).total_seconds())) for item in waiting_dialogs
+    waiting_offline = [
+        item
+        for item in waiting_all
+        if item.outcome == Dialog.Outcome.OFFLINE or item.client_online is False
     ]
-    average_wait = round(sum(wait_seconds) / len(wait_seconds)) if wait_seconds else 0
+    waiting_online = [item for item in waiting_all if item not in waiting_offline]
+
+    def _avg_wait(rows: list) -> int:
+        if not rows:
+            return 0
+        secs = [max(0, int((now - item.created_at).total_seconds())) for item in rows]
+        return round(sum(secs) / len(secs))
+
+    average_wait_online = _avg_wait(waiting_online)
+    average_wait_offline = _avg_wait(waiting_offline)
+    average_wait = _avg_wait(waiting_all)
     sla_window = timedelta(seconds=ServiceLevelSettings.get_solo().first_response_seconds)
     answered = list(
         Dialog.objects.filter(
             first_response_at__isnull=False,
-            created_at__gte=today_start - timedelta(days=1),
+            created_at__gte=today_start,
         ).only("created_at", "first_response_at")[:2000]
     )
     answered_count = len(answered)
@@ -1623,20 +1719,20 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
     operators = []
     for item in OperatorProfile.objects.prefetch_related("departments"):
         data = _operator_dict(item)
-        active_dialogs = Dialog.objects.filter(
-            operator=item, status=Dialog.Status.ACTIVE
-        ).count()
-        closed_today = Dialog.objects.filter(
+        active_qs = Dialog.objects.filter(operator=item, status=Dialog.Status.ACTIVE)
+        active_dialogs = active_qs.count()
+        closed_today_qs = Dialog.objects.filter(
             operator=item,
             status=Dialog.Status.CLOSED,
             closed_at__gte=today_start,
-        ).count()
+        )
+        closed_today = closed_today_qs.count()
         answered_today = list(
             Dialog.objects.filter(
                 operator=item,
                 first_response_at__isnull=False,
                 first_response_at__gte=today_start,
-            ).only("created_at", "first_response_at")[:500]
+            ).only("created_at", "first_response_at", "accepted_at", "closed_at")[:500]
         )
         response_secs = [
             (row.first_response_at - row.created_at).total_seconds()
@@ -1646,17 +1742,49 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
         avg_first_response = (
             round(sum(response_secs) / len(response_secs)) if response_secs else None
         )
+        # Time in dialogs today: sum of (closed_at|now - accepted_at) for today's handled.
+        time_in_dialogs = 0
+        for row in Dialog.objects.filter(operator=item).filter(
+            Q(status=Dialog.Status.ACTIVE)
+            | Q(status=Dialog.Status.CLOSED, closed_at__gte=today_start)
+        ).only("accepted_at", "closed_at", "created_at", "status")[:500]:
+            start = row.accepted_at or row.created_at
+            end = row.closed_at if row.status == Dialog.Status.CLOSED and row.closed_at else now
+            if start and end and end >= start:
+                # Clip to today.
+                clipped_start = start if start >= today_start else today_start
+                time_in_dialogs += max(0, int((end - clipped_start).total_seconds()))
+        avg_dialog_seconds = (
+            round(time_in_dialogs / closed_today) if closed_today else None
+        )
+        channel_rows = (
+            Dialog.objects.filter(operator=item, status=Dialog.Status.ACTIVE)
+            .values("channel")
+            .annotate(count=Count("id"))
+        )
+        channels_breakdown = {
+            (row["channel"] or "widget"): row["count"] for row in channel_rows
+        }
         data["active_dialogs"] = active_dialogs
         data["load"] = active_dialogs
         data["closed_today"] = closed_today
         data["avg_first_response_seconds"] = avg_first_response
+        data["time_in_dialogs_seconds"] = time_in_dialogs
+        data["avg_dialog_seconds"] = avg_dialog_seconds
+        data["channels_breakdown"] = channels_breakdown
+        data["photo_url"] = getattr(item, "photo_url", "") or ""
+        data["skill_tags"] = list(getattr(item, "skill_tags", None) or [])
         operators.append(data)
 
     queues = []
     for item in Department.objects.filter(is_active=True):
-        dept_waiting = list(
-            item.dialogs.filter(status=Dialog.Status.WAITING).only("created_at")
+        dept_waiting_online = item.dialogs.filter(
+            status=Dialog.Status.WAITING, client_online=True
+        ).exclude(outcome=Dialog.Outcome.OFFLINE)
+        dept_waiting_offline = item.dialogs.filter(status=Dialog.Status.WAITING).filter(
+            Q(outcome=Dialog.Outcome.OFFLINE) | Q(client_online=False)
         )
+        dept_waiting = list(item.dialogs.filter(status=Dialog.Status.WAITING).only("created_at"))
         longest = (
             max(int((now - d.created_at).total_seconds()) for d in dept_waiting)
             if dept_waiting
@@ -1670,6 +1798,8 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
                 "name": item.name,
                 "department": item.name,
                 "waiting": len(dept_waiting),
+                "waiting_online": dept_waiting_online.count(),
+                "waiting_offline": dept_waiting_offline.count(),
                 "active": item.dialogs.filter(status=Dialog.Status.ACTIVE).count(),
                 "longest_wait_seconds": longest,
             }
@@ -1680,6 +1810,8 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
             "ok": True,
             "kpis": {
                 "waiting": statuses.get(Dialog.Status.WAITING, 0),
+                "waiting_online": len(waiting_online),
+                "waiting_offline": len(waiting_offline),
                 "active": statuses.get(Dialog.Status.ACTIVE, 0),
                 "closed": statuses.get(Dialog.Status.CLOSED, 0),
                 "closed_today": Dialog.objects.filter(
@@ -1689,6 +1821,8 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
                     is_active=True, presence=OperatorProfile.Presence.ONLINE
                 ).count(),
                 "average_wait_seconds": average_wait,
+                "average_wait_online_seconds": average_wait_online,
+                "average_wait_offline_seconds": average_wait_offline,
                 "sla_percent": sla_percent,
             },
             "operators": operators,
@@ -1700,15 +1834,40 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET"])
 @_chat_permissions(PERM_CC_REPORTS, PERM_CC_ADMIN)
 def analytics(request: HttpRequest) -> HttpResponse:
-    from datetime import timedelta
+    from datetime import datetime, timedelta
 
     period = (request.GET.get("period") or "7d").lower()
-    days = {
-        "today": 1, "day": 1, "7d": 7, "week": 7,
-        "30d": 30, "month": 30, "90d": 90,
-    }.get(period, 7)
-    start = timezone.now() - timedelta(days=days)
-    dialogs = Dialog.objects.filter(created_at__gte=start)
+    date_from = (request.GET.get("date_from") or "").strip()
+    date_to = (request.GET.get("date_to") or "").strip()
+    if date_from or date_to:
+        try:
+            start = (
+                datetime.fromisoformat(date_from).replace(tzinfo=timezone.get_current_timezone())
+                if date_from
+                else timezone.now() - timedelta(days=30)
+            )
+            end = (
+                datetime.fromisoformat(date_to).replace(
+                    hour=23, minute=59, second=59, tzinfo=timezone.get_current_timezone()
+                )
+                if date_to
+                else timezone.now()
+            )
+        except ValueError:
+            return JsonResponse(
+                {"ok": False, "error": "date_from/date_to must be ISO dates (YYYY-MM-DD)"},
+                status=400,
+            )
+        dialogs = Dialog.objects.filter(created_at__gte=start, created_at__lte=end)
+        period_label = f"{date_from or '…'}…{date_to or '…'}"
+    else:
+        days = {
+            "today": 1, "day": 1, "7d": 7, "week": 7,
+            "30d": 30, "month": 30, "90d": 90,
+        }.get(period, 7)
+        start = timezone.now() - timedelta(days=days)
+        dialogs = Dialog.objects.filter(created_at__gte=start)
+        period_label = period
     closed = dialogs.filter(status=Dialog.Status.CLOSED)
     feedback = DialogFeedback.objects.filter(dialog__in=dialogs).aggregate(avg=Avg("rating"))
     response_seconds = [
@@ -1716,7 +1875,7 @@ def analytics(request: HttpRequest) -> HttpResponse:
         for item in dialogs.exclude(first_response_at=None)
     ]
     return JsonResponse({
-        "ok": True, "period": period, "from": start.isoformat(),
+        "ok": True, "period": period_label, "from": start.isoformat(),
         "kpis": {
             "dialogs": dialogs.count(), "closed": closed.count(),
             "waiting": dialogs.filter(status=Dialog.Status.WAITING).count(),
@@ -1729,140 +1888,31 @@ def analytics(request: HttpRequest) -> HttpResponse:
     })
 
 
-_CHANNEL_LABELS = {
-    "widget": "Виджет сайта",
-    "telegram": "Telegram",
-    "viber": "Viber",
-    "api": "API",
-    "email": "E-mail",
-}
-
-
-def _channel_label(channel: str) -> str:
-    key = (channel or "").strip().lower()
-    return _CHANNEL_LABELS.get(key, channel or "неизвестный канал")
-
-
-def _phones_linked(left: str, right: str) -> bool:
-    """Same client phone: exact normalized, national BY mobile, or 1-digit typo."""
-    a = normalize_phone(left)
-    b = normalize_phone(right)
-    if not a or not b:
-        return False
-    if a == b:
-        return True
-    # Belarus mobile without country code: 29/25/33/44 + 7 digits.
-    if len(a) >= 9 and len(b) >= 9 and a[-9:] == b[-9:]:
-        return True
-    # One-digit typo tolerance for the same-length numbers (widget ↔ TG re-entry).
-    if len(a) == len(b) and len(a) >= 10:
-        diffs = sum(1 for x, y in zip(a, b) if x != y)
-        if diffs == 1:
-            return True
-    # Soft fallback for truncated numbers.
-    return len(a) >= 7 and len(b) >= 7 and a[-7:] == b[-7:]
-
-
-def _name_token_set(first_name: str, last_name: str) -> frozenset[str]:
-    parts = []
-    for raw in (first_name or "", last_name or ""):
-        for token in re.split(r"[\s\-]+", raw.strip().casefold()):
-            if len(token) >= 2:
-                parts.append(token)
-    return frozenset(parts)
-
-
-def _names_linked(
-    first_a: str,
-    last_a: str,
-    first_b: str,
-    last_b: str,
-) -> bool:
-    """Same person even if widget/TG swapped имя/фамилия fields."""
-    left = _name_token_set(first_a, last_a)
-    right = _name_token_set(first_b, last_b)
-    return len(left) >= 2 and left == right
-
-
-def _history_identity_query(
-    *,
-    phone: str = "",
-    external_id: str = "",
-    first_name: str = "",
-    last_name: str = "",
-) -> Q:
-    """Match dialogs by phone (primary), external id, and FIO tokens."""
-    normalized = normalize_phone(phone)
-    phones: set[str] = {normalized} if normalized else set()
-    external_ids: set[str] = {external_id.strip()} if external_id.strip() else set()
-    name_key = _name_token_set(first_name, last_name)
-    matched_ids: set[Any] = set()
-
-    # Expand TG chat_id ↔ phone ↔ widget phone ↔ FIO (order-independent).
-    for _ in range(3):
-        before = (frozenset(phones), frozenset(external_ids), frozenset(matched_ids))
-        for item in Dialog.objects.only(
-            "id",
-            "client_phone",
-            "client_external_id",
-            "client_first_name",
-            "client_last_name",
-        ).iterator(chunk_size=500):
-            phone_hit = bool(phones) and any(
-                _phones_linked(item.client_phone, p) for p in phones
-            )
-            external_hit = bool(
-                item.client_external_id and item.client_external_id in external_ids
-            )
-            same_fio = bool(name_key) and _names_linked(
-                first_name,
-                last_name,
-                item.client_first_name,
-                item.client_last_name,
-            )
-            candidate_phone = normalize_phone(item.client_phone)
-            # FIO helps when phone was mistyped once or fields were swapped.
-            # Do not merge all namesakes: require phone/external already known,
-            # or both sides anonymous.
-            if same_fio and not phone_hit and not external_hit:
-                if phones or external_ids:
-                    if candidate_phone and not any(
-                        _phones_linked(candidate_phone, p) for p in phones
-                    ):
-                        same_fio = False
-                else:
-                    same_fio = not candidate_phone and not (
-                        item.client_external_id or ""
-                    ).strip()
-            if not (phone_hit or external_hit or same_fio):
-                continue
-            matched_ids.add(item.id)
-            phone_norm = normalize_phone(item.client_phone)
-            if phone_norm:
-                phones.add(phone_norm)
-            if item.client_external_id:
-                external_ids.add(item.client_external_id)
-        after = (frozenset(phones), frozenset(external_ids), frozenset(matched_ids))
-        if after == before:
-            break
-
-    if not matched_ids and not phones and not external_ids:
-        return Q()
-
-    query = Q()
-    if matched_ids:
-        query |= Q(id__in=list(matched_ids))
-    if phones:
-        query |= Q(
-            id__in=[
-                item.id
-                for item in Dialog.objects.only("id", "client_phone")
-                if any(_phones_linked(item.client_phone, p) for p in phones)
-            ]
-        )
-    if external_ids:
-        query |= Q(client_external_id__in=list(external_ids))
-    return query if query else Q(pk__in=[])
+@require_http_methods(["GET"])
+@_chat_permissions(PERM_CC_ADMIN)
+def ad_pending_operators(request: HttpRequest) -> HttpResponse:
+    """Local stub: operators that appeared in AD and need chat settings."""
+    existing = set(OperatorProfile.objects.values_list("external_id", flat=True))
+    stub = [
+        {
+            "external_id": "ad.ivanova.kk",
+            "display_name": "Иванова К.К.",
+            "email": "ivanova.kk@belarusbank.by",
+            "ad_role": "operator_cc",
+            "detected_at": timezone.now().isoformat(),
+            "needs": ["limits", "photo", "chat_login"],
+        },
+        {
+            "external_id": "ad.petrov.ss",
+            "display_name": "Петров С.С.",
+            "email": "petrov.ss@belarusbank.by",
+            "ad_role": "operator_cc",
+            "detected_at": timezone.now().isoformat(),
+            "needs": ["limits", "photo", "skill_tags"],
+        },
+    ]
+    pending = [item for item in stub if item["external_id"] not in existing]
+    return JsonResponse({"ok": True, "items": pending, "count": len(pending)})
 
 
 @require_http_methods(["GET"])
@@ -1879,7 +1929,7 @@ def client_history(request: HttpRequest) -> HttpResponse:
         external_id = external_id or current.client_external_id
         first_name = current.client_first_name
         last_name = current.client_last_name
-    query = _history_identity_query(
+    query = history_identity_query(
         phone=phone,
         external_id=external_id,
         first_name=first_name,
@@ -1896,7 +1946,7 @@ def client_history(request: HttpRequest) -> HttpResponse:
         {
             "id": str(item.id),
             "channel": item.channel,
-            "channel_label": _channel_label(item.channel),
+            "channel_label": channel_label(item.channel),
             "status": item.status,
             "outcome": item.outcome,
             "topic": item.close_topic,
@@ -1914,7 +1964,7 @@ def client_history(request: HttpRequest) -> HttpResponse:
     previous_items = [
         item for item in items if current is None or item["id"] != str(current.id)
     ]
-    current_channel = _channel_label(current.channel) if current else (
+    current_channel = channel_label(current.channel) if current else (
         items[0]["channel_label"] if items else ""
     )
 
@@ -1931,7 +1981,7 @@ def client_history(request: HttpRequest) -> HttpResponse:
     blocks = packed.get("detailed_blocks") or []
     for block in blocks:
         raw_channel = block.get("channel") or ""
-        block["channel"] = _channel_label(raw_channel) if raw_channel else "—"
+        block["channel"] = channel_label(raw_channel) if raw_channel else "—"
     if blocks:
         packed["detailed_summary"] = "\n\n".join(
             (
@@ -2233,14 +2283,13 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
                 "welcome_message": "Здравствуйте! Чем можем помочь?",
                 "queue_message": "Ожидайте ответа оператора…",
                 "offline_message": "Сейчас операторы недоступны. Оставьте сообщение — ответим позже.",
-                "require_phone": False,
+                "require_phone": True,
                 "allowed_domains": ["localhost", "127.0.0.1"],
                 "theme": {"accent": "#2E7D52"},
                 "form_fields": [
                     {"key": "name", "label": "Имя", "required": True, "type": "text"},
                     {"key": "last_name", "label": "Фамилия", "required": False, "type": "text"},
-                    {"key": "phone", "label": "Телефон", "required": False, "type": "tel"},
-                    {"key": "question", "label": "Вопрос", "required": True, "type": "text"},
+                    {"key": "phone", "label": "Телефон", "required": True, "type": "tel"},
                 ],
             },
         )

@@ -1,4 +1,4 @@
-"""Telegram intake FSM: greeting → question → FIO → phone → ARM queue."""
+"""Telegram intake FSM driven by channel form_fields and required flags."""
 
 from __future__ import annotations
 
@@ -8,13 +8,16 @@ from typing import Any, Mapping
 
 from online_chat.channel_delivery import send_telegram_text
 from online_chat.models import (
+    ChannelConnection,
     Dialog,
     DialogMessage,
     TelegramOnboardingSession,
     format_phone_e164,
     is_plausible_phone,
+    normalize_form_fields,
 )
 from online_chat.services import append_message, create_dialog_with_message
+
 
 GREETING = (
     "Здравствуйте! Вы написали в службу поддержки Беларусбанка.\n\n"
@@ -35,6 +38,104 @@ QUEUED = (
     "Ожидайте ответа в этом чате."
 )
 
+# Internal steps after question.
+STEP_COLLECT = "collect_fields"
+FIELD_PROMPTS = {
+    "name": "Укажите, пожалуйста, ваше имя.",
+    "first_name": "Укажите, пожалуйста, ваше имя.",
+    "last_name": "Укажите, пожалуйста, вашу фамилию.",
+    "phone": ASK_PHONE,
+    "email": "Укажите, пожалуйста, ваш email.",
+    "question": "Опишите, пожалуйста, ваш вопрос одним сообщением.",
+}
+
+
+def _telegram_form_fields() -> list[dict[str, Any]]:
+    """Resolve intake fields from Telegram channel config (fallback: name+phone)."""
+    channel = (
+        ChannelConnection.objects.filter(
+            channel=ChannelConnection.Channel.TELEGRAM,
+            is_active=True,
+        )
+        .order_by("-updated_at")
+        .first()
+    )
+    raw: list[Any] = []
+    if channel and isinstance(channel.config, dict):
+        candidate = channel.config.get("form_fields")
+        if isinstance(candidate, list) and candidate:
+            raw = candidate
+    if not raw:
+        raw = [
+            {"key": "name", "label": "Имя", "required": True, "type": "text"},
+            {"key": "phone", "label": "Телефон", "required": True, "type": "tel"},
+        ]
+    return normalize_form_fields(raw, require_phone=False)
+
+
+def _field_required(field: dict[str, Any]) -> bool:
+    return bool(field.get("required"))
+
+
+def _prompt_for_field(field: dict[str, Any]) -> str:
+    key = field["key"]
+    label = field.get("label") or key
+    required = _field_required(field)
+    if key in FIELD_PROMPTS:
+        base = FIELD_PROMPTS[key]
+    else:
+        base = f"Укажите, пожалуйста: {label}."
+    if required:
+        return base
+    return f"{base}\n\nПоле необязательное — можно пропустить кнопкой ниже."
+
+
+_INVISIBLE_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060\ufeff]")
+
+
+def _is_skip(raw: str) -> bool:
+    value = (raw or "").strip().casefold()
+    return value in {"-", "—", "пропустить", "skip", "нет", "не укажу", "не хочу"}
+
+
+def _clean_text(raw: str) -> str:
+    return _INVISIBLE_RE.sub("", raw or "").strip()
+
+
+def _bot_command(text: str, raw: Mapping[str, Any] | None = None) -> str:
+    """Canonical command token ('/start') or empty if this is not a bot command."""
+    cleaned = _clean_text(text)
+    payload = raw if isinstance(raw, Mapping) else {}
+    message = payload.get("message") or payload.get("edited_message") or {}
+    if not isinstance(message, Mapping):
+        message = {}
+    entities = message.get("entities") or message.get("caption_entities") or []
+    if isinstance(entities, list):
+        for ent in entities:
+            if not isinstance(ent, Mapping):
+                continue
+            if str(ent.get("type") or "") != "bot_command":
+                continue
+            if int(ent.get("offset") or 0) != 0:
+                continue
+            length = int(ent.get("length") or 0)
+            token = cleaned[:length] if length > 0 else cleaned.split(None, 1)[0]
+            name = token.split("@", 1)[0].casefold()
+            if name and not name.startswith("/"):
+                name = f"/{name}"
+            return name
+    head = cleaned.split(None, 1)[0].casefold() if cleaned else ""
+    if head.startswith("/"):
+        return head.split("@", 1)[0]
+    return ""
+
+
+def _is_start_command(command: str, text: str) -> bool:
+    if command == "/start":
+        return True
+    head = _clean_text(text).split(None, 1)[0].casefold() if text else ""
+    return head in {"start", "начать"}
+
 
 def _parse_fio(raw: str) -> tuple[str, str] | None:
     cleaned = re.sub(r"\s+", " ", (raw or "").strip())
@@ -51,10 +152,13 @@ def _parse_fio(raw: str) -> tuple[str, str] | None:
 
 
 def _active_dialog(chat_id: str) -> Dialog | None:
+    identity = str(chat_id or "").strip()
+    if not identity or identity == "unknown":
+        return None
     return (
         Dialog.objects.filter(
             channel="telegram",
-            client_external_id=str(chat_id),
+            client_external_id=identity,
             status__in=(Dialog.Status.WAITING, Dialog.Status.ACTIVE),
         )
         .order_by("-updated_at")
@@ -62,14 +166,183 @@ def _active_dialog(chat_id: str) -> Dialog | None:
     )
 
 
-def _reply(chat_id: str, text: str, **extra: Any) -> dict[str, Any]:
-    send_telegram_text(chat_id, text)
+def _live_dialog_for_session(
+    session: TelegramOnboardingSession | None,
+    chat_id: str,
+) -> Dialog | None:
+    """Only the dialog created by this completed intake — never a previous open chat."""
+    if session is not None and session.step != TelegramOnboardingSession.Step.DONE:
+        return None
+    payload = _session_payload(session) if session is not None else {}
+    if payload.get("detached"):
+        return None
+    existing = _active_dialog(chat_id)
+    if existing is None:
+        return None
+    bound = str(payload.get("bound_dialog_id") or "").strip()
+    if bound and bound != str(existing.id):
+        return None
+    return existing
+
+
+def _reply(
+    chat_id: str,
+    text: str,
+    *,
+    reply_markup: dict[str, Any] | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    send_telegram_text(chat_id, text, reply_markup=reply_markup)
     return {
         "ok": True,
         "channel": "telegram",
         "reply": {"method": "sendMessage", "chat_id": chat_id, "text": text},
         **extra,
     }
+
+
+def _session_payload(session: TelegramOnboardingSession) -> dict[str, Any]:
+    raw = session.meta if isinstance(getattr(session, "meta", None), dict) else {}
+    return dict(raw or {})
+
+
+def _save_payload(session: TelegramOnboardingSession, payload: dict[str, Any]) -> None:
+    session.meta = payload
+    session.save(update_fields=["meta", "updated_at"])
+
+
+def _finish_dialog(session: TelegramOnboardingSession, chat_id: str) -> dict[str, Any]:
+    phone = format_phone_e164(session.phone)
+    question = session.question.strip() or "Обращение из Telegram"
+    try:
+        dialog, message = create_dialog_with_message(
+            text=question,
+            channel="telegram",
+            widget_id="",
+            placement="telegram",
+            client_first_name=session.first_name,
+            client_last_name=session.last_name,
+            client_phone=phone,
+            client_external_id=chat_id,
+        )
+    except PermissionError:
+        return _reply(
+            chat_id,
+            "Ваш номер находится в списке блокировок. Обратитесь в отделение банка.",
+            routed_to="blocked",
+        )
+    session.step = TelegramOnboardingSession.Step.DONE
+    payload = _session_payload(session)
+    payload["bound_dialog_id"] = str(dialog.id)
+    payload["detached"] = False
+    payload.pop("field_index", None)
+    payload.pop("fields", None)
+    session.meta = payload
+    session.save(update_fields=["step", "meta", "updated_at"])
+    return _reply(
+        chat_id,
+        QUEUED,
+        routed_to="arm_queue",
+        dialog_id=str(dialog.id),
+        message_id=str(message.id),
+        step=session.step,
+    )
+
+
+def _ask_next_field(
+    session: TelegramOnboardingSession,
+    chat_id: str,
+    fields: list[dict[str, Any]],
+    index: int,
+) -> dict[str, Any]:
+    payload = _session_payload(session)
+    payload["field_index"] = index
+    payload["fields"] = [field["key"] for field in fields]
+    _save_payload(session, payload)
+    if index >= len(fields):
+        return _finish_dialog(session, chat_id)
+    field = fields[index]
+    required = _field_required(field)
+    markup = None
+    if not required:
+        markup = {
+            "inline_keyboard": [[{"text": "Пропустить", "callback_data": "skip_field"}]]
+        }
+    return _reply(
+        chat_id,
+        _prompt_for_field(field),
+        reply_markup=markup,
+        routed_to="onboarding",
+        step=STEP_COLLECT,
+        field=field["key"],
+    )
+
+
+def _begin_onboarding(chat_id: str) -> dict[str, Any]:
+    """Reset intake and ask the user to describe the question."""
+    session, _ = TelegramOnboardingSession.objects.get_or_create(
+        chat_id=chat_id,
+        defaults={"step": TelegramOnboardingSession.Step.AWAIT_QUESTION},
+    )
+    session.step = TelegramOnboardingSession.Step.AWAIT_QUESTION
+    session.question = ""
+    session.first_name = ""
+    session.last_name = ""
+    session.phone = ""
+    session.save(
+        update_fields=[
+            "step",
+            "question",
+            "first_name",
+            "last_name",
+            "phone",
+            "updated_at",
+        ]
+    )
+    payload = _session_payload(session)
+    payload.pop("field_index", None)
+    payload.pop("fields", None)
+    payload.pop("bound_dialog_id", None)
+    payload["detached"] = True
+    _save_payload(session, payload)
+    return _reply(
+        chat_id,
+        GREETING,
+        routed_to="onboarding",
+        step=session.step,
+    )
+
+
+def handle_telegram_skip_field(*, chat_id: str) -> dict[str, Any]:
+    """Skip the current optional onboarding field (inline button)."""
+    chat_id = str(chat_id)
+    session = (
+        TelegramOnboardingSession.objects.filter(chat_id=chat_id)
+        .exclude(step=TelegramOnboardingSession.Step.DONE)
+        .order_by("-updated_at")
+        .first()
+    )
+    if session is None:
+        return {
+            "ok": True,
+            "channel": "telegram",
+            "routed_to": "skip_ignored",
+        }
+    fields = _telegram_form_fields()
+    payload = _session_payload(session)
+    index = int(payload.get("field_index") or 0)
+    if index >= len(fields):
+        return _finish_dialog(session, chat_id)
+    field = fields[index]
+    if _field_required(field):
+        return _reply(
+            chat_id,
+            "Это поле обязательное — укажите данные сообщением.",
+            routed_to="onboarding",
+            step=STEP_COLLECT,
+            field=field["key"],
+        )
+    return _ask_next_field(session, chat_id, fields, index + 1)
 
 
 def handle_telegram_client_text(
@@ -80,11 +353,30 @@ def handle_telegram_client_text(
 ) -> dict[str, Any]:
     """Process one inbound Telegram text update through onboarding or live dialog."""
     chat_id = str(chat_id)
-    cleaned = (text or "").strip()
+    cleaned = _clean_text(text)
     if not cleaned:
         return _reply(chat_id, GREETING, routed_to="ignored")
 
-    existing = _active_dialog(chat_id)
+    command = _bot_command(cleaned, raw)
+    if command:
+        if _is_start_command(command, cleaned):
+            return _begin_onboarding(chat_id)
+        return {
+            "ok": True,
+            "channel": "telegram",
+            "routed_to": "command_ignored",
+            "command": command,
+        }
+    if _is_start_command("", cleaned):
+        return _begin_onboarding(chat_id)
+
+    session = (
+        TelegramOnboardingSession.objects.filter(chat_id=chat_id)
+        .order_by("-updated_at")
+        .first()
+    )
+
+    existing = _live_dialog_for_session(session, chat_id)
     if existing:
         external_message_id = str(raw.get("update_id") or "")
         message = append_message(
@@ -93,7 +385,6 @@ def handle_telegram_client_text(
             text=cleaned,
             external_message_id=external_message_id,
         )
-        # No Telegram ack — client already sees their own message in the chat.
         return {
             "ok": True,
             "channel": "telegram",
@@ -103,103 +394,71 @@ def handle_telegram_client_text(
             "message_id": str(message.id),
         }
 
-    session, created = TelegramOnboardingSession.objects.get_or_create(
-        chat_id=chat_id,
-        defaults={"step": TelegramOnboardingSession.Step.AWAIT_QUESTION},
-    )
-
-    is_start = cleaned.casefold() in {"/start", "start", "начать"}
-    if is_start or session.step == TelegramOnboardingSession.Step.DONE:
-        # Keep last phone/FIO for identity continuity across repeat contacts.
-        # Only the question is cleared — phone is re-confirmed later.
-        last_dialog = (
-            Dialog.objects.filter(
-                channel="telegram",
-                client_external_id=chat_id,
-            )
-            .order_by("-created_at")
-            .first()
+    if session is None:
+        session = TelegramOnboardingSession.objects.create(
+            chat_id=chat_id,
+            step=TelegramOnboardingSession.Step.AWAIT_QUESTION,
         )
-        if last_dialog:
-            if not session.phone and last_dialog.client_phone:
-                session.phone = last_dialog.client_phone
-            if not session.first_name and last_dialog.client_first_name:
-                session.first_name = last_dialog.client_first_name
-            if not session.last_name and last_dialog.client_last_name:
-                session.last_name = last_dialog.client_last_name
-        session.step = TelegramOnboardingSession.Step.AWAIT_QUESTION
-        session.question = ""
-        session.save(
-            update_fields=[
-                "step",
-                "question",
-                "first_name",
-                "last_name",
-                "phone",
-                "updated_at",
-            ]
-        )
-        return _reply(chat_id, GREETING, routed_to="onboarding", step=session.step)
-
-    if created:
-        # First contact without /start: greet, then treat this message as the question.
         send_telegram_text(chat_id, GREETING)
+
+    if session.step == TelegramOnboardingSession.Step.DONE:
+        return _begin_onboarding(chat_id)
+
+    fields = _telegram_form_fields()
 
     if session.step == TelegramOnboardingSession.Step.AWAIT_QUESTION:
         session.question = cleaned[:4000]
         session.step = TelegramOnboardingSession.Step.AWAIT_FIO
         session.save(update_fields=["question", "step", "updated_at"])
-        return _reply(chat_id, ASK_FIO, routed_to="onboarding", step=session.step)
+        return _ask_next_field(session, chat_id, fields, 0)
 
-    if session.step == TelegramOnboardingSession.Step.AWAIT_FIO:
+    # Dynamic field collection (also covers legacy AWAIT_FIO / AWAIT_PHONE).
+    payload = _session_payload(session)
+    index = int(payload.get("field_index") or 0)
+    if index >= len(fields):
+        index = 0
+    field = fields[index]
+    key = field["key"]
+    required = _field_required(field)
+
+    if not required and _is_skip(cleaned):
+        return _ask_next_field(session, chat_id, fields, index + 1)
+
+    if key in {"name", "first_name"}:
+        # Accept single name or full FIO.
         parsed = _parse_fio(cleaned)
-        if not parsed:
-            return _reply(chat_id, INVALID_FIO, routed_to="onboarding", step=session.step)
-        first_name, last_name = parsed
-        session.first_name = first_name
-        session.last_name = last_name
-        session.step = TelegramOnboardingSession.Step.AWAIT_PHONE
-        session.save(
-            update_fields=["first_name", "last_name", "step", "updated_at"]
-        )
-        return _reply(chat_id, ASK_PHONE, routed_to="onboarding", step=session.step)
-
-    if session.step == TelegramOnboardingSession.Step.AWAIT_PHONE:
+        if parsed:
+            session.first_name, session.last_name = parsed
+        else:
+            session.first_name = cleaned[:100]
+            if not session.last_name:
+                session.last_name = ""
+        session.save(update_fields=["first_name", "last_name", "updated_at"])
+    elif key == "last_name":
+        session.last_name = cleaned[:100]
+        session.save(update_fields=["last_name", "updated_at"])
+    elif key == "phone":
         if not is_plausible_phone(cleaned):
-            return _reply(
-                chat_id, INVALID_PHONE, routed_to="onboarding", step=session.step
-            )
-        phone = format_phone_e164(cleaned)
-        session.phone = phone
-        session.step = TelegramOnboardingSession.Step.DONE
-        session.save(update_fields=["phone", "step", "updated_at"])
-        question = session.question.strip() or "Обращение из Telegram"
-        try:
-            dialog, message = create_dialog_with_message(
-                text=question,
-                channel="telegram",
-                widget_id="",
-                placement="telegram",
-                client_first_name=session.first_name,
-                client_last_name=session.last_name,
-                client_phone=phone,
-                client_external_id=chat_id,
-            )
-        except PermissionError:
+            return _reply(chat_id, INVALID_PHONE, routed_to="onboarding", step=STEP_COLLECT)
+        session.phone = format_phone_e164(cleaned)
+        session.save(update_fields=["phone", "updated_at"])
+    elif key == "email":
+        if "@" not in cleaned or "." not in cleaned.split("@")[-1]:
             return _reply(
                 chat_id,
-                "Ваш номер находится в списке блокировок. Обратитесь в отделение банка.",
-                routed_to="blocked",
+                "Не удалось распознать email. Пример: name@example.by",
+                routed_to="onboarding",
+                step=STEP_COLLECT,
             )
-        return _reply(
-            chat_id,
-            QUEUED,
-            routed_to="arm_queue",
-            dialog_id=str(dialog.id),
-            message_id=str(message.id),
-            step=session.step,
-        )
+        payload["email"] = cleaned[:200]
+        _save_payload(session, payload)
+    else:
+        payload[key] = cleaned[:500]
+        _save_payload(session, payload)
 
-    session.step = TelegramOnboardingSession.Step.AWAIT_QUESTION
-    session.save(update_fields=["step", "updated_at"])
-    return _reply(chat_id, GREETING, routed_to="onboarding")
+    # Ensure we have at least some name before finish.
+    if not session.first_name and key not in {"name", "first_name"}:
+        # keep going
+        pass
+
+    return _ask_next_field(session, chat_id, fields, index + 1)

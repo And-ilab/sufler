@@ -591,8 +591,8 @@
 .chat-management__selected-fields li,
 .chat-management__trigger-list li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 8px;
   align-items: center;
   padding: 8px 10px;
   border: 1px solid #d9e4dc;
@@ -600,7 +600,48 @@
   background: #fff;
 }
 
+.chat-management__selected-fields li.is-sortable {
+  cursor: grab;
+}
+
+.chat-management__selected-fields li.is-sortable:active {
+  cursor: grabbing;
+}
+
+.chat-management__selected-fields li.is-dragging {
+  opacity: 0.45;
+}
+
+.chat-management__selected-fields li.is-drag-over {
+  border-color: #007a43;
+  box-shadow: 0 0 0 1px #007a43;
+}
+
+.chat-management__selected-fields-index {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #e8f0eb;
+  color: #2f5d45;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.chat-management__selected-fields-grip {
+  margin-right: 6px;
+  color: #7a9486;
+  font-size: 12px;
+  letter-spacing: -1px;
+}
+
 .chat-management__selected-fields-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
   overflow: hidden;
   font-size: 13px;
   font-weight: 600;
@@ -684,10 +725,14 @@
 
 @media (max-width: 640px) {
   .chat-management__selected-fields li {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas:
-      "label remove"
-      "required remove";
+      "index label remove"
+      "index required remove";
+  }
+
+  .chat-management__selected-fields-index {
+    grid-area: index;
   }
 
   .chat-management__selected-fields-label {
@@ -698,7 +743,7 @@
     grid-area: required;
   }
 
-  .chat-management__selected-fields .chat-management__icon-x {
+  .chat-management__selected-fields > li > .chat-management__icon-x {
     grid-area: remove;
     align-self: start;
   }
@@ -823,4 +868,74 @@
   .chat-management__form-grid .is-wide {
     grid-column: auto;
   }
+}
+
+.chat-management__avatar {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid #c5d6cc;
+  background: #e8f0eb;
+  flex-shrink: 0;
+}
+
+.chat-management__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chat-management__avatar svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.chat-management__avatar-upload {
+  display: inline-flex;
+  cursor: pointer;
+  position: relative;
+}
+
+.chat-management__avatar-upload input[type='file'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.chat-management__ad-pending {
+  margin-bottom: 16px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid #f0d48a;
+  background: linear-gradient(180deg, #fff9eb 0%, #fff6df 100%);
+}
+
+.chat-management__ad-pending > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.chat-management__ad-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.chat-management__ad-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #ead9a8;
 }

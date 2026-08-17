@@ -32,6 +32,8 @@ export interface ChatOperator {
   active_dialogs?: number
   is_active?: boolean
   auto_assign?: boolean
+  photo_url?: string
+  skill_tags?: string[]
 }
 
 export interface WidgetFormField {
@@ -87,8 +89,9 @@ export interface BaseMessage {
   text: string
   channel?: string
   channels: string[]
-  send_phase: 'before_bot' | 'after_bot' | 'offline'
+  send_phase: 'before_bot' | 'after_bot' | 'offline' | 'mid_dialog' | 'hold'
   sort_order: number
+  delay_seconds?: number
   placement_id?: EntityId | null
   is_active: boolean
 }
@@ -120,9 +123,13 @@ export interface BotConfiguration {
 
 export interface SupervisorKpis {
   waiting?: number
+  waiting_online?: number
+  waiting_offline?: number
   active?: number
   online_operators?: number
   average_wait_seconds?: number
+  average_wait_online_seconds?: number
+  average_wait_offline_seconds?: number
   sla_percent?: number
   closed_today?: number
   [key: string]: string | number | undefined
@@ -132,6 +139,9 @@ export interface SupervisorOperator extends ChatOperator {
   load?: number
   closed_today?: number
   avg_first_response_seconds?: number | null
+  time_in_dialogs_seconds?: number
+  avg_dialog_seconds?: number | null
+  channels_breakdown?: Record<string, number>
 }
 
 export interface SupervisorQueue {
@@ -139,6 +149,8 @@ export interface SupervisorQueue {
   name: string
   department?: string
   waiting: number
+  waiting_online?: number
+  waiting_offline?: number
   active?: number
   longest_wait_seconds?: number
 }
@@ -286,8 +298,30 @@ export async function getSupervisorOverview(): Promise<SupervisorOverview> {
   return request<SupervisorOverview>('supervisor/overview/')
 }
 
-export async function getAnalytics(period: 'day' | 'week' | 'month'): Promise<AnalyticsResponse> {
-  return request<AnalyticsResponse>(`analytics/?period=${period}`)
+export async function getAnalytics(
+  period: 'day' | 'week' | 'month' | 'custom' = 'week',
+  range?: { date_from?: string; date_to?: string },
+): Promise<AnalyticsResponse> {
+  const params = new URLSearchParams()
+  if (period !== 'custom') params.set('period', period)
+  if (range?.date_from) params.set('date_from', range.date_from)
+  if (range?.date_to) params.set('date_to', range.date_to)
+  return request<AnalyticsResponse>(`analytics/?${params.toString()}`)
+}
+
+export async function getAdPendingOperators(): Promise<{
+  ok: boolean
+  items: {
+    external_id: string
+    display_name: string
+    email: string
+    ad_role: string
+    detected_at: string
+    needs: string[]
+  }[]
+  count: number
+}> {
+  return request('ad/pending-operators/')
 }
 
 export async function listInternalMessages(params?: {

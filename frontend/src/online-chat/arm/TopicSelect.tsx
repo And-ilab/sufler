@@ -9,7 +9,7 @@ export function TopicSelect({
   options,
   onChange,
   disabled = false,
-  placeholder = 'Выберите тематику',
+  placeholder = 'Тематика не выбрана',
   style,
 }: {
   t: ArmTheme

@@ -74,6 +74,8 @@ export type AppealHistoryItem = {
   summary: string
 }
 
+export type ReplyTemplateScope = 'personal' | 'shared'
+
 export type ReplyTemplateItem = {
   id: string
   title: string
@@ -81,6 +83,9 @@ export type ReplyTemplateItem = {
   body: string
   updatedAt: string
   favorite?: boolean
+  /** personal = only owner; shared = all operators (supervisor-created). */
+  scope?: ReplyTemplateScope
+  ownerName?: string
 }
 
 export type ArmUiSettings = {
@@ -88,7 +93,5 @@ export type ArmUiSettings = {
   desktopNotify: boolean
   compactQueue: boolean
   autoExpandSummary: boolean
-  showColleagueSection: boolean
-  enterToSend: boolean
   fontScale: 'sm' | 'md' | 'lg'
 }

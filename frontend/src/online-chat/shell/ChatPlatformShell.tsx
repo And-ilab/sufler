@@ -22,6 +22,8 @@ interface ChatPlatformShellProps {
   showMenuButton?: boolean
   menuOpen?: boolean
   onMenuToggle?: () => void
+  photoUrl?: string | null
+  onPhotoChange?: (dataUrl: string) => void
 }
 
 export function ChatPlatformShell({
@@ -42,6 +44,8 @@ export function ChatPlatformShell({
   showMenuButton = false,
   menuOpen = false,
   onMenuToggle,
+  photoUrl,
+  onPhotoChange,
 }: ChatPlatformShellProps) {
   const routes = [
     { href: armHref, label: armNavLabel, access: 'arm' as const },
@@ -154,9 +158,39 @@ export function ChatPlatformShell({
           })}
         </nav>
         <div className="chat-platform-shell__user" title={userLine || undefined}>
-          {displayName && <strong>{displayName}</strong>}
-          {jobTitle && <small>{jobTitle}</small>}
-          {!displayName && !jobTitle && 'Пользователь'}
+          <label
+            className={`chat-platform-shell__avatar${onPhotoChange ? ' is-editable' : ''}`}
+            title={onPhotoChange ? 'Загрузить фото' : (displayName || 'Аватар')}
+          >
+            {photoUrl ? (
+              <img src={photoUrl} alt="" />
+            ) : (
+              <svg viewBox="0 0 40 40" width="36" height="36" aria-hidden>
+                <circle cx="20" cy="20" r="20" fill="#ffffff33" />
+                <circle cx="20" cy="13" r="9" fill="#ffffffaa" />
+                <path d="M3 40c2.2-12 9.5-17.5 17-17.5S34.8 28 37 40" fill="#ffffffaa" />
+              </svg>
+            )}
+            {onPhotoChange ? (
+              <input
+                type="file"
+                accept="image/*"
+                aria-label="Загрузить фото аватара"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  if (!file) return
+                  const reader = new FileReader()
+                  reader.onload = () => onPhotoChange(String(reader.result || ''))
+                  reader.readAsDataURL(file)
+                }}
+              />
+            ) : null}
+          </label>
+          <div className="chat-platform-shell__user-text">
+            {displayName && <strong>{displayName}</strong>}
+            {jobTitle && <small>{jobTitle}</small>}
+            {!displayName && !jobTitle && 'Пользователь'}
+          </div>
         </div>
       </header>
       <div className="chat-platform-shell__content">{children}</div>

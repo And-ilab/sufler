@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.db.models import Q
 from django.utils import timezone
 
 from audit.events import (
@@ -313,7 +315,144 @@ def is_test_client_dialog(dialog: Dialog) -> bool:
     return False
 
 
-def serialize_dialog(dialog: Dialog, *, include_messages: bool = False) -> dict[str, Any]:
+_CHANNEL_LABELS = {
+    "widget": "Виджет сайта",
+    "telegram": "Telegram",
+    "viber": "Viber",
+    "vk": "VK",
+    "ok": "OK",
+    "api": "API",
+    "email": "E-mail",
+}
+
+
+def channel_label(channel: str) -> str:
+    key = (channel or "").strip().lower()
+    return _CHANNEL_LABELS.get(key, channel or "неизвестный канал")
+
+
+def phones_linked(left: str, right: str) -> bool:
+    """Same client phone: exact normalized, national BY mobile, or 1-digit typo."""
+    a = normalize_phone(left)
+    b = normalize_phone(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if len(a) >= 9 and len(b) >= 9 and a[-9:] == b[-9:]:
+        return True
+    if len(a) == len(b) and len(a) >= 10:
+        diffs = sum(1 for x, y in zip(a, b) if x != y)
+        if diffs == 1:
+            return True
+    return len(a) >= 7 and len(b) >= 7 and a[-7:] == b[-7:]
+
+
+def _name_token_set(first_name: str, last_name: str) -> frozenset[str]:
+    parts = []
+    for raw in (first_name or "", last_name or ""):
+        for token in re.split(r"[\s\-]+", raw.strip().casefold()):
+            if len(token) >= 2:
+                parts.append(token)
+    return frozenset(parts)
+
+
+def names_linked(
+    first_a: str,
+    last_a: str,
+    first_b: str,
+    last_b: str,
+) -> bool:
+    """Same person even if widget/TG swapped имя/фамилия fields."""
+    left = _name_token_set(first_a, last_a)
+    right = _name_token_set(first_b, last_b)
+    return len(left) >= 2 and left == right
+
+
+def history_identity_query(
+    *,
+    phone: str = "",
+    external_id: str = "",
+    first_name: str = "",
+    last_name: str = "",
+) -> Q:
+    """Match dialogs by phone (primary), external id, and FIO tokens."""
+    normalized = normalize_phone(phone)
+    phones: set[str] = {normalized} if normalized else set()
+    external_ids: set[str] = {external_id.strip()} if external_id.strip() else set()
+    name_key = _name_token_set(first_name, last_name)
+    matched_ids: set[Any] = set()
+
+    # Expand TG chat_id ↔ phone ↔ widget phone ↔ FIO (order-independent).
+    for _ in range(3):
+        before = (frozenset(phones), frozenset(external_ids), frozenset(matched_ids))
+        for item in Dialog.objects.only(
+            "id",
+            "client_phone",
+            "client_external_id",
+            "client_first_name",
+            "client_last_name",
+        ).iterator(chunk_size=500):
+            phone_hit = bool(phones) and any(
+                phones_linked(item.client_phone, p) for p in phones
+            )
+            external_hit = bool(
+                item.client_external_id and item.client_external_id in external_ids
+            )
+            same_fio = bool(name_key) and names_linked(
+                first_name,
+                last_name,
+                item.client_first_name,
+                item.client_last_name,
+            )
+            candidate_phone = normalize_phone(item.client_phone)
+            if same_fio and not phone_hit and not external_hit:
+                if phones or external_ids:
+                    if candidate_phone and not any(
+                        phones_linked(candidate_phone, p) for p in phones
+                    ):
+                        same_fio = False
+                else:
+                    same_fio = not candidate_phone and not (
+                        item.client_external_id or ""
+                    ).strip()
+            if not (phone_hit or external_hit or same_fio):
+                continue
+            matched_ids.add(item.id)
+            phone_norm = normalize_phone(item.client_phone)
+            if phone_norm:
+                phones.add(phone_norm)
+            if item.client_external_id:
+                external_ids.add(item.client_external_id)
+        after = (frozenset(phones), frozenset(external_ids), frozenset(matched_ids))
+        if after == before:
+            break
+
+    if not matched_ids and not phones and not external_ids:
+        return Q()
+
+    query = Q()
+    if matched_ids:
+        query |= Q(id__in=list(matched_ids))
+    if phones:
+        query |= Q(
+            id__in=[
+                item.id
+                for item in Dialog.objects.only("id", "client_phone")
+                if any(phones_linked(item.client_phone, p) for p in phones)
+            ]
+        )
+    if external_ids:
+        query |= Q(client_external_id__in=list(external_ids))
+    return query if query else Q(pk__in=[])
+
+
+def serialize_dialog(
+    dialog: Dialog,
+    *,
+    include_messages: bool = False,
+    include_history: bool = False,
+) -> dict[str, Any]:
     needs_reply = dialog_needs_reply(dialog)
     wait_anchor = _wait_anchor(dialog)
     payload: dict[str, Any] = {
@@ -365,10 +504,97 @@ def serialize_dialog(dialog: Dialog, *, include_messages: bool = False) -> dict[
         "has_feedback": DialogFeedback.objects.filter(dialog_id=dialog.id).exists(),
     }
     if include_messages:
-        payload["messages"] = [
-            serialize_message(item) for item in dialog.messages.all()
-        ]
+        current_messages = [serialize_message(item) for item in dialog.messages.all()]
+        history_messages = (
+            _prior_dialog_messages_for_operator(dialog) if include_history else []
+        )
+        payload["messages"] = history_messages + current_messages
+        payload["history_message_count"] = len(history_messages)
     return payload
+
+
+def _history_separator_payload(
+    *,
+    separator_id: str,
+    dialog_id: str,
+    text: str,
+    created_at,
+) -> dict[str, Any]:
+    return {
+        "id": separator_id,
+        "dialog_id": dialog_id,
+        "speaker": "system",
+        "text": text,
+        "raw_text": text,
+        "receipt_status": "read",
+        "reply_to_id": None,
+        "quoted_text": "",
+        "edited_at": None,
+        "is_deleted": False,
+        "attachment_name": "",
+        "attachment_key": "",
+        "attachment_content_type": "",
+        "attachment_size": 0,
+        "attachment_scan_status": "not_required",
+        "external_message_id": "",
+        "channel_delivery_status": "not_required",
+        "channel_delivery_error": "",
+        "response_origin": "",
+        "created_at": created_at.isoformat(),
+        "is_history": True,
+    }
+
+
+def _prior_dialog_messages_for_operator(dialog: Dialog) -> list[dict[str, Any]]:
+    """Prepend prior appeals of the same client for ARM scrollback.
+
+    Client channels never receive these — only operator getDialog with
+    include_history=1. Identity is cross-channel (phone / external id / FIO).
+    """
+    query = history_identity_query(
+        phone=dialog.client_phone,
+        external_id=dialog.client_external_id,
+        first_name=dialog.client_first_name,
+        last_name=dialog.client_last_name,
+    )
+    if not query:
+        return []
+    prior = list(
+        Dialog.objects.filter(query)
+        .exclude(pk=dialog.pk)
+        .prefetch_related("messages")
+        .order_by("created_at")[:100]
+    )
+    packed: list[dict[str, Any]] = []
+    current_id = str(dialog.id)
+    for prior_dialog in prior:
+        when = prior_dialog.closed_at or prior_dialog.created_at
+        when_label = when.strftime("%d.%m.%Y %H:%M") if when else ""
+        topic = (prior_dialog.close_topic or "").strip() or "без темы"
+        channel = channel_label(prior_dialog.channel)
+        sep_text = f"—— Предыдущее обращение · {channel} · {when_label} · {topic} ——"
+        packed.append(
+            _history_separator_payload(
+                separator_id=f"history-sep-{prior_dialog.id}",
+                dialog_id=current_id,
+                text=sep_text,
+                created_at=when,
+            )
+        )
+        for message in prior_dialog.messages.all():
+            item = serialize_message(message)
+            item["is_history"] = True
+            packed.append(item)
+    if packed:
+        packed.append(
+            _history_separator_payload(
+                separator_id=f"history-sep-current-{dialog.id}",
+                dialog_id=current_id,
+                text="—— Текущее обращение ——",
+                created_at=dialog.created_at,
+            )
+        )
+    return packed
 
 
 def broadcast(group: str, event_type: str, payload: dict[str, Any]) -> None:
@@ -734,7 +960,11 @@ def close_dialog(dialog: Dialog, *, topic: str) -> Dialog:
     except Exception:  # noqa: BLE001
         logger.exception("dialog_summary_on_close_failed dialog_id=%s", dialog.id)
     # Manual+auto: grace window for the freed operator before auto-assign fills the slot.
-    hold = start_post_close_grace(previous_operator)
+    try:
+        hold = start_post_close_grace(previous_operator)
+    except Exception:  # noqa: BLE001 — never block close on grace/timer errors
+        logger.exception("start_post_close_grace_failed operator=%s", getattr(previous_operator, "id", None))
+        hold = None
     payload = serialize_dialog(dialog)
     if hold is not None:
         payload["assignment_grace_until"] = hold.until.isoformat()

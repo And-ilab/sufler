@@ -201,6 +201,7 @@ export const DEFAULT_TEMPLATES: ReplyTemplateItem[] = [
     body: 'Здравствуйте, {{client_name}}! Меня зовут {{operator_name}}. Чем могу помочь?',
     updatedAt: new Date().toISOString(),
     favorite: true,
+    scope: 'shared',
   },
   {
     id: 'tpl-wait',
@@ -209,6 +210,7 @@ export const DEFAULT_TEMPLATES: ReplyTemplateItem[] = [
     body: 'Проверяю информацию, одну минуту. Оставайтесь, пожалуйста, на связи.',
     updatedAt: new Date().toISOString(),
     favorite: true,
+    scope: 'shared',
   },
   {
     id: 'tpl-card4',
@@ -216,6 +218,7 @@ export const DEFAULT_TEMPLATES: ReplyTemplateItem[] = [
     category: 'Карты',
     body: 'Подскажите, пожалуйста, последние 4 цифры карты для идентификации.',
     updatedAt: new Date().toISOString(),
+    scope: 'shared',
   },
   {
     id: 'tpl-mortgage',
@@ -223,6 +226,7 @@ export const DEFAULT_TEMPLATES: ReplyTemplateItem[] = [
     category: 'Ипотека',
     body: 'По программе «Моя квартира» актуальная ставка для зарплатных клиентов — от 11,9% годовых при оформлении страховки. Могу рассчитать ориентировочный платёж.',
     updatedAt: new Date().toISOString(),
+    scope: 'shared',
   },
   {
     id: 'tpl-bye',
@@ -231,6 +235,7 @@ export const DEFAULT_TEMPLATES: ReplyTemplateItem[] = [
     body: 'Спасибо за обращение! Если появятся вопросы — пишите в чат. Хорошего дня!',
     updatedAt: new Date().toISOString(),
     favorite: true,
+    scope: 'shared',
   },
 ]
 

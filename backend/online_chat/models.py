@@ -40,6 +40,54 @@ def is_plausible_phone(phone: str) -> bool:
     return 10 <= len(digits) <= 15
 
 
+FIELD_KEY_ALIASES = {
+    "first_name": "name",
+    "fio": "name",
+    "tel": "phone",
+    "telephone": "phone",
+    "mobile": "phone",
+}
+FIELD_KEY_DROP = {"", "question", "tema", "topic"}
+
+
+def normalize_form_fields(raw: object, *, require_phone: bool = False) -> list[dict]:
+    """Canonical intake fields: unique keys, admin order, required flags preserved."""
+    fields: list[dict] = []
+    seen: set[str] = set()
+    items = raw if isinstance(raw, list) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip().casefold()
+        key = FIELD_KEY_ALIASES.get(key, key)
+        if not key or key in FIELD_KEY_DROP or key in seen:
+            continue
+        seen.add(key)
+        label = str(item.get("label") or key).strip() or key
+        field_type = str(item.get("type") or "text").strip() or "text"
+        if key == "phone":
+            field_type = "tel"
+        elif key == "email":
+            field_type = "email"
+        fields.append(
+            {
+                "key": key,
+                "label": label,
+                "required": bool(item.get("required")),
+                "type": field_type,
+            }
+        )
+    if require_phone:
+        if "phone" not in seen:
+            fields.append({"key": "phone", "label": "Телефон", "required": True, "type": "tel"})
+        else:
+            for field in fields:
+                if field["key"] == "phone":
+                    field["required"] = True
+                    field["type"] = "tel"
+    return fields
+
+
 def short_dialog_ref(dialog_id: uuid.UUID | str) -> str:
     raw = str(dialog_id).replace("-", "")
     return raw[:6].upper()
@@ -90,6 +138,8 @@ class OperatorProfile(models.Model):
     departments = models.ManyToManyField(Department, related_name="operators", blank=True)
     max_active_dialogs = models.PositiveIntegerField(default=3)
     auto_assign = models.BooleanField(default=True)
+    photo_url = models.TextField(blank=True, default="")
+    skill_tags = models.JSONField(default=list, blank=True)
     last_seen_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -217,6 +267,8 @@ class BaseMessage(models.Model):
     class SendPhase(models.TextChoices):
         BEFORE_BOT = "before_bot", "До бота"
         AFTER_BOT = "after_bot", "После бота / при эскалации"
+        MID_DIALOG = "mid_dialog", "В середине диалога (hold)"
+        HOLD = "hold", "Ожидание ответа оператора"
         OFFLINE = "offline", "Вне графика"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -237,6 +289,10 @@ class BaseMessage(models.Model):
         db_index=True,
     )
     sort_order = models.IntegerField(default=100, db_index=True)
+    delay_seconds = models.PositiveIntegerField(
+        default=0,
+        help_text="Задержка перед отправкой (hold / mid-dialog), секунды",
+    )
     placement = models.ForeignKey(
         WidgetPlacement,
         null=True,
@@ -635,6 +691,7 @@ class TelegramOnboardingSession(models.Model):
     first_name = models.CharField(max_length=100, blank=True, default="")
     last_name = models.CharField(max_length=100, blank=True, default="")
     phone = models.CharField(max_length=40, blank=True, default="")
+    meta = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -208,9 +208,11 @@ export function PieChartView({ data }: { data: PieSlice[] }) {
 export function DataTable({
   headers,
   rows,
+  onRowClick,
 }: {
   headers: string[]
   rows: string[][]
+  onRowClick?: (row: string[], index: number) => void
 }) {
   return (
     <div className="rpt-table-wrap">
@@ -224,7 +226,12 @@ export function DataTable({
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={`${row[0]}-${index}`}>
+            <tr
+              key={`${row[0]}-${index}`}
+              onClick={onRowClick ? () => onRowClick(row, index) : undefined}
+              style={onRowClick ? { cursor: 'pointer' } : undefined}
+              title={onRowClick ? 'Открыть диалог' : undefined}
+            >
               {row.map((cell, cellIndex) => (
                 <td key={`${index}-${cellIndex}`}>{cell}</td>
               ))}

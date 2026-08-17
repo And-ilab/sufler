@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import type { ArmTheme } from '../theme'
-import { Button, Row, Text } from '../primitives'
+import { Row, Text } from '../primitives'
 import type { ModuleSchemePalette } from './types'
 
 export function ArmModuleFrame({
@@ -8,7 +8,6 @@ export function ArmModuleFrame({
   scheme,
   title,
   subtitle,
-  onBack,
   actions,
   children,
   bodyStyle,
@@ -17,7 +16,8 @@ export function ArmModuleFrame({
   scheme: ModuleSchemePalette
   title: string
   subtitle?: string
-  onBack: () => void
+  /** Kept for call-site compatibility; navigation back is via ARM menu. */
+  onBack?: () => void
   actions?: ReactNode
   children: ReactNode
   bodyStyle?: CSSProperties
@@ -39,21 +39,26 @@ export function ArmModuleFrame({
           display: 'flex',
           alignItems: 'center',
           gap: 12,
-          padding: '12px 16px',
+          padding: '14px 20px',
           borderBottom: `1px solid ${scheme.accentWeak}`,
           background: scheme.headerBg,
           flexShrink: 0,
         }}
       >
-        <Button variant="secondary" size="sm" onClick={onBack} title="Вернуться к диалогам">
-          ← Диалоги
-        </Button>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <Text weight="semibold" style={{ fontSize: 16, letterSpacing: '-0.01em' }}>
+          <Text
+            weight="semibold"
+            style={{
+              fontSize: 18,
+              letterSpacing: '-0.02em',
+              color: t.text.primary,
+              lineHeight: 1.25,
+            }}
+          >
             {title}
           </Text>
           {subtitle ? (
-            <Text style={{ fontSize: 12, color: t.text.secondary, marginTop: 2 }}>{subtitle}</Text>
+            <Text style={{ fontSize: 12, color: t.text.secondary, marginTop: 3 }}>{subtitle}</Text>
           ) : null}
         </div>
         {actions ? <Row style={{ gap: 8, flexShrink: 0 }}>{actions}</Row> : null}

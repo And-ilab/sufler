@@ -359,3 +359,92 @@ class ApiTests(TestCase):
             .values_list("text", flat=True)
         )
         self.assertEqual(bot_texts[-2:], ["Срочное уведомление", "Передаю оператору."])
+
+
+class FormFieldsAndHistoryTests(TestCase):
+    def setUp(self) -> None:
+        self.department = Department.objects.create(code="support", name="Support")
+        self.placement = WidgetPlacement.objects.create(
+            widget_id="public-widget",
+            name="Public",
+            department=self.department,
+            form_fields=[
+                {"key": "name", "label": "Имя", "required": True, "type": "text"},
+                {"key": "phone", "label": "Телефон", "required": False, "type": "tel"},
+            ],
+        )
+
+    def test_normalize_form_fields_keeps_admin_order_and_required(self) -> None:
+        from online_chat.models import normalize_form_fields
+
+        fields = normalize_form_fields(
+            [
+                {"key": "email", "label": "Email", "required": False, "type": "email"},
+                {"key": "name", "label": "Имя", "required": False, "type": "text"},
+                {"key": "phone", "label": "Телефон", "required": True, "type": "tel"},
+            ]
+        )
+        self.assertEqual([item["key"] for item in fields], ["email", "name", "phone"])
+        self.assertFalse(fields[0]["required"])
+        self.assertFalse(fields[1]["required"])
+        self.assertTrue(fields[2]["required"])
+        self.assertNotIn("last_name", [item["key"] for item in fields])
+
+    def test_widget_config_returns_only_configured_fields(self) -> None:
+        response = self.client.get(
+            reverse("online_chat_widget_config", args=[self.placement.widget_id])
+        )
+        self.assertEqual(response.status_code, 200)
+        fields = response.json()["config"]["form_fields"]
+        self.assertEqual([item["key"] for item in fields], ["name", "phone"])
+        self.assertTrue(fields[0]["required"])
+        self.assertFalse(fields[1]["required"])
+
+    def test_operator_sees_cross_channel_history_client_does_not(self) -> None:
+        first, first_msg = create_dialog_with_message(
+            text="Старый вопрос из виджета",
+            widget_id="public-widget",
+            channel="widget",
+            client_phone="+375291112233",
+            client_first_name="Никита",
+            client_last_name="Иванов",
+        )
+        first.status = Dialog.Status.CLOSED
+        first.closed_at = timezone.now()
+        first.save(update_fields=["status", "closed_at", "updated_at"])
+        current, current_msg = create_dialog_with_message(
+            text="Новый вопрос из Telegram",
+            channel="telegram",
+            widget_id="",
+            placement="telegram",
+            client_phone="+375291112233",
+            client_first_name="Никита",
+            client_last_name="Иванов",
+            client_external_id="4242",
+        )
+
+        client_view = self.client.get(
+            reverse("online_chat_dialog", args=[str(current.id)])
+        )
+        self.assertEqual(client_view.status_code, 200)
+        client_messages = client_view.json()["dialog"]["messages"]
+        client_texts = [item["text"] for item in client_messages]
+        self.assertIn("Новый вопрос из Telegram", client_texts)
+        self.assertNotIn("Старый вопрос из виджета", client_texts)
+        self.assertFalse(any(item.get("is_history") for item in client_messages))
+
+        operator_view = self.client.get(
+            reverse("online_chat_dialog", args=[str(current.id)]),
+            {"include_history": "1"},
+        )
+        self.assertEqual(operator_view.status_code, 200)
+        operator_messages = operator_view.json()["dialog"]["messages"]
+        operator_texts = [item["text"] for item in operator_messages]
+        self.assertIn("Старый вопрос из виджета", operator_texts)
+        self.assertIn("Новый вопрос из Telegram", operator_texts)
+        self.assertGreater(operator_view.json()["dialog"]["history_message_count"], 0)
+        history_ids = {
+            item["id"] for item in operator_messages if item.get("is_history")
+        }
+        self.assertIn(str(first_msg.id), history_ids)
+        self.assertNotIn(str(current_msg.id), history_ids)

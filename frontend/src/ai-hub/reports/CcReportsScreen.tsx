@@ -167,12 +167,14 @@ function ReportChartView({
 
 export function CcReportsScreen({
   initialPanel = 'reports',
+  domain = 'chat',
 }: {
   initialPanel?: 'reports' | 'builder'
+  domain?: 'chat' | 'sufler' | 'all'
 } = {}) {
   const [panel, setPanel] = useState<'reports' | 'builder'>(initialPanel)
   const [catalogMeta, setCatalogMeta] = useState<CatalogReportMeta[]>([])
-  const [reportType, setReportType] = useState('chat-period')
+  const [reportType, setReportType] = useState(domain === 'sufler' ? 'usefulness' : 'chat-period')
   const [viewMode, setViewMode] = useState<ReportViewMode>('bar')
   const [filtersOpen, setFiltersOpen] = useState(true)
   const [periodFrom, setPeriodFrom] = useState(isoDaysAgo(13))
@@ -206,14 +208,30 @@ export function CcReportsScreen({
       catalogMeta.length > 0
         ? catalogMeta
         : [{ id: reportType, label: reportType, fr: '', default_view: 'table' as const }]
+    const filtered = base.filter((item) => {
+      if (domain === 'all') return true
+      const id = item.id.toLowerCase()
+      const isChat =
+        id.startsWith('chat')
+        || id.includes('offline')
+        || id.includes('history')
+        || id.includes('operator')
+        || id.includes('topic')
+        || id.includes('rating')
+        || id.includes('sla')
+        || id.includes('period')
+      if (domain === 'chat') return isChat
+      return !isChat
+    })
+    const source = filtered.length ? filtered : base
     const templates = savedTemplates.map((item) => ({
       id: `saved:${item.id}`,
       label: `★ ${item.name}`,
       fr: 'custom',
       default_view: (item.view_mode as ReportViewMode) || 'table',
     }))
-    return [...base, ...templates]
-  }, [catalogMeta, reportType, savedTemplates])
+    return [...source, ...templates]
+  }, [catalogMeta, domain, reportType, savedTemplates])
 
   const selected = useMemo(() => {
     const fromChoices = reportChoices.find((item) => item.id === reportType)

@@ -3,7 +3,7 @@ import { LiveOpsScreen } from './LiveOpsScreen'
 import { AsrQaScreen } from './AsrQaScreen'
 import './ReportsTheme.css'
 
-export type ReportsSection = 'overview' | 'live' | 'asr-qa'
+export type ReportsSection = 'chat' | 'sufler' | 'live' | 'asr-qa'
 
 interface AiHubReportsAppProps {
   username?: string
@@ -14,15 +14,23 @@ function resolveSection(pathname: string, explicit?: ReportsSection): ReportsSec
   if (explicit) return explicit
   if (pathname.includes('/asr')) return 'asr-qa'
   if (pathname.includes('/live')) return 'live'
-  return 'overview'
+  if (pathname.includes('/sufler')) return 'sufler'
+  if (pathname.includes('/chat')) return 'chat'
+  return 'chat'
 }
 
 const TABS: { id: ReportsSection; label: string; path: string; title: string }[] = [
   {
-    id: 'overview',
-    label: 'Аналитика',
-    path: '/ai-hub/reports',
-    title: 'Аналитика контакт-центра',
+    id: 'chat',
+    label: 'Онлайн-чат',
+    path: '/ai-hub/reports/chat',
+    title: 'Аналитика онлайн-чата',
+  },
+  {
+    id: 'sufler',
+    label: 'Суфлёр',
+    path: '/ai-hub/reports/sufler',
+    title: 'Аналитика суфлёра',
   },
   {
     id: 'live',
@@ -79,8 +87,9 @@ export function AiHubReportsApp({
           ))}
         </nav>
 
-        {active === 'overview' ? (
+        {active === 'chat' || active === 'sufler' ? (
           <CcReportsScreen
+            domain={active}
             initialPanel={
               window.location.pathname.includes('/builder')
               || window.location.search.includes('builder')

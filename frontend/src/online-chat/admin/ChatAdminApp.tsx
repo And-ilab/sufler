@@ -4,6 +4,7 @@ import {
   channelsApi,
   botsApi,
   departmentsApi,
+  getAdPendingOperators,
   getAnalytics,
   getSlaSettings,
   operatorsApi,
@@ -58,17 +59,48 @@ const tabs: Array<{ id: Tab; label: string }> = [
 ]
 
 const POPULAR_FORM_FIELDS: WidgetFormField[] = [
-  { key: 'first_name', label: 'Имя', type: 'text', required: true },
+  { key: 'name', label: 'Имя', type: 'text', required: true },
   { key: 'last_name', label: 'Фамилия', type: 'text', required: false },
   { key: 'phone', label: 'Телефон', type: 'tel', required: true },
   { key: 'email', label: 'Email', type: 'email', required: false },
-  { key: 'question', label: 'Тема обращения', type: 'text', required: true },
   { key: 'account', label: 'Номер счёта или карты', type: 'text', required: false },
   { key: 'city', label: 'Город', type: 'text', required: false },
   { key: 'passport', label: 'Серия и номер паспорта', type: 'text', required: false },
   { key: 'inn', label: 'УНП / ИНН', type: 'text', required: false },
   { key: 'company', label: 'Организация', type: 'text', required: false },
 ]
+
+const FIELD_KEY_ALIASES: Record<string, string> = {
+  first_name: 'name',
+  fio: 'name',
+  tel: 'phone',
+  telephone: 'phone',
+  mobile: 'phone',
+}
+
+function canonicalFieldKey(key: string): string {
+  const normalized = key.trim().toLowerCase()
+  return FIELD_KEY_ALIASES[normalized] || normalized
+}
+
+function sanitizeFormFields(fields: WidgetFormField[] | undefined | null): WidgetFormField[] {
+  if (!Array.isArray(fields)) return []
+  const seen = new Set<string>()
+  const cleaned: WidgetFormField[] = []
+  for (const field of fields) {
+    if (!field?.key) continue
+    const key = canonicalFieldKey(field.key)
+    if (!key || key === 'question' || seen.has(key)) continue
+    seen.add(key)
+    cleaned.push({
+      ...field,
+      key,
+      required: Boolean(field.required),
+      type: key === 'phone' ? 'tel' : key === 'email' ? 'email' : (field.type || 'text'),
+    })
+  }
+  return cleaned
+}
 
 function slugHint(value: string): string {
   const ascii = value
@@ -90,6 +122,34 @@ function formatOperatorFio(fullName: string): string {
     .map((part) => `${part[0]?.toUpperCase() ?? ''}.`)
     .join('')
   return `${surname} ${initials}`.trim()
+}
+
+function adRoleLabel(role: string): string {
+  const map: Record<string, string> = {
+    operator_cc: 'Оператор КЦ',
+    supervisor_cc: 'Супервизор КЦ',
+    admin_cc: 'Администратор КЦ',
+    operator: 'Оператор',
+    supervisor: 'Супервизор',
+    admin: 'Администратор',
+  }
+  return map[role] || role
+}
+
+function OperatorAvatarPreview({ url, name }: { url: string; name: string }) {
+  return (
+    <span className="chat-management__avatar" title={name} aria-hidden={!url}>
+      {url ? (
+        <img src={url} alt="" />
+      ) : (
+        <svg viewBox="0 0 40 40" width="40" height="40" aria-hidden>
+          <circle cx="20" cy="20" r="20" fill="#d7e3db" />
+          <circle cx="20" cy="13" r="9" fill="#7a9486" />
+          <path d="M3 40c2.2-12 9.5-17.5 17-17.5S34.8 28 37 40" fill="#7a9486" />
+        </svg>
+      )}
+    </span>
+  )
 }
 
 /** ARM presence labels; map to backend OperatorPresence on save. */
@@ -128,9 +188,15 @@ const CANONICAL_CHANNELS: Array<{ kind: string; name: string }> = [
 const emptyPlacement: Partial<WidgetPlacement> = {
   name: '',
   allowed_domains: [],
-  require_phone: false,
+  welcome_message: 'Здравствуйте! Оставьте контакты — оператор подключится.',
+  offline_message: 'Сейчас вне графика. Оставьте сообщение — ответим в рабочее время.',
+  require_phone: true,
   theme_accent: '#007A43',
-  form_fields: [],
+  form_fields: [
+    { key: 'name', label: 'Имя', type: 'text', required: true },
+    { key: 'last_name', label: 'Фамилия', type: 'text', required: false },
+    { key: 'phone', label: 'Телефон', type: 'tel', required: true },
+  ],
   is_active: true,
 }
 
@@ -225,7 +291,15 @@ export function ChatAdminApp() {
     try {
       await action()
       setSuccess(message)
-      await refresh()
+      try {
+        await refresh()
+      } catch (refreshError) {
+        setError(
+          refreshError instanceof Error
+            ? refreshError.message
+            : 'Сохранено, но список настроек не обновился',
+        )
+      }
       return true
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Операция не выполнена')
@@ -368,14 +442,21 @@ export function ChatAdminApp() {
 }
 
 function AnalyticsTab() {
-  const [period, setPeriod] = useState<'day' | 'week' | 'month'>('week')
+  const [mode, setMode] = useState<'day' | 'week' | 'month' | 'custom'>('week')
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 7)
+    return d.toISOString().slice(0, 10)
+  })
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10))
   const [data, setData] = useState<AnalyticsResponse | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    void getAnalytics(period)
+    const range = mode === 'custom' ? { date_from: dateFrom, date_to: dateTo } : undefined
+    void getAnalytics(mode === 'custom' ? 'custom' : mode, range)
       .then((response) => {
         setData(response)
         setError('')
@@ -384,7 +465,7 @@ function AnalyticsTab() {
         setError(caught instanceof Error ? caught.message : 'Не удалось загрузить аналитику')
       })
       .finally(() => setLoading(false))
-  }, [period])
+  }, [mode, dateFrom, dateTo])
 
   const kpis = (data?.kpis ?? {}) as Record<string, string | number | null | undefined>
 
@@ -395,14 +476,27 @@ function AnalyticsTab() {
         <label>
           Период
           <select
-            value={period}
-            onChange={(event) => setPeriod(event.target.value as 'day' | 'week' | 'month')}
+            value={mode}
+            onChange={(event) => setMode(event.target.value as typeof mode)}
           >
             <option value="day">1 день</option>
             <option value="week">7 дней</option>
             <option value="month">30 дней</option>
+            <option value="custom">Произвольные даты</option>
           </select>
         </label>
+        {mode === 'custom' ? (
+          <>
+            <label>
+              С
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            </label>
+            <label>
+              По
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            </label>
+          </>
+        ) : null}
       </div>
       {error && <p className="chat-management__error" role="alert">{error}</p>}
       {loading && <p className="chat-management__muted">Загрузка…</p>}
@@ -518,6 +612,15 @@ function OperatorsTab({
   const [username, setUsername] = useState('')
   const [departmentId, setDepartmentId] = useState('')
   const [capacity, setCapacity] = useState(5)
+  const [skillTags, setSkillTags] = useState('')
+  const [photoUrl, setPhotoUrl] = useState('')
+  const [adPending, setAdPending] = useState<Awaited<ReturnType<typeof getAdPendingOperators>>['items']>([])
+
+  useEffect(() => {
+    void getAdPendingOperators()
+      .then((response) => setAdPending(response.items ?? []))
+      .catch(() => setAdPending([]))
+  }, [items])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -532,9 +635,16 @@ function OperatorsTab({
           capacity,
           presence: 'offline',
           is_active: true,
+          photo_url: photoUrl.trim() || undefined,
+          skill_tags: skillTags
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter(Boolean),
         })
         setFullName('')
         setUsername('')
+        setSkillTags('')
+        setPhotoUrl('')
       },
       'Оператор создан.',
       {
@@ -569,6 +679,32 @@ function OperatorsTab({
             Лимит диалогов
             <input type="number" min="1" max="50" value={capacity} onChange={(event) => setCapacity(event.target.valueAsNumber)} />
           </label>
+          <label className="is-wide">
+            Навыки / каналы (через запятую)
+            <input
+              value={skillTags}
+              placeholder="мессенджеры, сайт, соцсети"
+              onChange={(event) => setSkillTags(event.target.value)}
+            />
+          </label>
+          <label className="is-wide">
+            Фото аватара
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
+              <OperatorAvatarPreview url={photoUrl} name={fullName || 'Новый'} />
+              <input
+                type="file"
+                accept="image/*"
+                disabled={disabled}
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  if (!file) return
+                  const reader = new FileReader()
+                  reader.onload = () => setPhotoUrl(String(reader.result || ''))
+                  reader.readAsDataURL(file)
+                }}
+              />
+            </div>
+          </label>
         </div>
         <div className="chat-management__actions">
           <button disabled={disabled}>Создать оператора</button>
@@ -576,14 +712,101 @@ function OperatorsTab({
       </form>
       <section className="chat-management__card" aria-labelledby="operators-admin-heading">
         <h2 id="operators-admin-heading">Операторы</h2>
+        {adPending.length ? (
+          <div className="chat-management__ad-pending" aria-label="Новые операторы из Active Directory">
+            <header>
+              <strong>Новые из Active Directory</strong>
+              <span className="chat-management__pill is-warn">{adPending.length}</span>
+            </header>
+            <p className="chat-management__muted">
+              Пользователи с ролью КЦ появились в AD. Назначьте лимит диалогов, фото и навыки, затем создайте оператора.
+            </p>
+            <ul className="chat-management__ad-list">
+              {adPending.map((item) => (
+                <li key={item.external_id} className="chat-management__ad-card">
+                  <OperatorAvatarPreview url="" name={item.display_name} />
+                  <div>
+                    <strong>{item.display_name}</strong>
+                    <div className="chat-management__muted">{item.email}</div>
+                    <div>
+                      <span className="chat-management__pill">{adRoleLabel(item.ad_role)}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="is-secondary"
+                    disabled={disabled}
+                    onClick={() => {
+                      setFullName(item.display_name)
+                      setUsername(item.email.split('@')[0] || item.external_id)
+                    }}
+                  >
+                    Заполнить форму
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <div className="chat-management__table-wrap">
           <table>
-            <thead><tr><th>ФИО</th><th>Отдел</th><th>Статус</th><th>Лимит</th><th>Активен</th></tr></thead>
+            <thead><tr><th>Фото</th><th>ФИО</th><th>Отдел</th><th>Навыки</th><th>Статус</th><th>Лимит</th><th>Активен</th></tr></thead>
             <tbody>
               {items.map((item) => (
                 <tr key={item.id}>
-                  <td><strong>{item.name}</strong></td>
+                  <td>
+                    <label className="chat-management__avatar-upload" title="Загрузить фото">
+                      <OperatorAvatarPreview url={item.photo_url || ''} name={item.name} />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        disabled={disabled}
+                        aria-label={`Загрузить фото ${item.name}`}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0]
+                          if (!file) return
+                          const reader = new FileReader()
+                          reader.onload = () => {
+                            const next = String(reader.result || '')
+                            void perform(
+                              () => operatorsApi.update(item.id, { photo_url: next }),
+                              `Фото ${item.name} обновлено.`,
+                            )
+                          }
+                          reader.readAsDataURL(file)
+                        }}
+                      />
+                    </label>
+                  </td>
+                  <td>
+                    <strong>{item.name}</strong>
+                  </td>
                   <td>{item.department_name ?? departmentName(item.department_id ?? item.department, departments)}</td>
+                  <td>
+                    <input
+                      aria-label={`Навыки ${item.name}`}
+                      defaultValue={(item.skill_tags ?? []).join(', ')}
+                      key={`${item.id}-skills-${(item.skill_tags ?? []).join(',')}`}
+                      placeholder="мессенджеры, сайт"
+                      onBlur={(event) => {
+                        const next = event.target.value
+                          .split(',')
+                          .map((tag) => tag.trim())
+                          .filter(Boolean)
+                        const prev = item.skill_tags ?? []
+                        if (next.join('|') === prev.join('|')) return
+                        void perform(
+                          () => operatorsApi.update(item.id, { skill_tags: next }),
+                          `Навыки ${item.name} обновлены.`,
+                          {
+                            title: 'Изменить навыки / каналы?',
+                            description: `Для «${item.name}»: ${next.join(', ') || 'без тегов'}.`,
+                          },
+                        )
+                        event.target.value = prev.join(', ')
+                      }}
+                    />
+                  </td>
                   <td>
                     <select
                       aria-label={`Присутствие ${item.name}`}
@@ -600,7 +823,6 @@ function OperatorsTab({
                             description: `Установить для «${item.name}» статус «${label}»?`,
                           },
                         )
-                        // Keep select visually stable until refresh applies.
                         event.target.value = presenceToUi(item.presence)
                       }}
                     >
@@ -764,10 +986,15 @@ function DepartmentsTab({ items, disabled, perform }: TabProps & { items: Depart
 function FormFieldsPicker({
   value,
   onChange,
+  allowReorder = false,
 }: {
   value: WidgetFormField[]
   onChange: (fields: WidgetFormField[]) => void
+  /** Messenger channels: drag to set ask order. Widget: selection only. */
+  allowReorder?: boolean
 }) {
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const selectedKeys = new Set(value.map((field) => field.key))
   const togglePopular = (field: WidgetFormField) => {
     if (selectedKeys.has(field.key)) {
@@ -779,13 +1006,21 @@ function FormFieldsPicker({
   const setRequired = (key: string, required: boolean) => {
     onChange(value.map((item) => (item.key === key ? { ...item, required } : item)))
   }
-  const removeField = (key: string) => onChange(value.filter((item) => item.key !== key))
+  const removeField = (key: string) => {
+    onChange(value.filter((item) => item.key !== key))
+  }
+  const reorderTo = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= value.length || to >= value.length) return
+    const next = [...value]
+    const [item] = next.splice(from, 1)
+    next.splice(to, 0, item)
+    onChange(next)
+  }
 
   return (
     <div className="chat-management__field-picker is-wide">
       <div className="chat-management__field-picker-head">
         <strong>Поля формы</strong>
-        <span>Выберите поля для формы входа в выбранном канале</span>
       </div>
 
       <div className="chat-management__field-grid" role="group" aria-label="Доступные поля">
@@ -814,13 +1049,61 @@ function FormFieldsPicker({
         </div>
         {value.length ? (
           <ul className="chat-management__selected-fields">
-            {value.map((field) => (
-              <li key={field.key}>
-                <span className="chat-management__selected-fields-label">{field.label}</span>
+            {value.map((field, index) => (
+              <li
+                key={field.key}
+                className={[
+                  allowReorder ? 'is-sortable' : '',
+                  dragIndex === index ? 'is-dragging' : '',
+                  dragOverIndex === index && dragIndex !== index ? 'is-drag-over' : '',
+                ].filter(Boolean).join(' ')}
+                draggable={allowReorder}
+                onDragStart={(event) => {
+                  if (!allowReorder) return
+                  setDragIndex(index)
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData('text/plain', String(index))
+                }}
+                onDragOver={(event) => {
+                  if (!allowReorder || dragIndex === null) return
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                  if (dragOverIndex !== index) setDragOverIndex(index)
+                }}
+                onDragLeave={() => {
+                  if (dragOverIndex === index) setDragOverIndex(null)
+                }}
+                onDrop={(event) => {
+                  if (!allowReorder) return
+                  event.preventDefault()
+                  const from = dragIndex ?? Number(event.dataTransfer.getData('text/plain'))
+                  reorderTo(from, index)
+                  setDragIndex(null)
+                  setDragOverIndex(null)
+                }}
+                onDragEnd={() => {
+                  setDragIndex(null)
+                  setDragOverIndex(null)
+                }}
+              >
+                {allowReorder ? (
+                  <span className="chat-management__selected-fields-index" aria-hidden>
+                    {index + 1}
+                  </span>
+                ) : null}
+                <span
+                  className="chat-management__selected-fields-label"
+                  title={allowReorder ? 'Перетащите, чтобы изменить порядок' : undefined}
+                >
+                  {allowReorder ? (
+                    <span className="chat-management__selected-fields-grip" aria-hidden>⠿</span>
+                  ) : null}
+                  {field.label}
+                </span>
                 <label className="chat-management__required-toggle">
                   <input
                     type="checkbox"
-                    checked={field.required}
+                    checked={Boolean(field.required)}
                     onChange={(event) => setRequired(field.key, event.target.checked)}
                   />
                   <span>Обязательное</span>
@@ -922,11 +1205,57 @@ function PlacementsTab({
             <input type="checkbox" checked={form.is_active !== false} onChange={(event) => set('is_active', event.target.checked)} />
             Виджет активен
           </label>
+          <label className="is-wide">
+            Приветствие
+            <textarea
+              value={form.welcome_message ?? ''}
+              onChange={(event) => set('welcome_message', event.target.value)}
+              rows={2}
+            />
+          </label>
+          <label className="is-wide">
+            Вне графика
+            <textarea
+              value={form.offline_message ?? ''}
+              onChange={(event) => set('offline_message', event.target.value)}
+              rows={2}
+            />
+          </label>
         </div>
         <div className="chat-management__actions">
           <button disabled={disabled}>{editingId == null ? 'Создать' : 'Сохранить'}</button>
           {editingId != null && <button type="button" className="is-secondary" onClick={reset}>Отмена</button>}
         </div>
+        {(form.name || editingId != null) ? (
+          <div
+            className="chat-management__widget-preview"
+            style={{
+              marginTop: 16,
+              border: '1px solid #d7e0d9',
+              borderRadius: 12,
+              overflow: 'hidden',
+              background: '#f4f7f5',
+            }}
+          >
+            <div style={{ padding: '10px 12px', background: form.theme_accent || '#007A43', color: '#fff', fontWeight: 600 }}>
+              Чат банка · превью
+            </div>
+            <div style={{ padding: 12, display: 'grid', gap: 8 }}>
+              <p style={{ margin: 0, fontSize: 13, color: '#334' }}>
+                {(form.welcome_message || 'Здравствуйте! Оставьте контакты — оператор подключится.').slice(0, 160)}
+              </p>
+              {(form.form_fields?.length ? form.form_fields : POPULAR_FORM_FIELDS.slice(0, 3)).map((field) => (
+                <label key={field.key} style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+                  {field.label}{field.required ? ' *' : ''}
+                  <input disabled placeholder={field.type === 'tel' ? '+375 …' : ''} style={{ padding: 8, borderRadius: 6, border: '1px solid #c9d4cc' }} />
+                </label>
+              ))}
+              <button type="button" disabled style={{ padding: '8px 12px', borderRadius: 8, background: form.theme_accent || '#007A43', color: '#fff', border: 0 }}>
+                Начать диалог
+              </button>
+            </div>
+          </div>
+        ) : null}
       </form>
       <section className="chat-management__card">
         <h2>Виджеты</h2>
@@ -1001,6 +1330,7 @@ function ChannelsTab({
     id: EntityId
     name: string
     fields: WidgetFormField[]
+    allowReorder: boolean
   } | null>(null)
 
   const messengerRows = CANONICAL_CHANNELS.filter((item) => item.kind !== 'widget').map((canonical) => {
@@ -1010,39 +1340,44 @@ function ChannelsTab({
   const widgetChannel = items.find((item) => (item.kind ?? item.channel ?? '') === 'widget')
 
   const openChannelForm = (channel: ChatChannel) => {
+    const channelKind = String(channel.kind ?? channel.channel ?? '')
+    const cleaned = sanitizeFormFields(channel.form_fields)
     setFormTarget({
       kind: 'channel',
       id: channel.id,
       name: channel.name.replace(/\s*\(demo\)/gi, ''),
-      fields: channel.form_fields?.length
-        ? channel.form_fields
-        : [POPULAR_FORM_FIELDS[0], POPULAR_FORM_FIELDS[2]],
+      fields: cleaned,
+      allowReorder: channelKind !== 'widget',
     })
   }
   const openPlacementForm = (placement: WidgetPlacement) => {
+    const cleaned = sanitizeFormFields(placement.form_fields)
     setFormTarget({
       kind: 'placement',
       id: placement.id,
       name: `Виджет · ${placement.name.replace(/\s*\(demo\)/gi, '')}`,
-      fields: placement.form_fields?.length
-        ? placement.form_fields
-        : [POPULAR_FORM_FIELDS[0], POPULAR_FORM_FIELDS[2]],
+      fields: cleaned,
+      allowReorder: false,
     })
   }
   const saveFormFields = async () => {
     if (!formTarget) return
-    const fields = formTarget.fields
-    await perform(async () => {
-      if (formTarget.kind === 'channel') {
-        await channelsApi.update(formTarget.id, { form_fields: fields })
+    const target = formTarget
+    const mapped = sanitizeFormFields(target.fields)
+    // Close first so a slow/partial refresh cannot leave the modal stuck open.
+    setFormTarget(null)
+    const ok = await perform(async () => {
+      if (target.kind === 'channel') {
+        // Only form_fields — never rewrite config from the masked list payload.
+        await channelsApi.update(target.id, { form_fields: mapped } as Partial<ChatChannel>)
       } else {
-        await placementsApi.update(formTarget.id, { form_fields: fields })
+        await placementsApi.update(target.id, {
+          form_fields: mapped,
+          require_phone: mapped.some((field) => field.key === 'phone' && field.required),
+        })
       }
-      setFormTarget(null)
-    }, `Поля формы для «${formTarget.name}» сохранены.`, {
-      title: 'Сохранить поля формы?',
-      description: `Для «${formTarget.name}» будет сохранено ${fields.length} полей.`,
-    })
+    }, `Поля формы для «${target.name}» сохранены.`)
+    if (!ok) setFormTarget(target)
   }
 
   return (
@@ -1222,6 +1557,7 @@ function ChannelsTab({
             <h2>Поля формы · {formTarget.name.replace(/\s*\(demo\)/gi, '')}</h2>
             <FormFieldsPicker
               value={formTarget.fields}
+              allowReorder={formTarget.allowReorder}
               onChange={(fields) => setFormTarget((current) => (current ? { ...current, fields } : current))}
             />
             <div className="chat-management__actions">
@@ -1524,6 +1860,8 @@ function BotsTab({
 const SEND_PHASE_OPTIONS = [
   { value: 'before_bot', label: 'До бота' },
   { value: 'after_bot', label: 'После бота / при эскалации' },
+  { value: 'mid_dialog', label: 'В середине диалога' },
+  { value: 'hold', label: 'Ожидание ответа оператора (hold)' },
   { value: 'offline', label: 'Вне графика' },
 ] as const
 
@@ -1541,6 +1879,7 @@ function BaseMessagesTab({
   const [sendPhase, setSendPhase] = useState<BaseMessage['send_phase']>('before_bot')
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
+  const [delaySeconds, setDelaySeconds] = useState(0)
   const [selectedChannels, setSelectedChannels] = useState<string[] | null>(null)
 
   const channelOptions = [
@@ -1588,11 +1927,13 @@ function BaseMessagesTab({
           text,
           channels: selected,
           send_phase: sendPhase,
+          delay_seconds: delaySeconds,
           sort_order: Math.max(0, ...items.map((item) => item.sort_order ?? 0)) + 10,
           is_active: true,
         })
         setTitle('')
         setText('')
+        setDelaySeconds(0)
       },
       'Базовое сообщение создано.',
       {
@@ -1635,6 +1976,17 @@ function BaseMessagesTab({
             </select>
           </label>
           <label>Название<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Например: Сбой оплаты" /></label>
+          <label>
+            Задержка, сек
+            <input
+              type="number"
+              min="0"
+              max="3600"
+              value={delaySeconds}
+              onChange={(event) => setDelaySeconds(event.target.valueAsNumber || 0)}
+              title="Для mid_dialog / hold / автозакрытия по словам"
+            />
+          </label>
           <div className="chat-management__field-picker is-wide">
             <div className="chat-management__field-picker-head">
               <strong>Каналы</strong>
@@ -1680,6 +2032,7 @@ function BaseMessagesTab({
                   <br />
                   <small>
                     {SEND_PHASE_OPTIONS.find((option) => option.value === item.send_phase)?.label ?? item.send_phase}
+                    {item.delay_seconds ? ` · задержка ${item.delay_seconds}с` : ''}
                     {' · '}
                     {(item.channels?.length
                       ? item.channels.map((value) => (

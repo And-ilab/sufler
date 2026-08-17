@@ -7,6 +7,12 @@ import {
 } from './arm/ArmOperatorView'
 import { ARM_THEME_DARK, ARM_THEME_LIGHT, type ThemeKind } from './arm/theme'
 import {
+  ARM_UI_SETTINGS_EVENT,
+  armFontScaleFactor,
+  loadArmUiSettings,
+  type ArmUiSettings,
+} from './arm/modules'
+import {
   operatorsApi,
   type OperatorPresence as PersistedPresence,
 } from './api/managementApi'
@@ -65,6 +71,18 @@ export function ChatArmApp({
   const [presence, setPresence] = useState<OperatorPresence>(initialPresence)
   const [viewMode, setViewMode] = useState<'active' | 'colleague'>(viewOnly ? 'colleague' : 'active')
   const [closeTopic, setCloseTopic] = useState<string>('')
+  const [uiSettings, setUiSettings] = useState<ArmUiSettings>(() => loadArmUiSettings())
+
+  useEffect(() => {
+    const sync = () => setUiSettings(loadArmUiSettings())
+    const onCustom = () => sync()
+    window.addEventListener(ARM_UI_SETTINGS_EVENT, onCustom)
+    window.addEventListener('storage', sync)
+    return () => {
+      window.removeEventListener(ARM_UI_SETTINGS_EVENT, onCustom)
+      window.removeEventListener('storage', sync)
+    }
+  }, [])
 
   useEffect(() => {
     if (viewOnly) setViewMode('colleague')
@@ -108,6 +126,8 @@ export function ChatArmApp({
       .catch(() => setToast('Статус сохранён только локально: профиль оператора не найден.'))
   }
 
+  const fontScale = armFontScaleFactor(uiSettings.fontScale)
+
   const cssVars = {
     '--arm-accent': scheme.accent,
     '--arm-accent-weak': scheme.accentWeak,
@@ -126,6 +146,7 @@ export function ChatArmApp({
     '--arm-t-tertiary': t.text.tertiary,
     '--arm-bg-elevated': t.bg.elevated,
     '--arm-bg-editor': t.bg.editor,
+    '--arm-font-scale': String(fontScale),
   } as CSSProperties
 
   return (
@@ -138,6 +159,7 @@ export function ChatArmApp({
         ...cssVars,
         background: scheme.panelBg,
         color: t.text.primary,
+        fontSize: `${14 * fontScale}px`,
       }}
     >
       <div
