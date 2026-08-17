@@ -14,6 +14,9 @@ interface SpeechRecognitionLike {
   onerror: ((event: { error?: string }) => void) | null
   onend: (() => void) | null
   onspeechstart: (() => void) | null
+  onspeechend: (() => void) | null
+  onaudiostart: (() => void) | null
+  onsoundstart: (() => void) | null
 }
 
 interface SpeechRecognitionEventLike {
@@ -82,6 +85,38 @@ function encodeWav(float32: Float32Array, sampleRate: number): Blob {
   view.setUint32(40, pcm.length * 2, true)
   new Int16Array(buffer, 44).set(pcm)
   return new Blob([buffer], { type: 'audio/wav' })
+}
+
+function attachMicLevelMeter(
+  context: AudioContext,
+  stream: MediaStream,
+  recordingRef: { current: boolean },
+  onLevel: (level: number) => void,
+): { stop: () => void } {
+  const source = context.createMediaStreamSource(stream)
+  const analyser = context.createAnalyser()
+  analyser.fftSize = 512
+  source.connect(analyser)
+  const samples = new Uint8Array(analyser.fftSize)
+  let frame = 0
+  const tick = () => {
+    if (!recordingRef.current) return
+    analyser.getByteTimeDomainData(samples)
+    let sum = 0
+    for (let index = 0; index < samples.length; index += 1) {
+      const value = (samples[index] - 128) / 128
+      sum += value * value
+    }
+    onLevel(Math.sqrt(sum / Math.max(1, samples.length)))
+    frame = window.requestAnimationFrame(tick)
+  }
+  frame = window.requestAnimationFrame(tick)
+  return {
+    stop: () => {
+      window.cancelAnimationFrame(frame)
+      source.disconnect()
+    },
+  }
 }
 
 function attachPcmUtterances(
@@ -181,6 +216,8 @@ export function useLiveDualAsr(
   const cleanupRef = useRef<(() => void) | null>(null)
   const finalizeTimerRef = useRef<number | null>(null)
   const lastInterimRef = useRef('')
+  const levelPulseRef = useRef(0)
+  const hearingRef = useRef(false)
 
   const setPartial = useCallback((patch: Partial<LiveDualAsrState>) => {
     setState((current) => ({ ...current, ...patch }))
@@ -202,6 +239,8 @@ export function useLiveDualAsr(
       window.clearTimeout(finalizeTimerRef.current)
       finalizeTimerRef.current = null
     }
+    hearingRef.current = false
+    window.cancelAnimationFrame(levelPulseRef.current)
     cleanupRef.current?.()
     cleanupRef.current = null
     setPartial({
@@ -215,8 +254,131 @@ export function useLiveDualAsr(
 
   const start = useCallback(async () => {
     if (recordingRef.current) return
-    recordingRef.current = true
+    const insecure = isInsecureRemoteOrigin()
+    const Recognition = speechCtor()
+    const emitHeard = (text: string, isFinal: boolean) => {
+      const cleaned = text.trim()
+      if (!cleaned) return
+      setPartial({ caption: cleaned })
+      onUtteranceRef.current(micSpeakerRef.current, cleaned, isFinal)
+    }
 
+    // SpeechRecognition starts on click; getUserMedia only drives the level meter.
+    if (Recognition) {
+      recordingRef.current = true
+      const recognition = new Recognition()
+      recognition.lang = 'ru-RU'
+      recognition.continuous = true
+      recognition.interimResults = true
+      recognition.onresult = (event) => {
+        let finalChunk = ''
+        let interim = ''
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const piece = String(event.results[index]?.[0]?.transcript || '')
+          if (event.results[index].isFinal) finalChunk += piece
+          else interim += piece
+        }
+        const finalText = finalChunk.trim()
+        const interimText = interim.trim()
+        if (finalText) {
+          lastInterimRef.current = ''
+          if (finalizeTimerRef.current != null) {
+            window.clearTimeout(finalizeTimerRef.current)
+            finalizeTimerRef.current = null
+          }
+          emitHeard(finalText, true)
+          return
+        }
+        if (!interimText) return
+        lastInterimRef.current = interimText
+        emitHeard(interimText, false)
+        if (finalizeTimerRef.current != null) {
+          window.clearTimeout(finalizeTimerRef.current)
+        }
+        finalizeTimerRef.current = window.setTimeout(() => {
+          const pending = lastInterimRef.current.trim()
+          if (pending) emitHeard(pending, true)
+          lastInterimRef.current = ''
+        }, 1200)
+      }
+      recognition.onerror = (event) => {
+        if (event.error === 'no-speech' || event.error === 'aborted') return
+        setPartial({
+          error: '',
+          status:
+            event.error === 'network' || event.error === 'service-not-allowed' || insecure
+              ? `Chrome не отдаёт текст по HTTP (${window.location.host}). Введите реплику в поле.`
+              : `Микрофон: ${event.error || 'ошибка распознавания'}`,
+        })
+      }
+      recognition.onend = () => {
+        if (!recordingRef.current) return
+        window.setTimeout(() => {
+          if (!recordingRef.current) return
+          try {
+            recognition.start()
+          } catch {
+            /* already started */
+          }
+        }, 250)
+      }
+      try {
+        recognition.start()
+      } catch {
+        recordingRef.current = false
+        setPartial({ error: 'Не удалось запустить распознавание микрофона' })
+        return
+      }
+      setPartial({
+        recording: true,
+        error: '',
+        caption: '',
+        micLevel: 0,
+        systemCapture: false,
+        status: 'Говорите в микрофон — полоска прыгает от голоса. После паузы текст должен появиться в ленте.',
+      })
+
+      let micStream: MediaStream | null = null
+      let micContext: AudioContext | null = null
+      let micMeter: { stop: () => void } | null = null
+      void navigator.mediaDevices
+        .getUserMedia({ audio: true, video: false })
+        .then((stream) => {
+          if (!recordingRef.current) {
+            stream.getTracks().forEach((track) => track.stop())
+            return
+          }
+          micStream = stream
+          micContext = new AudioContext()
+          void micContext.resume()
+          micMeter = attachMicLevelMeter(
+            micContext,
+            stream,
+            recordingRef,
+            (level) => setState((current) => ({ ...current, micLevel: level })),
+          )
+        })
+        .catch(() => {
+          setPartial({
+            error: 'Нет доступа к микрофону. Разрешите его в браузере и нажмите «Начать имитацию» снова.',
+          })
+        })
+
+      cleanupRef.current = () => {
+        try {
+          recognition.onend = null
+          recognition.stop()
+        } catch {
+          /* already stopped */
+        }
+        micMeter?.stop()
+        micStream?.getTracks().forEach((track) => track.stop())
+        void micContext?.close()
+      }
+      return
+    }
+
+    recordingRef.current = true
     let micStream: MediaStream
     try {
       micStream = await navigator.mediaDevices.getUserMedia({
@@ -229,81 +391,11 @@ export function useLiveDualAsr(
       return
     }
 
-    const insecure = isInsecureRemoteOrigin()
-    const Recognition = speechCtor()
-    const recognition = Recognition ? new Recognition() : null
-    const emitHeard = (text: string, isFinal: boolean) => {
-      const cleaned = text.trim()
-      if (!cleaned) return
-      setPartial({ caption: cleaned })
-      onUtteranceRef.current(micSpeakerRef.current, cleaned, isFinal)
-    }
-    if (recognition) {
-      recognition.lang = 'ru-RU'
-      recognition.continuous = true
-      recognition.interimResults = true
-      recognition.onresult = (event) => {
-        const result = event.results[event.results.length - 1]
-        const alternative = result?.[0]
-        const text = String(alternative?.transcript || '').trim()
-        if (!text) return
-        lastInterimRef.current = text
-        const isFinal = Boolean(result?.isFinal)
-        emitHeard(text, isFinal)
-        if (finalizeTimerRef.current != null) {
-          window.clearTimeout(finalizeTimerRef.current)
-        }
-        if (!isFinal) {
-          finalizeTimerRef.current = window.setTimeout(() => {
-            const pending = lastInterimRef.current.trim()
-            if (pending) emitHeard(pending, true)
-            lastInterimRef.current = ''
-          }, 1200)
-        } else {
-          lastInterimRef.current = ''
-        }
-      }
-      recognition.onspeechstart = () => {
-        setPartial({ status: 'Слышу речь — ждите паузу, текст появится в ленте.' })
-      }
-      recognition.onerror = (event) => {
-        if (event.error === 'no-speech' || event.error === 'aborted') return
-        setPartial({
-          error: '',
-          status:
-            event.error === 'network' || event.error === 'service-not-allowed' || insecure
-              ? `Chrome не отдаёт текст по HTTP (${window.location.host}). В chrome://flags найдите unsafely-treat-insecure-origin-as-secure, добавьте ${window.location.origin}, перезапустите Chrome. Пока введите реплику в поле.`
-              : `Микрофон: ${event.error || 'ошибка распознавания'}`,
-        })
-      }
-      recognition.onend = () => {
-        if (recordingRef.current) {
-          window.setTimeout(() => {
-            if (!recordingRef.current) return
-            try {
-              recognition.start()
-            } catch {
-              /* Chrome throws if start() races */
-            }
-          }, 200)
-        }
-      }
-      try {
-        recognition.start()
-      } catch {
-        setPartial({ error: 'Не удалось запустить распознавание микрофона' })
-      }
-    }
-
     setPartial({
       recording: true,
       error: '',
       caption: '',
-      status: insecure
-        ? `Микрофон включён, но Chrome по HTTP не пишет речь в страницу. Добавьте ${window.location.origin} в chrome://flags/#unsafely-treat-insecure-origin-as-secure и перезапустите Chrome — либо введите реплику в поле.`
-        : Recognition
-          ? 'Говорите в микрофон и сделайте паузу — текст должен появиться в ленте.'
-          : 'Говорите паузами или введите реплику — облачного распознавания в этом браузере нет.',
+      status: 'В этом браузере нет Chrome Speech Recognition. Введите реплику в поле или говорите паузами для локального STT.',
       systemCapture: false,
     })
 
@@ -321,20 +413,12 @@ export function useLiveDualAsr(
             if (text) onUtteranceRef.current(speaker, text, true)
           })
           .catch(() => {
-            /* Speech Recognition or manual input still available */
+            /* manual input still available */
           })
       },
     )
 
     cleanupRef.current = () => {
-      try {
-        if (recognition) {
-          recognition.onend = null
-          recognition.stop()
-        }
-      } catch {
-        /* already stopped */
-      }
       micCapture.stop()
       micStream.getTracks().forEach((track) => track.stop())
       void micContext.close()

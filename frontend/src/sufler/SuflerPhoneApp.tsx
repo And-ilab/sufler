@@ -190,10 +190,10 @@ export function SuflerPhoneApp({
     setTypedLine('')
   }
 
-  const startLive = async () => {
+  const startLive = () => {
     setLines([])
     liveTurns.current = { client: '', operator: '' }
-    await live.start()
+    void live.start()
   }
 
   const blocks = useMemo(() => lines, [lines])
@@ -302,7 +302,7 @@ export function SuflerPhoneApp({
       </div>
 
       <footer className="sufler-phone__footer">
-        <span>
+        <span className="sufler-phone__footer-status">
           {live.recording
             ? live.caption
               ? `Слышу: ${live.caption}`
@@ -342,15 +342,23 @@ export function SuflerPhoneApp({
                   style={{ transform: `scaleY(${Math.min(1, live.systemLevel * 8)})` }}
                 />
               </span>
-              <Button variant="ghost" onClick={live.swapSpeakers}>
-                Микрофон: {live.micSpeaker === 'client' ? 'клиент' : 'оператор'}
+              <Button
+                variant="ghost"
+                onClick={live.swapSpeakers}
+                title={
+                  live.micSpeaker === 'client'
+                    ? 'Микрофон пишет клиента'
+                    : 'Микрофон пишет оператора'
+                }
+              >
+                {live.micSpeaker === 'client' ? 'Клиент' : 'Оператор'}
               </Button>
               <Button variant="secondary" onClick={live.stop}>
                 Стоп
               </Button>
             </>
           ) : (
-            <Button variant="primary" onClick={() => void startLive()}>
+            <Button variant="primary" onClick={startLive}>
               Начать имитацию
             </Button>
           )}
