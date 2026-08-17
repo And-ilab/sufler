@@ -184,6 +184,58 @@ class ModelGatewayTest(unittest.TestCase):
             "Bearer test-key",
         )
 
+    def test_sufler_uses_dedicated_llm_assistant_stays_on_ollama(self):
+        env = {
+            "MODEL_GATEWAY_MODE": "openai",
+            "OPENAI_BASE_URL": "http://ollama:11434/v1",
+            "OPENAI_API_KEY": "ollama",
+            "OPENAI_MODEL": "qwen2.5:3b",
+            "OLLAMA_BASE_URL": "http://ollama:11434",
+            "SUFLER_LLM_BASE_URL": "https://api.deepseek.com/v1",
+            "SUFLER_LLM_API_KEY": "test-sufler-key",
+            "SUFLER_LLM_MODEL": "deepseek-chat",
+        }
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "id": "chatcmpl-split",
+            "object": "chat.completion",
+            "choices": [],
+        }
+        with patch.dict("os.environ", env, clear=False):
+            with patch(
+                "assistant.local_llm.active_model_id",
+                return_value="qwen2.5:3b",
+            ):
+                gateway = ModelGateway.from_registry()
+                with patch(
+                    "core.model_gateway.requests.post",
+                    return_value=response,
+                ) as post:
+                    gateway.chat("sufler_cc", self.messages)
+                    sufler_call = post.call_args
+                    gateway.chat("assistant_bank", self.messages)
+                    assistant_call = post.call_args
+
+        self.assertEqual(
+            sufler_call.args[0],
+            "https://api.deepseek.com/v1/chat/completions",
+        )
+        self.assertEqual(sufler_call.kwargs["json"]["model"], "deepseek-chat")
+        self.assertEqual(
+            sufler_call.kwargs["headers"]["Authorization"],
+            "Bearer test-sufler-key",
+        )
+        self.assertEqual(
+            assistant_call.args[0],
+            "http://ollama:11434/v1/chat/completions",
+        )
+        self.assertEqual(assistant_call.kwargs["json"]["model"], "qwen2.5:3b")
+        self.assertEqual(
+            assistant_call.kwargs["headers"]["Authorization"],
+            "Bearer ollama",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

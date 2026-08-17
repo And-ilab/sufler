@@ -43,9 +43,8 @@ class TranscribeWavTest(unittest.TestCase):
 
     def test_silent_wav_has_no_speech(self):
         with patch("orchestrator.transcribe._transcribe_vosk", return_value=""):
-            with patch("orchestrator.transcribe._transcribe_google", return_value=""):
-                with self.assertRaises(TranscribeError) as raised:
-                    transcribe_wav(_silent_wav())
+            with self.assertRaises(TranscribeError) as raised:
+                transcribe_wav(_silent_wav())
         self.assertIn("recognize", str(raised.exception).lower())
 
 

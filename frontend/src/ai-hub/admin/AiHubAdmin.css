@@ -1,9 +1,11 @@
+@import "../../tokens.css";
+
 .admin-center {
   display: grid;
   min-height: 100vh;
   grid-template-columns: 240px minmax(0, 1fr);
-  color: var(--color-text);
-  background: var(--color-surface-muted);
+  color: var(--color-text, #172033);
+  background: var(--color-surface-muted, #f5f7fb);
 }
 
 .admin-center--boot {
@@ -50,7 +52,7 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  color: var(--color-text);
+  color: var(--color-text, #172033);
   text-decoration: none;
   border-bottom: 1px solid var(--color-border);
 }
@@ -100,7 +102,7 @@
   justify-content: space-between;
   gap: var(--space-2);
   padding: var(--space-2);
-  color: var(--color-text-muted);
+  color: var(--color-text-muted, #5f6b7a);
   font-size: .75rem;
   line-height: 1.2;
   text-decoration: none;
@@ -238,7 +240,7 @@
 }
 
 .admin-breadcrumbs a {
-  color: var(--color-primary);
+  color: var(--color-primary, #0D3880);
   text-decoration: none;
 }
 

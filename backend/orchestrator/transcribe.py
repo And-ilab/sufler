@@ -1,20 +1,14 @@
-"""Local dual-channel STT for sufler imitation: Vosk, then Google web STT."""
+"""Local STT for sufler imitation: Vosk on uploaded PCM WAV."""
 
 from __future__ import annotations
 
 import json
-import logging
 import os
 import struct
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 MAX_AUDIO_BYTES = 2_000_000
-GOOGLE_STT_KEY = "AIzaSyBOti4mM-6x9WDnZIjIeyEU21OpBXqWBgw"
 
 
 class TranscribeError(ValueError):
@@ -92,42 +86,6 @@ def _transcribe_vosk(pcm: bytes, sample_rate: int) -> str:
     return str(payload.get("text") or "").strip()
 
 
-def _transcribe_google(pcm: bytes, sample_rate: int) -> str:
-    url = (
-        "https://www.google.com/speech-api/v2/recognize"
-        f"?client=chromium&lang=ru-RU&maxresults=1&key={GOOGLE_STT_KEY}"
-    )
-    request = urllib.request.Request(
-        url,
-        data=pcm,
-        headers={"Content-Type": f"audio/l16; rate={sample_rate}"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        logger.warning("google stt failed: %s", exc)
-        return ""
-    text = ""
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        alternatives = (
-            (payload.get("result") or [{}])[0].get("alternative") or []
-        )
-        if alternatives:
-            text = str(alternatives[0].get("transcript") or "").strip()
-            if text:
-                return text
-    return text
-
-
 def transcribe_wav(data: bytes) -> str:
     if not data:
         raise TranscribeError("audio is empty")
@@ -135,9 +93,6 @@ def transcribe_wav(data: bytes) -> str:
         raise TranscribeError("audio is too large")
     pcm, sample_rate = _read_wav_pcm16(data)
     text = _transcribe_vosk(pcm, sample_rate)
-    if text:
-        return text
-    text = _transcribe_google(pcm, sample_rate)
     if text:
         return text
     raise TranscribeError("could not recognize speech")
