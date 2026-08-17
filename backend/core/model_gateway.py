@@ -377,12 +377,15 @@ class ModelGateway:
             )
 
         endpoint = self._openai_endpoint(configured)
+        timeout = self._timeout_seconds
+        if configured.profile == SUFLER_PROFILE:
+            timeout = min(timeout, 45.0)
         try:
             response = requests.post(
                 endpoint,
                 headers=self._headers(configured),
                 json=payload,
-                timeout=self._timeout_seconds,
+                timeout=timeout,
             )
             response.raise_for_status()
             result = response.json()

@@ -11,6 +11,8 @@ export interface TranscriptLine {
   isFinal: boolean
   turnId: string
   hints?: SuflerHint[]
+  hintStatus?: 'loading' | 'ready' | 'empty'
+  hintMessage?: string
 }
 
 interface UseSuflerTranscriptOptions {
@@ -81,17 +83,27 @@ export function useSuflerTranscript({
     })
   }, [])
 
-  const attachHints = useCallback((turnId: string, hints: SuflerHint[]) => {
-    setLines((current) => {
-      const next = current.map((line) =>
-        line.turnId === turnId && line.speaker === 'client'
-          ? { ...line, hints }
-          : line,
-      )
-      linesRef.current = next
-      return next
-    })
-  }, [])
+  const attachHints = useCallback(
+    (turnId: string, hints: SuflerHint[], hintMessage = '') => {
+      setLines((current) => {
+        const next = current.map((line) =>
+          line.turnId === turnId && line.speaker === 'client'
+            ? {
+                ...line,
+                hints,
+                hintStatus: (hints.length ? 'ready' : 'empty') as TranscriptLine['hintStatus'],
+                hintMessage: hints.length
+                  ? ''
+                  : hintMessage || 'Подсказок нет: модель не вернула текст.',
+              }
+            : line,
+        )
+        linesRef.current = next
+        return next
+      })
+    },
+    [],
+  )
 
   useEffect(() => {
     if (!enabled || demoMode) {
@@ -131,17 +143,32 @@ export function useSuflerTranscript({
           text: payload.text,
           isFinal: payload.is_final,
           turnId: payload.turn_id,
+          ...(payload.is_final && payload.speaker === 'client'
+            ? {
+                hintStatus: 'loading' as const,
+                hintMessage: 'Подсказки загружаются…',
+              }
+            : {}),
         })
         return
       }
       if (payload.type === 'hints') {
-        attachHints(payload.turn_id, payload.hints.slice(0, 5))
+        attachHints(
+          payload.turn_id,
+          payload.hints.slice(0, 5),
+          payload.hints.length
+            ? ''
+            : 'Подсказок нет. Проверьте DeepSeek (SUFLER_LLM_*) и SUFLER_ALLOW_UNGROUNDED=1.',
+        )
         if (payload.latency_ms?.total != null) {
           setLatencyMs(payload.latency_ms.total)
         }
         return
       }
       if (payload.type === 'error') {
+        if (payload.turn_id) {
+          attachHints(payload.turn_id, [], payload.message)
+        }
         setError(payload.message)
       }
     }
@@ -152,6 +179,58 @@ export function useSuflerTranscript({
     }
   }, [attachHints, callId, demoLines, demoMode, enabled, upsertLine])
 
+  const ingestLive = useCallback(
+    (message: {
+      type: 'asr.partial' | 'asr.final'
+      speaker: 'client' | 'operator'
+      text: string
+      turn_id: string
+    }) => {
+      const nextLine: TranscriptLine = {
+        id: `${message.turn_id}-${message.speaker}`,
+        speaker: message.speaker,
+        text: message.text,
+        isFinal: message.type === 'asr.final',
+        turnId: message.turn_id,
+      }
+      if (message.type === 'asr.final' && message.speaker === 'client') {
+        nextLine.hintStatus = 'loading'
+        nextLine.hintMessage = 'Подсказки загружаются…'
+      }
+      upsertLine(nextLine)
+      if (message.type !== 'asr.final' || message.speaker !== 'client') return
+      const dialogContext = linesRef.current
+        .map((line) =>
+          `${line.speaker === 'client' ? 'Клиент' : 'Оператор'}: ${line.text}`,
+        )
+        .join('\n')
+      void requestSuflerSuggest(message.text, 3, { dialogContext })
+        .then((result) => {
+          const hints = result.hints.slice(0, 5)
+          const blocked = result.blocked_reason
+          attachHints(
+            message.turn_id,
+            hints,
+            hints.length
+              ? ''
+              : blocked === 'sufler_unavailable'
+                ? 'База знаний пуста, а модель не ответила. Проверьте SUFLER_LLM_* и SUFLER_ALLOW_UNGROUNDED=1.'
+                : 'Подсказок нет: в базе нет статьи по этому вопросу, а модель не вернула текст.',
+          )
+          setLatencyMs(result.latency_ms.total)
+        })
+        .catch((requestError: unknown) => {
+          const hintMessage =
+            requestError instanceof Error
+              ? requestError.message
+              : 'Не удалось получить подсказки'
+          attachHints(message.turn_id, [], hintMessage)
+          setError(hintMessage)
+        })
+    },
+    [attachHints, upsertLine],
+  )
+
   const pushAsr = useCallback(
     (message: {
       type: 'asr.partial' | 'asr.final'
@@ -160,37 +239,12 @@ export function useSuflerTranscript({
       turn_id: string
     }) => {
       if (demoMode) {
-        upsertLine({
-          id: `${message.turn_id}-${message.speaker}`,
-          speaker: message.speaker,
-          text: message.text,
-          isFinal: message.type === 'asr.final',
-          turnId: message.turn_id,
-        })
-        if (message.type === 'asr.final' && message.speaker === 'client') {
-          const dialogContext = linesRef.current
-            .map((line) =>
-              `${line.speaker === 'client' ? 'Клиент' : 'Оператор'}: ${line.text}`,
-            )
-            .join('\n')
-          void requestSuflerSuggest(message.text, 3, { dialogContext })
-            .then((result) => {
-              attachHints(message.turn_id, result.hints.slice(0, 5))
-              setLatencyMs(result.latency_ms.total)
-            })
-            .catch((requestError: unknown) => {
-              setError(
-                requestError instanceof Error
-                  ? requestError.message
-                  : 'Suggest failed',
-              )
-            })
-        }
+        ingestLive(message)
         return
       }
       socketRef.current?.send(JSON.stringify(message))
     },
-    [attachHints, demoMode, upsertLine],
+    [demoMode, ingestLive],
   )
 
   const replaceLines = useCallback(
@@ -209,6 +263,7 @@ export function useSuflerTranscript({
     connected,
     error,
     latencyMs,
+    ingestLive,
     pushAsr,
     setLines: replaceLines,
   }

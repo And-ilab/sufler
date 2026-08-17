@@ -32,6 +32,21 @@ from orchestrator.sufler import (  # noqa: E402
 
 
 class SuflerSuggestPipelineTest(TestCase):
+    def setUp(self):
+        env = patch.dict(
+            os.environ,
+            {
+                "SUFLER_ALLOW_UNGROUNDED": "0",
+                "SUFLER_LLM_BASE_URL": "",
+                "MODEL_GATEWAY_MODE": "stub",
+                "OPENAI_BASE_URL": "",
+                "EMBEDDING_MODE": "stub",
+            },
+            clear=False,
+        )
+        env.start()
+        self.addCleanup(env.stop)
+
     @staticmethod
     def add_chunk(article_id, title, content):
         return CCProductionChunk.objects.create(
@@ -118,6 +133,17 @@ class SuflerSuggestPipelineTest(TestCase):
         self.assertEqual(result["hints"], [])
         self.assertEqual(result["blocked_reason"], "no_relevant_knowledge")
         self.assertEqual(result["latency_ms"]["llm"], 0.0)
+
+    def test_ungrounded_empty_index_still_returns_hint(self):
+        with patch.dict(os.environ, {"SUFLER_ALLOW_UNGROUNDED": "1"}, clear=False):
+            result = suggest(
+                "Как завести карту банка?",
+                limit=3,
+                gateway=ModelGateway.from_registry(),
+            )
+        self.assertTrue(result["hints"])
+        self.assertTrue(result["hints"][0]["text"].strip())
+        self.assertIsNone(result["blocked_reason"])
 
     def test_commission_fixtures_ignored_and_llm_answers(self):
         self.add_chunk(

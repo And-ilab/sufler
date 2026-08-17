@@ -159,19 +159,20 @@ export function SuflerPhoneApp({
   embedded = false,
   clientSummary = DEFAULT_SUMMARY,
 }: SuflerPhoneAppProps) {
-  const { lines, connected, error, latencyMs, pushAsr, setLines } = useSuflerTranscript({
+  const { lines, connected, error, latencyMs, ingestLive, pushAsr, setLines } = useSuflerTranscript({
     callId,
     demoMode,
     demoLines,
   })
   const liveTurns = useRef<Record<DualSpeaker, string>>({ client: '', operator: '' })
+  const [typedLine, setTypedLine] = useState('')
 
   const handleUtterance = (speaker: DualSpeaker, text: string, isFinal: boolean) => {
     if (!liveTurns.current[speaker]) {
       liveTurns.current[speaker] = `${speaker}-${Date.now()}`
     }
     const turnId = liveTurns.current[speaker]
-    pushAsr({
+    ingestLive({
       type: isFinal ? 'asr.final' : 'asr.partial',
       speaker,
       text,
@@ -181,6 +182,13 @@ export function SuflerPhoneApp({
   }
 
   const live = useLiveDualAsr(handleUtterance)
+
+  const submitTypedLine = () => {
+    const text = typedLine.trim()
+    if (!text) return
+    handleUtterance('client', text, true)
+    setTypedLine('')
+  }
 
   const startLive = async () => {
     setLines([])
@@ -264,13 +272,21 @@ export function SuflerPhoneApp({
                     ))}
                   </div>
                 )}
+                {line.speaker === 'client' && line.isFinal && hints.length === 0 && (
+                  <div className="sufler-phone__hints-empty" role="status">
+                    {line.hintStatus === 'loading'
+                      ? (line.hintMessage || 'Подсказки загружаются…')
+                      : (line.hintMessage || 'Подсказки не пришли. Повторите реплику или проверьте DeepSeek на сервере.')}
+                  </div>
+                )}
               </article>
             )
           })}
           {!blocks.length && (
             <Card className="sufler-phone__empty">
-              Нажмите «Начать имитацию»: микрофон — клиент, системный звук — оператор.
-              Реплика клиента уходит в DeepSeek и собирает подсказки.
+              {live.recording
+                ? 'Говорите паузами или введите реплику клиента внизу — она появится в ленте.'
+                : 'Нажмите «Начать имитацию»: микрофон — клиент, системный звук — оператор. Реплика клиента уходит в DeepSeek и собирает подсказки.'}
             </Card>
           )}
         </section>
@@ -298,6 +314,20 @@ export function SuflerPhoneApp({
         <div className="sufler-phone__live">
           {live.recording ? (
             <>
+              <label className="sufler-phone__typed">
+                <input
+                  value={typedLine}
+                  placeholder="Реплика клиента…"
+                  aria-label="Реплика клиента"
+                  onChange={(event) => setTypedLine(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      submitTypedLine()
+                    }
+                  }}
+                />
+              </label>
               <span className="sufler-phone__levels" aria-hidden="true">
                 <i
                   className="sufler-phone__level sufler-phone__level--mic"

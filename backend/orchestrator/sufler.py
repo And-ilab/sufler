@@ -202,12 +202,20 @@ def _select_documents(
     return selected[:limit]
 
 
+def _sufler_llm_configured() -> bool:
+    if (os.getenv("SUFLER_LLM_BASE_URL") or "").strip():
+        return True
+    openai = (os.getenv("OPENAI_BASE_URL") or "").strip()
+    return bool(openai)
+
+
 def _allow_ungrounded() -> bool:
-    return os.getenv("SUFLER_ALLOW_UNGROUNDED", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
+    flag = os.getenv("SUFLER_ALLOW_UNGROUNDED", "").strip().lower()
+    if flag in {"1", "true", "yes"}:
+        return True
+    if flag in {"0", "false", "no"}:
+        return False
+    return _sufler_llm_configured()
 
 
 def _build_messages(
@@ -387,7 +395,6 @@ def suggest(
                 "latency_ms": latency_ms,
                 "request_id": correlation_id,
             }
-        documents = []
         ungrounded = True
     else:
         ungrounded = False
@@ -411,7 +418,8 @@ def suggest(
         if len(llm_text) > int(settings.response_chars_max):
             llm_text = llm_text[: int(settings.response_chars_max)].rstrip()
         answer_text, operator_tip = _parse_llm_hint(llm_text)
-        answer_text = _clean_answer_text(answer_text)
+        cleaned = _clean_answer_text(answer_text)
+        answer_text = cleaned or answer_text
     except Exception:  # noqa: BLE001 — fall back to KB snippets
         logger.exception("sufler_llm_failed request_id=%s", correlation_id)
         answer_text, operator_tip = "", ""
@@ -422,8 +430,14 @@ def suggest(
     if not answer_text:
         if documents:
             answer_text = _snippet_as_answer(documents[0])
-        elif ungrounded:
-            answer_text = ""
+        if not answer_text:
+            answer_text = (
+                "В базе СУЗ нет подходящей статьи по этой реплике. "
+                "Оформите продукт в отделении с паспортом либо через "
+                "интернет-банк / мобильное приложение. Перед ответом "
+                "сверьте актуальные условия в СУЗ."
+            )
+            operator_tip = operator_tip or "Сверить формулировку со статьёй СУЗ."
 
     hints: list[dict[str, Any]] = []
     for index, document in enumerate(documents):
@@ -447,15 +461,20 @@ def suggest(
                 "citations": [_citation(document)],
             }
         )
-    if ungrounded and answer_text and not hints:
+    if answer_text and not hints:
+        source = documents[0] if documents else None
         hints.append(
             {
                 "rank": 1,
                 "text": answer_text,
                 "operator_tip": operator_tip,
-                "relevance_score": 0.5,
-                "relevance_percent": 50,
-                "citations": [],
+                "relevance_score": (
+                    float(source["relevance_score"]) if source else 0.5
+                ),
+                "relevance_percent": (
+                    int(source["relevance_percent"]) if source else 50
+                ),
+                "citations": [_citation(source)] if source else [],
             }
         )
     if not hints:

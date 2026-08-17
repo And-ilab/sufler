@@ -83,6 +83,63 @@ function encodeWav(float32: Float32Array, sampleRate: number): Blob {
   return new Blob([buffer], { type: 'audio/wav' })
 }
 
+function attachPcmUtterances(
+  context: AudioContext,
+  stream: MediaStream,
+  recordingRef: { current: boolean },
+  onLevel: (level: number) => void,
+  onWav: (wav: Blob) => void,
+): { processor: ScriptProcessorNode; stop: () => void } {
+  const source = context.createMediaStreamSource(stream)
+  const processor = context.createScriptProcessor(4096, 1, 1)
+  const sink = context.createGain()
+  sink.gain.value = 0
+  source.connect(processor)
+  processor.connect(sink)
+  sink.connect(context.destination)
+  const chunks: Float32Array[] = []
+  let speaking = false
+  let silenceMs = 0
+  processor.onaudioprocess = (event) => {
+    if (!recordingRef.current) return
+    const input = event.inputBuffer.getChannelData(0)
+    const level = rms(input)
+    onLevel(level)
+    if (level >= 0.02) {
+      speaking = true
+      silenceMs = 0
+      chunks.push(new Float32Array(input))
+    } else if (speaking) {
+      silenceMs += (input.length / event.inputBuffer.sampleRate) * 1000
+      chunks.push(new Float32Array(input))
+      if (silenceMs >= 700) {
+        speaking = false
+        silenceMs = 0
+        const mergedLength = chunks.reduce((sum, item) => sum + item.length, 0)
+        const merged = new Float32Array(mergedLength)
+        let offset = 0
+        for (const item of chunks) {
+          merged.set(item, offset)
+          offset += item.length
+        }
+        chunks.length = 0
+        const rate = event.inputBuffer.sampleRate
+        const pcm = downsample(merged, rate, 16000)
+        if (pcm.length < 16000 * 0.35) return
+        onWav(encodeWav(pcm, 16000))
+      }
+    }
+  }
+  return {
+    processor,
+    stop: () => {
+      processor.disconnect()
+      source.disconnect()
+      sink.disconnect()
+    },
+  }
+}
+
 export interface LiveDualAsrState {
   recording: boolean
   micLevel: number
@@ -142,10 +199,49 @@ export function useLiveDualAsr(
 
   const start = useCallback(async () => {
     if (recordingRef.current) return
+    recordingRef.current = true
     const Recognition = speechCtor()
-    if (!Recognition) {
-      setPartial({ error: 'Нужен Chrome: в этом браузере нет распознавания речи' })
-      return
+    const recognition = Recognition ? new Recognition() : null
+    if (recognition) {
+      recognition.lang = 'ru-RU'
+      recognition.continuous = true
+      recognition.interimResults = true
+      recognition.onresult = (event) => {
+        let transcript = ''
+        let isFinal = false
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const result = event.results[index]
+          transcript += result[0].transcript
+          isFinal = result.isFinal
+        }
+        const text = transcript.trim()
+        if (!text) return
+        onUtteranceRef.current(micSpeakerRef.current, text, isFinal)
+      }
+      recognition.onerror = (event) => {
+        if (event.error === 'no-speech' || event.error === 'aborted') return
+        setPartial({
+          error: '',
+          status:
+            event.error === 'network' || event.error === 'service-not-allowed'
+              ? 'Облачное распознавание недоступно. Говорите паузами — отправим на локальный STT, либо введите реплику.'
+              : `Микрофон: ${event.error || 'ошибка распознавания'}`,
+        })
+      }
+      recognition.onend = () => {
+        if (recordingRef.current) {
+          try {
+            recognition.start()
+          } catch {
+            /* Chrome throws if start() races */
+          }
+        }
+      }
+      try {
+        recognition.start()
+      } catch {
+        setPartial({ error: 'Не удалось запустить распознавание микрофона' })
+      }
     }
 
     let micStream: MediaStream
@@ -155,67 +251,47 @@ export function useLiveDualAsr(
         video: false,
       })
     } catch {
+      try {
+        recognition?.stop()
+      } catch {
+        /* ignore */
+      }
       setPartial({ error: 'Нет доступа к микрофону. Разрешите его в браузере.' })
+      recordingRef.current = false
       return
     }
 
-    recordingRef.current = true
     setPartial({
       recording: true,
       error: '',
-      status: 'Говорите в микрофон. Клиент пишется в ленту, подсказки — через DeepSeek.',
+      status: Recognition
+        ? 'Говорите в микрофон. Клиент пишется в ленту, подсказки — через DeepSeek.'
+        : 'Говорите паузами или введите реплику — облачного распознавания в этом браузере нет.',
       systemCapture: false,
     })
 
-    const recognition = new Recognition()
-    recognition.lang = 'ru-RU'
-    recognition.continuous = true
-    recognition.interimResults = true
-    recognition.onresult = (event) => {
-      let transcript = ''
-      let isFinal = false
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const result = event.results[index]
-        transcript += result[0].transcript
-        isFinal = result.isFinal
-      }
-      const text = transcript.trim()
-      if (!text) return
-      onUtteranceRef.current(micSpeakerRef.current, text, isFinal)
-    }
-    recognition.onerror = (event) => {
-      if (event.error === 'no-speech' || event.error === 'aborted') return
-      setPartial({ error: `Микрофон: ${event.error || 'ошибка распознавания'}` })
-    }
-    recognition.onend = () => {
-      if (recordingRef.current) {
-        try {
-          recognition.start()
-        } catch {
-          /* Chrome throws if start() races */
-        }
-      }
-    }
-    try {
-      recognition.start()
-    } catch {
-      setPartial({ error: 'Не удалось запустить распознавание микрофона' })
-    }
-
     const micContext = new AudioContext()
-    const micSource = micContext.createMediaStreamSource(micStream)
-    const micAnalyser = micContext.createAnalyser()
-    micAnalyser.fftSize = 2048
-    micSource.connect(micAnalyser)
-    const micData = new Float32Array(micAnalyser.fftSize)
-    const micMeter = window.setInterval(() => {
-      micAnalyser.getFloatTimeDomainData(micData)
-      setState((current) => ({ ...current, micLevel: rms(micData) }))
-    }, 120)
+    void micContext.resume()
+    const micCapture = attachPcmUtterances(
+      micContext,
+      micStream,
+      recordingRef,
+      (level) => setState((current) => ({ ...current, micLevel: level })),
+      (wav) => {
+        const speaker = micSpeakerRef.current
+        void transcribeUtterance(wav, speaker)
+          .then((text) => {
+            if (text) onUtteranceRef.current(speaker, text, true)
+          })
+          .catch(() => {
+            /* Speech Recognition or manual input still available */
+          })
+      },
+    )
 
     let systemStream: MediaStream | null = null
     let systemContext: AudioContext | null = null
-    let processor: ScriptProcessorNode | null = null
+    let systemCapture: { stop: () => void } | null = null
 
     const attachSystem = async () => {
       try {
@@ -243,56 +319,25 @@ export function useLiveDualAsr(
         return
       }
       systemContext = new AudioContext({ sampleRate: 16000 })
-      const source = systemContext.createMediaStreamSource(systemStream)
-      processor = systemContext.createScriptProcessor(4096, 1, 1)
-      const chunks: Float32Array[] = []
-      let speaking = false
-      let silenceMs = 0
-      const sink = systemContext.createGain()
-      sink.gain.value = 0
-      source.connect(processor)
-      processor.connect(sink)
-      sink.connect(systemContext.destination)
-      processor.onaudioprocess = (event) => {
-        if (!recordingRef.current) return
-        const input = event.inputBuffer.getChannelData(0)
-        const level = rms(input)
-        setState((current) => ({ ...current, systemLevel: level }))
-        if (level >= 0.02) {
-          speaking = true
-          silenceMs = 0
-          chunks.push(new Float32Array(input))
-        } else if (speaking) {
-          silenceMs += (input.length / event.inputBuffer.sampleRate) * 1000
-          chunks.push(new Float32Array(input))
-          if (silenceMs >= 700) {
-            speaking = false
-            silenceMs = 0
-            const mergedLength = chunks.reduce((sum, item) => sum + item.length, 0)
-            const merged = new Float32Array(mergedLength)
-            let offset = 0
-            for (const item of chunks) {
-              merged.set(item, offset)
-              offset += item.length
-            }
-            chunks.length = 0
-            const rate = event.inputBuffer.sampleRate
-            const pcm = downsample(merged, rate, 16000)
-            if (pcm.length < 16000 * 0.35) return
-            const wav = encodeWav(pcm, 16000)
-            const speaker = systemSpeakerRef.current
-            void transcribeUtterance(wav, speaker)
-              .then((text) => {
-                if (text) onUtteranceRef.current(speaker, text, true)
+      void systemContext.resume()
+      systemCapture = attachPcmUtterances(
+        systemContext,
+        systemStream,
+        recordingRef,
+        (level) => setState((current) => ({ ...current, systemLevel: level })),
+        (wav) => {
+          const speaker = systemSpeakerRef.current
+          void transcribeUtterance(wav, speaker)
+            .then((text) => {
+              if (text) onUtteranceRef.current(speaker, text, true)
+            })
+            .catch((error: unknown) => {
+              setPartial({
+                error: error instanceof Error ? error.message : 'Системный звук не распознан',
               })
-              .catch((error: unknown) => {
-                setPartial({
-                  error: error instanceof Error ? error.message : 'Системный звук не распознан',
-                })
-              })
-          }
-        }
-      }
+            })
+        },
+      )
       systemStream.getVideoTracks().forEach((track) => {
         track.enabled = false
       })
@@ -304,16 +349,18 @@ export function useLiveDualAsr(
     void attachSystem()
 
     cleanupRef.current = () => {
-      window.clearInterval(micMeter)
       try {
-        recognition.onend = null
-        recognition.stop()
+        if (recognition) {
+          recognition.onend = null
+          recognition.stop()
+        }
       } catch {
         /* already stopped */
       }
+      micCapture.stop()
+      systemCapture?.stop()
       micStream.getTracks().forEach((track) => track.stop())
       systemStream?.getTracks().forEach((track) => track.stop())
-      processor?.disconnect()
       void micContext.close()
       void systemContext?.close()
     }
