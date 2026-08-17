@@ -7,12 +7,16 @@ the registry baseline ``intfloat/multilingual-e5-large``.
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import os
 from functools import lru_cache
 from typing import Literal, Sequence
 
 import requests
+
+logger = logging.getLogger(__name__)
+_http_stub_fallback_logged = False
 
 DEFAULT_DIMENSIONS = 1024
 DEFAULT_MODEL = "intfloat/multilingual-e5-large"
@@ -158,7 +162,18 @@ def embed_texts(
         dims = _dimensions()
         return [deterministic_embedding(text, dims) for text in cleaned]
     if mode == "http":
-        return _http_embed(cleaned, is_query=is_query)
+        try:
+            return _http_embed(cleaned, is_query=is_query)
+        except EmbeddingError:
+            global _http_stub_fallback_logged
+            if not _http_stub_fallback_logged:
+                logger.warning(
+                    "HTTP embedding unavailable; using stub vectors so sufler "
+                    "suggest can continue"
+                )
+                _http_stub_fallback_logged = True
+            dims = _dimensions()
+            return [deterministic_embedding(text, dims) for text in cleaned]
     return _local_embed(cleaned, is_query=is_query)
 
 

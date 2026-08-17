@@ -21,6 +21,7 @@ from django.contrib.auth.models import Group  # noqa: E402
 from django.test import Client, TestCase  # noqa: E402
 
 from auth.roles import ROLES_BY_CODE  # noqa: E402
+from core.embeddings import EmbeddingError  # noqa: E402
 from core.model_gateway import ModelGateway  # noqa: E402
 from ingest.models import CCProductionChunk  # noqa: E402
 from ingest.pipeline import deterministic_embedding  # noqa: E402
@@ -209,6 +210,33 @@ class SuflerSuggestApiTest(TestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["error"], "permission_denied")
+
+    def test_http_embedding_outage_still_returns_hints(self):
+        query = "лимиты снятия наличных"
+        self.add_chunk(55, "Лимиты снятия наличных", query)
+        client = Client()
+        client.force_login(
+            self.user_for_role("contact_center_telephony_operator")
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "EMBEDDING_MODE": "http",
+                "EMBEDDING_BASE_URL": "http://embedding:8090",
+            },
+            clear=False,
+        ):
+            with patch(
+                "core.embeddings._http_embed",
+                side_effect=EmbeddingError("down"),
+            ):
+                response = client.post(
+                    self.url,
+                    data=json.dumps({"text": query, "limit": 3}),
+                    content_type="application/json",
+                )
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(len(response.json()["hints"]), 1)
 
 
 if __name__ == "__main__":

@@ -332,7 +332,14 @@ def suggest(
     retrieval_text = _retrieval_query(normalized, dialog_context)
 
     qu_started = time.perf_counter()
-    qu_result = preview_query(retrieval_text, limit=max(limit, 5))
+    try:
+        qu_result = preview_query(retrieval_text, limit=max(limit, 5))
+    except Exception:
+        logger.exception(
+            "sufler_qu_failed request_id=%s",
+            correlation_id,
+        )
+        qu_result = {"documents": []}
     latency_ms["qu"] = _elapsed_ms(qu_started)
 
     rag_started = time.perf_counter()
