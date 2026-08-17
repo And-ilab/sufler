@@ -148,33 +148,46 @@ def _local_embed(
     return result
 
 
+def _embed_texts(
+    texts: Sequence[str],
+    *,
+    is_query: bool = False,
+) -> tuple[list[list[float]], str]:
+    """Embed texts and report which backend produced the vectors."""
+    if not texts:
+        return [], _mode()
+    cleaned = [str(text or "") for text in texts]
+    mode = _mode()
+    if mode == "stub":
+        dims = _dimensions()
+        return [deterministic_embedding(text, dims) for text in cleaned], "stub"
+    if mode == "http":
+        try:
+            return _http_embed(cleaned, is_query=is_query), "http"
+        except EmbeddingError:
+            global _http_stub_fallback_logged
+            if not _http_stub_fallback_logged:
+                logger.warning(
+                    "HTTP embedding unavailable; using lexical retrieval "
+                    "instead of mixing stub query vectors with stored embeddings"
+                )
+                _http_stub_fallback_logged = True
+            dims = _dimensions()
+            return (
+                [deterministic_embedding(text, dims) for text in cleaned],
+                "http-fallback",
+            )
+    return _local_embed(cleaned, is_query=is_query), "local"
+
+
 def embed_texts(
     texts: Sequence[str],
     *,
     is_query: bool = False,
 ) -> list[list[float]]:
     """Embed one or more texts according to ``EMBEDDING_MODE``."""
-    if not texts:
-        return []
-    cleaned = [str(text or "") for text in texts]
-    mode = _mode()
-    if mode == "stub":
-        dims = _dimensions()
-        return [deterministic_embedding(text, dims) for text in cleaned]
-    if mode == "http":
-        try:
-            return _http_embed(cleaned, is_query=is_query)
-        except EmbeddingError:
-            global _http_stub_fallback_logged
-            if not _http_stub_fallback_logged:
-                logger.warning(
-                    "HTTP embedding unavailable; using stub vectors so sufler "
-                    "suggest can continue"
-                )
-                _http_stub_fallback_logged = True
-            dims = _dimensions()
-            return [deterministic_embedding(text, dims) for text in cleaned]
-    return _local_embed(cleaned, is_query=is_query)
+    vectors, _backend = _embed_texts(texts, is_query=is_query)
+    return vectors
 
 
 def embed_text(text: str, *, is_query: bool = False) -> list[float]:
@@ -183,6 +196,11 @@ def embed_text(text: str, *, is_query: bool = False) -> list[float]:
 
 def embed_query(text: str) -> list[float]:
     return embed_text(text, is_query=True)
+
+
+def embed_query_with_backend(text: str) -> tuple[list[float], str]:
+    vectors, backend = _embed_texts([text], is_query=True)
+    return vectors[0], backend
 
 
 def embed_passage(text: str) -> list[float]:

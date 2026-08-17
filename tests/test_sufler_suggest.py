@@ -211,9 +211,20 @@ class SuflerSuggestApiTest(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["error"], "permission_denied")
 
-    def test_http_embedding_outage_still_returns_hints(self):
-        query = "лимиты снятия наличных"
-        self.add_chunk(55, "Лимиты снятия наличных", query)
+    def test_http_embedding_outage_ranks_by_text_not_mixed_vectors(self):
+        query = "Как оформить карту Беларусь банка?"
+        self.add_chunk(
+            12845,
+            "Komissiya za perevod3",
+            "Komissiya za perevod mezhdu schetami banka "
+            "sostavlyaet 0.5 procenta ot summy operacii.",
+        )
+        self.add_chunk(
+            91008,
+            "Кредитная карта",
+            "Как оформить кредитную карту Беларусбанка? "
+            "Подайте заявку в отделении или онлайн.",
+        )
         client = Client()
         client.force_login(
             self.user_for_role("contact_center_telephony_operator")
@@ -236,7 +247,15 @@ class SuflerSuggestApiTest(TestCase):
                     content_type="application/json",
                 )
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(len(response.json()["hints"]), 1)
+        body = response.json()
+        titles = [
+            citation["title"]
+            for hint in body["hints"]
+            for citation in hint["citations"]
+        ]
+        self.assertTrue(titles)
+        self.assertTrue(any("карта" in title.casefold() for title in titles))
+        self.assertFalse(any("Komissiya" in title for title in titles))
 
 
 if __name__ == "__main__":

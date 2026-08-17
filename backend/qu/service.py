@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Iterable, Sequence
 from typing import Any
 
@@ -11,12 +12,83 @@ from pgvector.django import CosineDistance
 
 from hub.model_registry_store import get_model_settings
 from ingest.models import CCProductionChunk
-from core.embeddings import embed_query
+from core.embeddings import embed_query, embed_query_with_backend
 from qu.models import QuReferenceExample
 
 
 DEFAULT_LIMIT = 5
 MAX_LIMIT = 5
+_TOKEN_RE = re.compile(r"[а-яёa-z0-9]{3,}", re.IGNORECASE)
+_STOPWORDS = frozenset(
+    {
+        "как",
+        "что",
+        "это",
+        "для",
+        "при",
+        "или",
+        "чем",
+        "его",
+        "они",
+        "мы",
+        "вы",
+        "на",
+        "по",
+        "со",
+        "из",
+        "от",
+        "до",
+        "не",
+        "ни",
+        "же",
+        "ли",
+        "бы",
+        "то",
+        "да",
+        "за",
+        "без",
+        "про",
+        "между",
+    }
+)
+
+
+def _tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in _TOKEN_RE.findall((text or "").casefold())
+        if token not in _STOPWORDS
+    }
+
+
+def _lexical_score(query: str, title: str, content: str) -> float:
+    query_tokens = _tokens(query)
+    if not query_tokens:
+        return 0.0
+    title_tokens = _tokens(title)
+    doc_tokens = title_tokens | _tokens(content)
+    if not doc_tokens:
+        return 0.0
+    overlap = query_tokens & doc_tokens
+    if not overlap:
+        return 0.0
+    recall = len(overlap) / len(query_tokens)
+    title_hits = query_tokens & title_tokens
+    title_bonus = 0.2 * (len(title_hits) / len(query_tokens))
+    return min(1.0, recall + title_bonus)
+
+
+def _score_lexical(
+    chunks: Iterable[CCProductionChunk],
+    query: str,
+) -> list[tuple[float, CCProductionChunk]]:
+    scored: list[tuple[float, CCProductionChunk]] = []
+    for chunk in chunks:
+        score = _lexical_score(query, chunk.title, chunk.content)
+        if score > 0:
+            scored.append((score, chunk))
+    scored.sort(key=lambda item: (-item[0], item[1].article_id))
+    return scored
 
 
 def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
@@ -58,7 +130,7 @@ def preview_query(query: str, *, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
     if not 1 <= limit <= MAX_LIMIT:
         raise ValueError(f"limit must be between 1 and {MAX_LIMIT}")
 
-    query_embedding = embed_query(normalized_query)
+    query_embedding, backend = embed_query_with_backend(normalized_query)
     chunk_query = CCProductionChunk.objects.filter(is_active=True).only(
         "article_id",
         "chunk_index",
@@ -67,7 +139,9 @@ def preview_query(query: str, *, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
         "permalink",
         "embedding",
     )
-    if connection.vendor == "postgresql":
+    if backend == "http-fallback":
+        scored_chunks = _score_lexical(chunk_query, normalized_query)[: limit * 20]
+    elif connection.vendor == "postgresql":
         chunks = list(
             chunk_query.annotate(
                 distance=CosineDistance("embedding", query_embedding)
@@ -112,11 +186,14 @@ def preview_query(query: str, *, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
     ).context_inclusion_threshold
     documents = []
     for rank, (score, chunk) in enumerate(ranked, start=1):
-        matched_example_id, matched_example = _best_example(
-            query_embedding,
-            examples_by_article.get(chunk.article_id, global_examples),
-            fallback=chunk.title,
-        )
+        if backend == "http-fallback":
+            matched_example_id, matched_example = None, chunk.title
+        else:
+            matched_example_id, matched_example = _best_example(
+                query_embedding,
+                examples_by_article.get(chunk.article_id, global_examples),
+                fallback=chunk.title,
+            )
         documents.append(
             {
                 "rank": rank,
