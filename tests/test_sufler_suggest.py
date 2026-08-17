@@ -119,6 +119,28 @@ class SuflerSuggestPipelineTest(TestCase):
         self.assertEqual(result["blocked_reason"], "no_relevant_knowledge")
         self.assertEqual(result["latency_ms"]["llm"], 0.0)
 
+    def test_commission_fixtures_ignored_and_llm_answers(self):
+        self.add_chunk(
+            12845,
+            "Komissiya za perevod3",
+            "Komissiya za perevod mezhdu schetami banka "
+            "sostavlyaet 0.5 procenta ot summy operacii.",
+        )
+        result = suggest(
+            "Как оформить карту беларусбанка?",
+            limit=3,
+            gateway=ModelGateway.from_registry(),
+        )
+        titles = [
+            citation["title"]
+            for hint in result["hints"]
+            for citation in hint["citations"]
+        ]
+        self.assertFalse(any("Komissiya" in title for title in titles))
+        self.assertTrue(result["hints"])
+        self.assertNotIn("0.5 procenta", result["hints"][0]["text"])
+        self.assertIsNone(result["blocked_reason"])
+
 
 class SuflerSuggestApiTest(TestCase):
     url = "/api/v1/sufler/suggest"

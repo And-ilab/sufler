@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from django.db import connection
+from django.db.models import Q
 from pgvector.django import CosineDistance
 
 from hub.model_registry_store import get_model_settings
@@ -91,6 +92,38 @@ def _score_lexical(
     return scored
 
 
+def suz_transfer_commission_fixture_q() -> Q:
+    """INT/demo SUZ articles in Latin translit — not real Belarusbank KB."""
+    return (
+        Q(title__icontains="Komissiya za perevod")
+        | Q(title__icontains="комиссия за перевод")
+        | Q(permalink__icontains="komissiya-perevod")
+        | Q(content__icontains="Komissiya za perevod mezhdu schetami")
+    )
+
+
+def is_suz_transfer_commission_doc(document: Mapping[str, Any]) -> bool:
+    title = str(document.get("title") or "").casefold()
+    permalink = str(document.get("permalink") or "").casefold()
+    snippet = str(
+        document.get("snippet") or document.get("content") or ""
+    ).casefold()
+    return (
+        "komissiya za perevod" in title
+        or "комиссия за перевод" in title
+        or "komissiya-perevod" in permalink
+        or "komissiya za perevod mezhdu schetami" in snippet
+    )
+
+
+def ignored_suz_fixtures_exist() -> bool:
+    return (
+        CCProductionChunk.objects.filter(is_active=True)
+        .filter(suz_transfer_commission_fixture_q())
+        .exists()
+    )
+
+
 def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
     dot = sum(a * b for a, b in zip(left, right, strict=False))
     left_norm = math.sqrt(sum(value * value for value in left))
@@ -131,13 +164,17 @@ def preview_query(query: str, *, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
         raise ValueError(f"limit must be between 1 and {MAX_LIMIT}")
 
     query_embedding, backend = embed_query_with_backend(normalized_query)
-    chunk_query = CCProductionChunk.objects.filter(is_active=True).only(
-        "article_id",
-        "chunk_index",
-        "title",
-        "content",
-        "permalink",
-        "embedding",
+    chunk_query = (
+        CCProductionChunk.objects.filter(is_active=True)
+        .exclude(suz_transfer_commission_fixture_q())
+        .only(
+            "article_id",
+            "chunk_index",
+            "title",
+            "content",
+            "permalink",
+            "embedding",
+        )
     )
     if backend == "http-fallback":
         scored_chunks = _score_lexical(chunk_query, normalized_query)[: limit * 20]

@@ -16,7 +16,11 @@ from typing import Any, Mapping, Sequence
 
 from core.model_gateway import ModelGateway
 from hub.model_registry_store import get_model_settings
-from qu.service import preview_query
+from qu.service import (
+    ignored_suz_fixtures_exist,
+    is_suz_transfer_commission_doc,
+    preview_query,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +163,11 @@ def _select_documents(
     context_threshold: float,
 ) -> list[Mapping[str, Any]]:
     """Return 1…limit docs, never below OPERATOR_MIN_RELEVANCE (20%)."""
-    pool = list(documents)
+    pool = [
+        document
+        for document in documents
+        if not is_suz_transfer_commission_doc(document)
+    ]
     if not pool:
         return []
     floor = max(float(context_threshold), OPERATOR_MIN_RELEVANCE)
@@ -360,7 +368,7 @@ def suggest(
             if not qu_result["documents"]
             else "no_relevant_knowledge"
         )
-        if not _allow_ungrounded():
+        if not _allow_ungrounded() and not ignored_suz_fixtures_exist():
             latency_ms["total"] = _elapsed_ms(total_started)
             _log_latency(
                 request_id=correlation_id,
