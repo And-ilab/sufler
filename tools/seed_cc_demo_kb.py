@@ -44,7 +44,7 @@ _bootstrap_django()
 
 from hub.models import ModelRegistrySettings  # noqa: E402
 from ingest.models import CCProductionChunk  # noqa: E402
-from ingest.pipeline import deterministic_embedding  # noqa: E402
+from core.embeddings import deterministic_embedding, embed_passage  # noqa: E402
 
 
 # Each content starts with title + typical client question so stub embeddings
@@ -181,6 +181,18 @@ DEMO_CHUNKS = [
         ),
     },
     {
+        "article_id": 91013,
+        "title": "Переводы в РФ",
+        "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/m-banking/",
+        "content": (
+            "Переводы в РФ. Как оформить перевод в Россию через мобильный банк? "
+            "Перевод в РФ доступен через «Платежи» → «За рубеж». "
+            "Проверьте суточный лимит клиента и статус карты. "
+            "Для перевода нужен действующий лимит на международные операции. "
+            "Комиссия зависит от суммы и валюты."
+        ),
+    },
+    {
         "article_id": 91012,
         "title": "Закрытие счёта",
         "permalink": "https://belarusbank.by/o-banke/press/kontakt-centr/",
@@ -218,6 +230,13 @@ def _ensure_sufler_threshold() -> None:
     )
 
 
+def _embed(text: str) -> list[float]:
+    try:
+        return embed_passage(text)
+    except Exception:
+        return deterministic_embedding(text)
+
+
 def main() -> int:
     _ensure_sufler_threshold()
     created = 0
@@ -236,7 +255,7 @@ def main() -> int:
                 "visibility_scope": ["kc_operator"],
                 "checksum": f"sha256:{checksum}",
                 "embedding_model": "deterministic-dev",
-                "embedding": deterministic_embedding(item["content"]),
+                "embedding": _embed(item["content"]),
                 "is_active": True,
             },
         )

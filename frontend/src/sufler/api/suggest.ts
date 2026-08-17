@@ -68,6 +68,7 @@ export async function requestSuflerSuggest(
   } catch {
     /* ignore — suggest will surface a friendly error if auth still missing */
   }
+  const safeLimit = Math.min(5, Math.max(1, Math.round(limit) || 3))
   const response = await fetch('/api/v1/sufler/suggest', {
     method: 'POST',
     credentials: 'include',
@@ -77,7 +78,7 @@ export async function requestSuflerSuggest(
     },
     body: JSON.stringify({
       text,
-      limit,
+      limit: safeLimit,
       client_history: options?.clientHistory ?? '',
       dialog_context: options?.dialogContext ?? '',
     }),

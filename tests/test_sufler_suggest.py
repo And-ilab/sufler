@@ -80,6 +80,15 @@ class SuflerSuggestPipelineTest(TestCase):
         with self.assertRaises(SuflerOrchestratorError):
             suggest("   ")
 
+    def test_limit_five_accepted_limit_six_rejected(self):
+        query = "как оформить банковскую карту"
+        self.add_chunk(11, "Оформление карты", query)
+        result = suggest(query, limit=5, gateway=ModelGateway.from_registry())
+        self.assertGreaterEqual(len(result["hints"]), 1)
+        with self.assertRaises(SuflerOrchestratorError) as raised:
+            suggest(query, limit=6, gateway=ModelGateway.from_registry())
+        self.assertIn("between 1 and 5", str(raised.exception))
+
     def test_no_relevant_documents_skip_llm(self):
         # Empty index → unavailable. Irrelevant seeded docs → no_relevant_knowledge.
         with patch(

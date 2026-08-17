@@ -61,33 +61,45 @@ export function useSuflerTranscript({
   const [error, setError] = useState('')
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
+  const linesRef = useRef<TranscriptLine[]>(demoMode ? demoLines : [])
 
   const upsertLine = useCallback((line: TranscriptLine) => {
     setLines((current) => {
       const index = current.findIndex(
         (item) => item.turnId === line.turnId && item.speaker === line.speaker,
       )
-      if (index === -1) return [...current, line]
-      const next = [...current]
-      next[index] = { ...next[index], ...line, hints: line.hints ?? next[index].hints }
+      const next =
+        index === -1
+          ? [...current, line]
+          : current.map((item, itemIndex) =>
+              itemIndex === index
+                ? { ...item, ...line, hints: line.hints ?? item.hints }
+                : item,
+            )
+      linesRef.current = next
       return next
     })
   }, [])
 
   const attachHints = useCallback((turnId: string, hints: SuflerHint[]) => {
-    setLines((current) =>
-      current.map((line) =>
+    setLines((current) => {
+      const next = current.map((line) =>
         line.turnId === turnId && line.speaker === 'client'
           ? { ...line, hints }
           : line,
-      ),
-    )
+      )
+      linesRef.current = next
+      return next
+    })
   }, [])
 
   useEffect(() => {
     if (!enabled || demoMode) {
       setConnected(demoMode)
-      if (demoMode) setLines(demoLines)
+      if (demoMode) {
+        linesRef.current = demoLines
+        setLines(demoLines)
+      }
       return
     }
 
@@ -156,7 +168,12 @@ export function useSuflerTranscript({
           turnId: message.turn_id,
         })
         if (message.type === 'asr.final' && message.speaker === 'client') {
-          void requestSuflerSuggest(message.text, 5)
+          const dialogContext = linesRef.current
+            .map((line) =>
+              `${line.speaker === 'client' ? 'Клиент' : 'Оператор'}: ${line.text}`,
+            )
+            .join('\n')
+          void requestSuflerSuggest(message.text, 3, { dialogContext })
             .then((result) => {
               attachHints(message.turn_id, result.hints.slice(0, 5))
               setLatencyMs(result.latency_ms.total)
@@ -176,12 +193,23 @@ export function useSuflerTranscript({
     [attachHints, demoMode, upsertLine],
   )
 
+  const replaceLines = useCallback(
+    (next: TranscriptLine[] | ((current: TranscriptLine[]) => TranscriptLine[])) => {
+      setLines((current) => {
+        const resolved = typeof next === 'function' ? next(current) : next
+        linesRef.current = resolved
+        return resolved
+      })
+    },
+    [],
+  )
+
   return {
     lines,
     connected,
     error,
     latencyMs,
     pushAsr,
-    setLines,
+    setLines: replaceLines,
   }
 }

@@ -16,6 +16,7 @@ from auth.roles import (
 )
 from orchestrator.sufler import SuflerOrchestratorError, suggest
 from orchestrator.test_dialog import run_test_prompt
+from orchestrator.transcribe import TranscribeError, transcribe_wav
 
 
 def _parse_suggest_body(body: bytes) -> tuple[str, int, str, str]:
@@ -132,3 +133,43 @@ def sufler_test_dialog(request: HttpRequest) -> JsonResponse:
     if result.get("request_id"):
         response["X-Request-ID"] = str(result["request_id"])
     return response
+
+
+@require_http_methods(["POST"])
+@require_permissions(
+    PERM_SUFLER_TELEPHONY,
+    PERM_SUFLER_CHAT,
+    require_all=False,
+    api=True,
+)
+def sufler_transcribe(request: HttpRequest) -> JsonResponse:
+    """POST /api/v1/sufler/transcribe — live dual-channel imitation STT."""
+    speaker = str(request.POST.get("speaker") or "client")
+    if speaker not in {"client", "operator"}:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"request": ["speaker must be client or operator"]},
+            },
+            status=400,
+        )
+    audio = request.FILES.get("audio")
+    if audio is None:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"request": ["audio file is required"]},
+            },
+            status=400,
+        )
+    try:
+        text = transcribe_wav(audio.read())
+    except TranscribeError as exc:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"request": [str(exc)]},
+            },
+            status=400,
+        )
+    return JsonResponse({"text": text, "speaker": speaker})

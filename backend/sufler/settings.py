@@ -11,12 +11,46 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _running_tests() -> bool:
+    joined = " ".join(sys.argv).lower()
+    if "pytest" in joined or os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
+    return any(arg in {"test", "pytest"} for arg in sys.argv[1:2])
+
+
+def _load_env_files() -> None:
+    """Load local .env for runserver/daphne. Skip during unit tests."""
+    if _running_tests():
+        return
+    repo_root = BASE_DIR.parent
+    for path in (
+        repo_root / "infra" / ".env",
+        BASE_DIR / ".env",
+        repo_root / ".env",
+    ):
+        if not path.is_file():
+            continue
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip("'").strip('"')
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+_load_env_files()
 
 
 # Quick-start development settings - unsuitable for production

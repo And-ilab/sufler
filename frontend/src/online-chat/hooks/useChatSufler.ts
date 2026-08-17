@@ -66,7 +66,7 @@ export function useChatSufler({
       setError('')
       setActiveTurnId(message.turnId)
       try {
-        const result = await requestSuflerSuggest(message.text, 5)
+        const result = await requestSuflerSuggest(message.text, 3)
         const nextHints = result.hints.slice(0, 5)
         setHints(nextHints)
         setLatencyMs(result.latency_ms.total)

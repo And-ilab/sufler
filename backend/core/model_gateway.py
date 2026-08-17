@@ -253,7 +253,14 @@ class ModelGateway:
         return headers
 
     def _resolve_model(self, profile: GatewayProfile) -> str:
-        """Runtime UI selection → env OPENAI_MODEL → registry slot name."""
+        """Env OPENAI_MODEL (openai mode) → runtime UI → registry slot name."""
+        env_model = ""
+        for key in ("OPENAI_MODEL", "OLLAMA_MODEL"):
+            env_model = (os.environ.get(key) or "").strip()
+            if env_model:
+                break
+        if self._mode_for(profile) == "openai" and env_model:
+            return env_model
         try:
             from assistant.local_llm import active_model_id
 
@@ -262,11 +269,7 @@ class ModelGateway:
                 return runtime
         except Exception:
             pass
-        for key in ("OPENAI_MODEL", "OLLAMA_MODEL"):
-            override = (os.environ.get(key) or "").strip()
-            if override:
-                return override
-        return profile.model
+        return env_model or profile.model
 
     def _payload(
         self,

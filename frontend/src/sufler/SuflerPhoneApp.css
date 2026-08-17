@@ -31,6 +31,34 @@
   font-size: .8125rem;
 }
 
+.sufler-phone__live {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sufler-phone__levels {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 18px;
+  width: 14px;
+}
+
+.sufler-phone__level {
+  display: block;
+  width: 5px;
+  height: 18px;
+  transform-origin: bottom;
+  background: var(--color-primary);
+  border-radius: 1px;
+}
+
+.sufler-phone__level--sys {
+  background: var(--color-text-muted);
+}
+
 .sufler-phone__eyebrow {
   margin: 0 0 var(--space-1);
   color: var(--color-text-muted);

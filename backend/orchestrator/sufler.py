@@ -8,6 +8,7 @@ FR-CC / KPI budgets.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 import uuid
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 PROFILE = "sufler_cc"
 KB_ID = "cc_production"
 DEFAULT_HINT_LIMIT = 3
-MAX_HINT_LIMIT = 3
+MAX_HINT_LIMIT = 5
 # Operator-facing floor: never show hints below 20% relevance.
 OPERATOR_MIN_RELEVANCE = 0.20
 # Prefer a second hint when it is reasonably close to the best match.
@@ -193,6 +194,14 @@ def _select_documents(
     return selected[:limit]
 
 
+def _allow_ungrounded() -> bool:
+    return os.getenv("SUFLER_ALLOW_UNGROUNDED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 def _build_messages(
     query: str,
     documents: Sequence[Mapping[str, Any]],
@@ -223,6 +232,27 @@ def _build_messages(
             "Текущая переписка (учитывай уточнения клиента):\n"
             f"{cleaned_dialog[:2000]}\n\n"
         )
+    if not documents:
+        user_content = (
+            f"{history_block}"
+            f"{dialog_block}"
+            f"Последняя реплика клиента:\n{query}\n\n"
+            "Фрагменты СУЗ сейчас недоступны. Сформируй краткий ответ оператору "
+            "по общим правилам розничного банка. В СОВЕТЕ напиши, что формулировку "
+            "нужно сверить со статьёй СУЗ перед озвучиванием.\n"
+            "Сформируй ответ по шаблону ОТВЕТ:/СОВЕТ:."
+        )
+        return [
+            {
+                "role": "system",
+                "content": (
+                    SYSTEM_PROMPT
+                    + "\nЕсли фрагменты СУЗ не переданы, всё равно заполни ОТВЕТ "
+                    "осторожной формулировкой и укажи в СОВЕТЕ сверку с СУЗ."
+                ),
+            },
+            {"role": "user", "content": user_content},
+        ]
     primary = documents[0]
     user_content = (
         f"{history_block}"
@@ -323,24 +353,29 @@ def suggest(
             if not qu_result["documents"]
             else "no_relevant_knowledge"
         )
-        latency_ms["total"] = _elapsed_ms(total_started)
-        _log_latency(
-            request_id=correlation_id,
-            latency_ms=latency_ms,
-            hint_count=0,
-            document_count=0,
-        )
-        return {
-            "query": normalized,
-            "profile": PROFILE,
-            "kb_id": KB_ID,
-            "hints": [],
-            "citations_enabled": True,
-            "blocked_reason": empty_reason,
-            "min_relevance": OPERATOR_MIN_RELEVANCE,
-            "latency_ms": latency_ms,
-            "request_id": correlation_id,
-        }
+        if not _allow_ungrounded():
+            latency_ms["total"] = _elapsed_ms(total_started)
+            _log_latency(
+                request_id=correlation_id,
+                latency_ms=latency_ms,
+                hint_count=0,
+                document_count=0,
+            )
+            return {
+                "query": normalized,
+                "profile": PROFILE,
+                "kb_id": KB_ID,
+                "hints": [],
+                "citations_enabled": True,
+                "blocked_reason": empty_reason,
+                "min_relevance": OPERATOR_MIN_RELEVANCE,
+                "latency_ms": latency_ms,
+                "request_id": correlation_id,
+            }
+        documents = []
+        ungrounded = True
+    else:
+        ungrounded = False
 
     llm_started = time.perf_counter()
     active_gateway = gateway or ModelGateway.from_registry()
@@ -370,7 +405,10 @@ def suggest(
         latency_ms["llm"] = _elapsed_ms(llm_started)
 
     if not answer_text:
-        answer_text = _snippet_as_answer(documents[0])
+        if documents:
+            answer_text = _snippet_as_answer(documents[0])
+        elif ungrounded:
+            answer_text = ""
 
     hints: list[dict[str, Any]] = []
     for index, document in enumerate(documents):
@@ -392,6 +430,17 @@ def suggest(
                 "relevance_score": document["relevance_score"],
                 "relevance_percent": document["relevance_percent"],
                 "citations": [_citation(document)],
+            }
+        )
+    if ungrounded and answer_text and not hints:
+        hints.append(
+            {
+                "rank": 1,
+                "text": answer_text,
+                "operator_tip": operator_tip,
+                "relevance_score": 0.5,
+                "relevance_percent": 50,
+                "citations": [],
             }
         )
     if not hints:

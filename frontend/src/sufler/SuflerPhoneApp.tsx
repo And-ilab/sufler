@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Button, Card, HintCard, StatusBadge } from '../components'
 import { relevanceStatusFromPercent } from '../components/hintRelevance'
 import {
   useSuflerTranscript,
   type TranscriptLine,
 } from './hooks/useSuflerTranscript'
+import { useLiveDualAsr, type DualSpeaker } from './hooks/useLiveDualAsr'
 import type { SuflerHint } from './api/suggest'
 import './SuflerPhoneApp.css'
 
@@ -158,11 +159,34 @@ export function SuflerPhoneApp({
   embedded = false,
   clientSummary = DEFAULT_SUMMARY,
 }: SuflerPhoneAppProps) {
-  const { lines, connected, error, latencyMs, pushAsr } = useSuflerTranscript({
+  const { lines, connected, error, latencyMs, pushAsr, setLines } = useSuflerTranscript({
     callId,
     demoMode,
     demoLines,
   })
+  const liveTurns = useRef<Record<DualSpeaker, string>>({ client: '', operator: '' })
+
+  const handleUtterance = (speaker: DualSpeaker, text: string, isFinal: boolean) => {
+    if (!liveTurns.current[speaker]) {
+      liveTurns.current[speaker] = `${speaker}-${Date.now()}`
+    }
+    const turnId = liveTurns.current[speaker]
+    pushAsr({
+      type: isFinal ? 'asr.final' : 'asr.partial',
+      speaker,
+      text,
+      turn_id: turnId,
+    })
+    if (isFinal) liveTurns.current[speaker] = ''
+  }
+
+  const live = useLiveDualAsr(handleUtterance)
+
+  const startLive = async () => {
+    setLines([])
+    liveTurns.current = { client: '', operator: '' }
+    await live.start()
+  }
 
   const blocks = useMemo(() => lines, [lines])
 
@@ -177,17 +201,17 @@ export function SuflerPhoneApp({
           <h1>Телефония</h1>
         </div>
         <div className="sufler-phone__meta">
-          <StatusBadge status={connected ? 'success' : 'warning'}>
-            {connected ? 'ASR активен' : 'ASR офлайн'}
+          <StatusBadge status={live.recording || connected ? 'success' : 'warning'}>
+            {live.recording ? 'Имитация' : connected ? 'ASR активен' : 'ASR офлайн'}
           </StatusBadge>
           <StatusBadge status="info">Консультация</StatusBadge>
           <span>{operatorName}</span>
         </div>
       </header>
 
-      {error && (
+      {(error || live.error) && (
         <Card className="sufler-phone__error" role="alert">
-          {error}
+          {live.error || error}
         </Card>
       )}
 
@@ -245,7 +269,8 @@ export function SuflerPhoneApp({
           })}
           {!blocks.length && (
             <Card className="sufler-phone__empty">
-              Ожидание реплик клиента. Транскрипт появится по WebSocket.
+              Нажмите «Начать имитацию»: микрофон — клиент, системный звук — оператор.
+              Реплика клиента уходит в DeepSeek и собирает подсказки.
             </Card>
           )}
         </section>
@@ -260,26 +285,57 @@ export function SuflerPhoneApp({
 
       <footer className="sufler-phone__footer">
         <span>
-          {connected ? 'ASR активен · ' : ''}
-          {latencyMs != null
-            ? `p95 подсказки ${Math.round(latencyMs)} мс`
-            : 'p95 подсказки 1.4 с'}
+          {live.recording
+            ? live.status || 'Имитация разговора'
+            : connected
+              ? 'ASR активен · '
+              : ''}
+          {!live.recording &&
+            (latencyMs != null
+              ? `p95 подсказки ${Math.round(latencyMs)} мс`
+              : 'p95 подсказки 1.4 с')}
         </span>
-        {demoMode && (
-          <Button
-            variant="secondary"
-            onClick={() =>
-              pushAsr({
-                type: 'asr.final',
-                speaker: 'client',
-                text: 'Как заменить ПИН-код карты?',
-                turn_id: `demo-${Date.now()}`,
-              })
-            }
-          >
-            Демо-реплика
-          </Button>
-        )}
+        <div className="sufler-phone__live">
+          {live.recording ? (
+            <>
+              <span className="sufler-phone__levels" aria-hidden="true">
+                <i
+                  className="sufler-phone__level sufler-phone__level--mic"
+                  style={{ transform: `scaleY(${Math.min(1, live.micLevel * 8)})` }}
+                />
+                <i
+                  className="sufler-phone__level sufler-phone__level--sys"
+                  style={{ transform: `scaleY(${Math.min(1, live.systemLevel * 8)})` }}
+                />
+              </span>
+              <Button variant="ghost" onClick={live.swapSpeakers}>
+                Микрофон: {live.micSpeaker === 'client' ? 'клиент' : 'оператор'}
+              </Button>
+              <Button variant="secondary" onClick={live.stop}>
+                Стоп
+              </Button>
+            </>
+          ) : (
+            <Button variant="primary" onClick={() => void startLive()}>
+              Начать имитацию
+            </Button>
+          )}
+          {demoMode && !live.recording && (
+            <Button
+              variant="secondary"
+              onClick={() =>
+                pushAsr({
+                  type: 'asr.final',
+                  speaker: 'client',
+                  text: 'Как заменить ПИН-код карты?',
+                  turn_id: `demo-${Date.now()}`,
+                })
+              }
+            >
+              Демо-реплика
+            </Button>
+          )}
+        </div>
       </footer>
     </main>
   )
