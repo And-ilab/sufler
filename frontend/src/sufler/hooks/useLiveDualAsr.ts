@@ -119,15 +119,27 @@ function attachMicLevelMeter(
   }
 }
 
+function mixMono(buffer: AudioBuffer): Float32Array {
+  const left = buffer.getChannelData(0)
+  if (buffer.numberOfChannels < 2) return new Float32Array(left)
+  const right = buffer.getChannelData(1)
+  const mixed = new Float32Array(left.length)
+  for (let index = 0; index < left.length; index += 1) {
+    mixed[index] = (left[index] + right[index]) * 0.5
+  }
+  return mixed
+}
+
 function attachPcmUtterances(
   context: AudioContext,
   stream: MediaStream,
   recordingRef: { current: boolean },
   onLevel: (level: number) => void,
   onWav: (wav: Blob) => void,
+  speakThreshold = 0.02,
 ): { processor: ScriptProcessorNode; stop: () => void } {
   const source = context.createMediaStreamSource(stream)
-  const processor = context.createScriptProcessor(4096, 1, 1)
+  const processor = context.createScriptProcessor(4096, 2, 1)
   const sink = context.createGain()
   sink.gain.value = 0
   source.connect(processor)
@@ -138,16 +150,16 @@ function attachPcmUtterances(
   let silenceMs = 0
   processor.onaudioprocess = (event) => {
     if (!recordingRef.current) return
-    const input = event.inputBuffer.getChannelData(0)
+    const input = mixMono(event.inputBuffer)
     const level = rms(input)
     onLevel(level)
-    if (level >= 0.02) {
+    if (level >= speakThreshold) {
       speaking = true
       silenceMs = 0
-      chunks.push(new Float32Array(input))
+      chunks.push(input)
     } else if (speaking) {
       silenceMs += (input.length / event.inputBuffer.sampleRate) * 1000
-      chunks.push(new Float32Array(input))
+      chunks.push(input)
       if (silenceMs >= 700) {
         speaking = false
         silenceMs = 0
@@ -184,6 +196,7 @@ export interface LiveDualAsrState {
   systemSpeaker: DualSpeaker
   status: string
   caption: string
+  systemCaption: string
   error: string
   systemCapture: boolean
 }
@@ -205,6 +218,7 @@ export function useLiveDualAsr(
     systemSpeaker: 'operator',
     status: '',
     caption: '',
+    systemCaption: '',
     error: '',
     systemCapture: false,
   })
@@ -214,6 +228,7 @@ export function useLiveDualAsr(
   const onUtteranceRef = useRef(onUtterance)
   onUtteranceRef.current = onUtterance
   const cleanupRef = useRef<(() => void) | null>(null)
+  const systemCleanupRef = useRef<(() => void) | null>(null)
   const finalizeTimerRef = useRef<number | null>(null)
   const lastInterimRef = useRef('')
   const levelPulseRef = useRef(0)
@@ -241,6 +256,8 @@ export function useLiveDualAsr(
     }
     hearingRef.current = false
     window.cancelAnimationFrame(levelPulseRef.current)
+    systemCleanupRef.current?.()
+    systemCleanupRef.current = null
     cleanupRef.current?.()
     cleanupRef.current = null
     setPartial({
@@ -248,6 +265,8 @@ export function useLiveDualAsr(
       micLevel: 0,
       systemLevel: 0,
       caption: '',
+      systemCaption: '',
+      systemCapture: false,
       status: 'Запись остановлена',
     })
   }, [setPartial])
@@ -374,6 +393,8 @@ export function useLiveDualAsr(
         micMeter?.stop()
         micStream?.getTracks().forEach((track) => track.stop())
         void micContext?.close()
+        systemCleanupRef.current?.()
+        systemCleanupRef.current = null
       }
       return
     }
@@ -422,8 +443,122 @@ export function useLiveDualAsr(
       micCapture.stop()
       micStream.getTracks().forEach((track) => track.stop())
       void micContext.close()
+      systemCleanupRef.current?.()
+      systemCleanupRef.current = null
     }
   }, [setPartial])
 
-  return { ...state, start, stop, swapSpeakers }
+  const enableSystemAudio = useCallback(async () => {
+    if (!recordingRef.current || systemCleanupRef.current) return
+    let systemStream: MediaStream
+    try {
+      systemStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      })
+    } catch {
+      setPartial({
+        status:
+          'Системный звук не выбран. В Chrome в окне шаринга отметьте «Также системный звук».',
+      })
+      return
+    }
+    const audioTracks = systemStream.getAudioTracks()
+    if (!audioTracks.length) {
+      systemStream.getTracks().forEach((track) => track.stop())
+      setPartial({
+        status:
+          'Нет дорожки звука. Выберите вкладку или экран и включите «Также системный звук».',
+      })
+      return
+    }
+    const systemContext = new AudioContext({ sampleRate: 16000 })
+    void systemContext.resume()
+    const systemCapture = attachPcmUtterances(
+      systemContext,
+      systemStream,
+      recordingRef,
+      (level) => setState((current) => ({ ...current, systemLevel: level })),
+      (wav) => {
+        const speaker: DualSpeaker = 'operator'
+        setPartial({ status: 'Распознаю реплику оператора…', error: '' })
+        void transcribeUtterance(wav, speaker)
+          .then((text) => {
+            if (!text) return
+            onUtteranceRef.current(speaker, text, true)
+            setPartial({
+              systemCaption: text,
+              status: `Оператор: ${text}`,
+              error: '',
+            })
+          })
+          .catch((error: unknown) => {
+            const message =
+              error instanceof Error ? error.message : 'Системный звук не распознан'
+            if (message.includes('could not recognize')) {
+              setPartial({ status: 'Оператор говорил, но фразу не разобрали. Повторите громче.' })
+              return
+            }
+            setPartial({ error: message })
+          })
+      },
+      0.006,
+    )
+    const preview = document.createElement('video')
+    preview.muted = true
+    preview.playsInline = true
+    preview.autoplay = true
+    preview.setAttribute('aria-hidden', 'true')
+    preview.style.cssText =
+      'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-20px;top:-20px'
+    preview.srcObject = systemStream
+    document.body.appendChild(preview)
+    void preview.play().catch(() => {
+      /* capture still runs without visible preview */
+    })
+    const releasePreview = () => {
+      preview.srcObject = null
+      preview.remove()
+    }
+    const releaseSystem = () => {
+      if (!systemCleanupRef.current) return
+      systemCleanupRef.current = null
+      releasePreview()
+      systemCapture.stop()
+      systemStream.getTracks().forEach((track) => track.stop())
+      void systemContext.close()
+      setPartial({
+        systemCapture: false,
+        systemLevel: 0,
+        systemCaption: '',
+        status: recordingRef.current
+          ? 'Системный звук отключён. Микрофон продолжает писать клиента.'
+          : 'Запись остановлена',
+      })
+    }
+    systemStream.getTracks().forEach((track) => {
+      track.addEventListener('ended', releaseSystem)
+    })
+    setPartial({
+      systemCapture: true,
+      error: '',
+      systemCaption: '',
+      status: 'Два канала сразу: микрофон — клиент, системный звук — оператор. Реплики оператора появятся в ленте.',
+    })
+    systemCleanupRef.current = () => {
+      systemStream.getTracks().forEach((track) => {
+        track.removeEventListener('ended', releaseSystem)
+      })
+      releasePreview()
+      systemCapture.stop()
+      systemStream.getTracks().forEach((track) => track.stop())
+      void systemContext.close()
+    }
+  }, [setPartial])
+
+  return { ...state, start, stop, swapSpeakers, enableSystemAudio }
 }

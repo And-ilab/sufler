@@ -15,5 +15,6 @@ websockets==12.0
 Pillow>=10.0.0
 pytesseract>=0.3.10
 pypdf>=4.0.0
+vosk
 # Heavier optional engine (not in default image):
 # paddleocr

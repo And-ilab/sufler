@@ -47,6 +47,13 @@ class TranscribeWavTest(unittest.TestCase):
                 transcribe_wav(_silent_wav())
         self.assertIn("recognize", str(raised.exception).lower())
 
+    def test_returns_recognized_text(self):
+        with patch(
+            "orchestrator.transcribe._transcribe_vosk",
+            return_value="добрый день",
+        ):
+            self.assertEqual(transcribe_wav(_silent_wav()), "добрый день")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,10 +5,18 @@ from __future__ import annotations
 import json
 import os
 import struct
+import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any
 
 MAX_AUDIO_BYTES = 2_000_000
+VOSK_SMALL_RU = "vosk-model-small-ru-0.22"
+VOSK_SMALL_RU_URL = (
+    "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
+)
+
+_model_cache: Any = None
 
 
 class TranscribeError(ValueError):
@@ -51,37 +59,104 @@ def _read_wav_pcm16(data: bytes) -> tuple[bytes, int]:
     return pcm, sample_rate
 
 
+def _looks_like_vosk_model(path: Path) -> bool:
+    return path.is_dir() and (
+        (path / "am" / "final.mdl").exists()
+        or (path / "conf" / "model.conf").exists()
+        or (path / "ivector" / "final.dubm").exists()
+    )
+
+
 def _vosk_model_path() -> Path | None:
     configured = os.environ.get("VOSK_MODEL_PATH", "").strip()
     candidates = [
         Path(configured).expanduser() if configured else None,
+        Path(__file__).resolve().parents[1] / "var" / VOSK_SMALL_RU,
         Path(__file__).resolve().parents[1]
         / "services"
         / "asr"
         / "model"
-        / "vosk-model-small-ru-0.22",
+        / VOSK_SMALL_RU,
         Path(__file__).resolve().parents[2]
         / "recognizer"
         / "model"
         / "vosk-model-ru-0.22",
     ]
     for candidate in candidates:
-        if candidate is not None and candidate.exists():
+        if candidate is not None and _looks_like_vosk_model(candidate):
             return candidate
     return None
 
 
-def _transcribe_vosk(pcm: bytes, sample_rate: int) -> str:
-    model_path = _vosk_model_path()
-    if model_path is None:
-        return ""
+def _download_enabled() -> bool:
+    flag = os.environ.get("VOSK_MODEL_DOWNLOAD", "1").strip().lower()
+    return flag not in {"0", "false", "no"}
+
+
+def _ensure_vosk_model() -> Path | None:
+    existing = _vosk_model_path()
+    if existing is not None:
+        return existing
+    if not _download_enabled():
+        return None
+    dest_parent = Path(__file__).resolve().parents[1] / "var"
+    dest = dest_parent / VOSK_SMALL_RU
+    dest_parent.mkdir(parents=True, exist_ok=True)
+    zip_path = dest_parent / f"{VOSK_SMALL_RU}.zip"
     try:
-        from vosk import KaldiRecognizer, Model
+        urllib.request.urlretrieve(VOSK_SMALL_RU_URL, zip_path)
+        with zipfile.ZipFile(zip_path) as archive:
+            archive.extractall(dest_parent)
+        zip_path.unlink(missing_ok=True)
+    except OSError:
+        zip_path.unlink(missing_ok=True)
+        return None
+    if _looks_like_vosk_model(dest):
+        return dest
+    return None
+
+
+def _load_vosk_model(model_path: Path) -> Any:
+    global _model_cache
+    cached_path, cached_model = _model_cache or (None, None)
+    if cached_model is not None and cached_path == str(model_path):
+        return cached_model
+    from vosk import Model, SetLogLevel
+
+    SetLogLevel(-1)
+    model = Model(str(model_path))
+    _model_cache = (str(model_path), model)
+    return model
+
+
+def _import_kaldi():
+    import sys
+
+    try:
+        from vosk import KaldiRecognizer
+        return KaldiRecognizer
     except ImportError:
-        return ""
-    rec = KaldiRecognizer(Model(str(model_path)), sample_rate)
+        sys.modules.pop("vosk", None)
+        sys.modules.pop("vosk.vosk_cffi", None)
+    try:
+        from vosk import KaldiRecognizer
+        return KaldiRecognizer
+    except ImportError as exc:
+        raise TranscribeError(f"не удалось загрузить vosk: {exc}") from exc
+
+
+def _transcribe_vosk(pcm: bytes, sample_rate: int) -> str:
+    KaldiRecognizer = _import_kaldi()
+    model_path = _ensure_vosk_model()
+    if model_path is None:
+        raise TranscribeError(
+            "модель Vosk не найдена. Нужен vosk-model-small-ru-0.22"
+        )
+    rec = KaldiRecognizer(_load_vosk_model(model_path), sample_rate)
     rec.SetWords(True)
-    rec.AcceptWaveform(pcm)
+    frame = 4000
+    for offset in range(0, len(pcm), frame):
+        rec.AcceptWaveform(pcm[offset : offset + frame])
     payload: dict[str, Any] = json.loads(rec.FinalResult())
     return str(payload.get("text") or "").strip()
 

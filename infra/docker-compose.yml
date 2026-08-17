@@ -134,6 +134,8 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-180}
+      VOSK_MODEL_PATH: ${VOSK_MODEL_PATH:-/app/var/vosk-model-small-ru-0.22}
+      VOSK_MODEL_DOWNLOAD: ${VOSK_MODEL_DOWNLOAD:-1}
       ASSISTANT_MAX_TOKENS: ${ASSISTANT_MAX_TOKENS:-256}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -165,7 +167,7 @@ services:
     command:
       - sh
       - -c
-      - python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000
+      - python -m pip install -q vosk && python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000
     ports:
       - "${BACKEND_PORT_HOST:-8001}:8000"
     volumes:
@@ -285,6 +287,8 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-180}
+      VOSK_MODEL_PATH: ${VOSK_MODEL_PATH:-/app/var/vosk-model-small-ru-0.22}
+      VOSK_MODEL_DOWNLOAD: ${VOSK_MODEL_DOWNLOAD:-1}
       ASSISTANT_MAX_TOKENS: ${ASSISTANT_MAX_TOKENS:-256}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}

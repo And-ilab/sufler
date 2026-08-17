@@ -241,7 +241,11 @@ export function SuflerPhoneApp({
                   <header>
                     <strong>{line.speaker === 'client' ? 'Клиент' : 'Оператор'}</strong>
                     {line.speaker === 'operator' ? (
-                      <StatusBadge status="info">черновик</StatusBadge>
+                      <StatusBadge status="info">
+                        {live.recording || live.systemCapture
+                          ? 'системный звук'
+                          : 'оператор'}
+                      </StatusBadge>
                     ) : (
                       <StatusBadge status={line.isFinal ? 'neutral' : 'info'}>
                         {line.isFinal ? 'final' : 'partial'}
@@ -285,10 +289,12 @@ export function SuflerPhoneApp({
           {!blocks.length && (
             <Card className="sufler-phone__empty">
               {live.caption
-                ? `Слышу: ${live.caption}`
+                ? `Слышу клиента: ${live.caption}`
+                : live.systemCaption
+                  ? `Оператор: ${live.systemCaption}`
                 : live.recording
-                  ? 'Говорите паузами или введите реплику клиента внизу — она появится в ленте.'
-                  : 'Нажмите «Начать имитацию»: микрофон — клиент. Реплика клиента уходит в DeepSeek и собирает подсказки.'}
+                  ? 'Говорите в микрофон (клиент). Системный звук оператора появится в ленте после кнопки «Системный звук».'
+                  : 'Нажмите «Начать имитацию»: микрофон — клиент, системный звук — оператор. Реплики оператора пишутся в ленту.'}
             </Card>
           )}
         </section>
@@ -304,9 +310,15 @@ export function SuflerPhoneApp({
       <footer className="sufler-phone__footer">
         <span className="sufler-phone__footer-status">
           {live.recording
-            ? live.caption
-              ? `Слышу: ${live.caption}`
-              : live.status || 'Имитация разговора'
+            ? [
+                live.caption ? `Клиент: ${live.caption}` : '',
+                live.systemCaption ? `Оператор: ${live.systemCaption}` : '',
+                !live.caption && !live.systemCaption
+                  ? live.status || 'Имитация разговора'
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')
             : connected
               ? 'ASR активен · '
               : ''}
@@ -353,6 +365,23 @@ export function SuflerPhoneApp({
               >
                 {live.micSpeaker === 'client' ? 'Клиент' : 'Оператор'}
               </Button>
+              {live.systemCapture ? (
+                <Button
+                  variant="ghost"
+                  disabled
+                  title="Системный звук пишется как оператор"
+                >
+                  Оператор · sys
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  onClick={() => void live.enableSystemAudio()}
+                  title="Захват системного звука как оператора. В Chrome отметьте «Также системный звук»."
+                >
+                  Системный звук
+                </Button>
+              )}
               <Button variant="secondary" onClick={live.stop}>
                 Стоп
               </Button>
