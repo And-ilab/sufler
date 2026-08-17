@@ -3745,6 +3745,7 @@ export function ArmOperatorView({
           setComposerNotice("Не удалось закрыть диалог на сервере. Попробуйте ещё раз.");
         });
     }
+    onCloseTopicChange("");
     const nextDialog = remainingDialogs.find((item) => item.id !== closingId);
     if (nextDialog) {
       onSelectQueue(nextDialog.id);

@@ -11,6 +11,7 @@ export interface CcAnalyticsFilters {
   topic?: string
   status?: string
   department?: string
+  group_by?: string
 }
 
 export interface CcAnalyticsSummary {
@@ -151,8 +152,22 @@ export interface BuilderTemplatesPayload {
     filters: Record<string, string>
     view_mode: string
   }[]
+  saved?: SavedReportTemplate[]
   metric_catalog: { id: string; label: string }[]
   stub: boolean
+}
+
+export interface SavedReportTemplate {
+  id: string
+  name: string
+  metrics: string[]
+  view_mode: string
+  date_from: string | null
+  date_to: string | null
+  filters: Record<string, unknown>
+  owner_username: string
+  created_at: string
+  updated_at: string
 }
 
 interface ApiErrorPayload {
@@ -182,6 +197,7 @@ function toQuery(
   if (filters.topic) params.set('topic', filters.topic)
   if (filters.status) params.set('status', filters.status)
   if (filters.department) params.set('department', filters.department)
+  if (filters.group_by) params.set('group_by', filters.group_by)
   for (const [key, value] of Object.entries(extra)) {
     if (value) params.set(key, value)
   }
@@ -207,10 +223,21 @@ async function parseJson<T>(response: Response): Promise<T> {
   }
   if (!response.ok) {
     const error = body as ApiErrorPayload
-    throw new CcReportsApiError(
-      error.error || `HTTP ${response.status}`,
-      error.details || {},
-    )
+    const raw = error.error || `Ошибка сервера (HTTP ${response.status})`
+    const localized = raw
+      .replace(/\bchat-period\b/gi, 'Обращения за период')
+      .replace(/\bchat-sla\b/gi, 'SLA и время ожидания')
+      .replace(/\bchat-operators\b/gi, 'Нагрузка операторов')
+      .replace(/\bchat-ratings\b/gi, 'Оценки клиентов')
+      .replace(/\bchat-topics\b/gi, 'Тематики закрытия')
+      .replace(/\bchat-offline\b/gi, 'Необработанные и отказные обращения')
+      .replace(/\bchat_history\b/gi, 'Реестр диалогов')
+      .replace(/\busefulness\b/gi, 'Полезность подсказок суфлёра')
+      .replace(/\brelevance\b/gi, 'Релевантность ответов')
+      .replace(/\bperformance\b/gi, 'Производительность')
+      .replace(/\brepeats\b/gi, 'Повторные обращения')
+      .replace(/\bexecutive\b/gi, 'Сводка для руководства')
+    throw new CcReportsApiError(localized, error.details || {})
   }
   return body as T
 }
@@ -247,6 +274,22 @@ export async function fetchCcCatalog(
 
 export async function fetchBuilderTemplates(): Promise<BuilderTemplatesPayload> {
   const response = await authedFetch('/api/reports/cc/builder/')
+  return parseJson(response)
+}
+
+export async function saveBuilderTemplate(body: {
+  name: string
+  metrics: string[]
+  view_mode?: string
+  date_from?: string
+  date_to?: string
+  filters?: Record<string, unknown>
+}): Promise<{ saved: SavedReportTemplate }> {
+  const response = await authedFetch('/api/reports/cc/builder/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
   return parseJson(response)
 }
 

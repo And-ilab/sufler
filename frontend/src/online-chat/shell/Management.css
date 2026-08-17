@@ -199,6 +199,23 @@
   letter-spacing: .03em;
 }
 
+.chat-management__operator-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chat-management__role-prefix {
+  color: #8a6d1d;
+  font-weight: 700;
+}
+
+.chat-management__role-badge {
+  color: #5c4a12;
+  background: #f6eed4;
+}
+
 .chat-management__pill {
   display: inline-flex;
   align-items: center;
@@ -685,6 +702,107 @@
     grid-area: remove;
     align-self: start;
   }
+}
+
+.chat-management__actions--grow {
+  flex: 1;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.chat-management__search {
+  min-width: 220px;
+}
+
+.chat-management__row-link {
+  cursor: pointer;
+}
+
+.chat-management__row-link:hover td {
+  background: color-mix(in srgb, var(--arm-accent-control) 8%, transparent);
+}
+
+.chat-management__row-link:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--arm-accent) 40%, transparent);
+  outline-offset: -2px;
+}
+
+.chat-management__queue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.chat-management__queue-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.chat-management__queue-card h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.chat-management__queue-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.chat-management__queue-metrics span {
+  display: block;
+  color: var(--arm-t-secondary);
+  font-size: 12px;
+}
+
+.chat-management__queue-metrics strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 20px;
+}
+
+.chat-management__queue-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--arm-stroke-tertiary) 70%, transparent);
+  overflow: hidden;
+}
+
+.chat-management__queue-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--arm-accent-control);
+  transition: width 240ms ease;
+}
+
+.chat-management__queue-card.is-warn .chat-management__queue-bar span {
+  background: #c47f17;
+}
+
+.chat-management__queue-card.is-critical .chat-management__queue-bar span {
+  background: #c62828;
+}
+
+.chat-management__modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 32, 28, 0.45);
+}
+
+.chat-management__modal {
+  width: min(560px, 100%);
+  max-height: min(80vh, 720px);
+  overflow: auto;
 }
 
 @media (max-width: 800px) {

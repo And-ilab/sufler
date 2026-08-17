@@ -10,8 +10,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from online_chat.models import (
-    Department,
+    BaseMessage,
     BotConfiguration,
+    Department,
     Dialog,
     DialogMessage,
     OperatorProfile,
@@ -313,3 +314,48 @@ class ApiTests(TestCase):
                 text="Передаю оператору.",
             ).exists()
         )
+
+    def test_base_message_before_bot_matches_widget_placement(self) -> None:
+        BaseMessage.objects.create(
+            title="Welcome",
+            text="Базовое приветствие",
+            channels=[f"widget:{self.placement.id}"],
+            send_phase=BaseMessage.SendPhase.BEFORE_BOT,
+            sort_order=10,
+        )
+        BaseMessage.objects.create(
+            title="Other",
+            text="Чужое приветствие",
+            channels=["widget:00000000-0000-0000-0000-000000000000"],
+            send_phase=BaseMessage.SendPhase.BEFORE_BOT,
+            sort_order=20,
+        )
+
+        dialog, _ = create_dialog_with_message(text="Help", widget_id="public-widget")
+
+        self.assertTrue(dialog.messages.filter(text="Базовое приветствие").exists())
+        self.assertFalse(dialog.messages.filter(text="Чужое приветствие").exists())
+
+    def test_global_bot_sends_after_bot_message_before_handoff(self) -> None:
+        BotConfiguration.objects.create(
+            name="Global FAQ",
+            is_active=True,
+            handoff_message="Передаю оператору.",
+        )
+        BaseMessage.objects.create(
+            title="Escalation",
+            text="Срочное уведомление",
+            channels=["widget"],
+            send_phase=BaseMessage.SendPhase.AFTER_BOT,
+            sort_order=10,
+        )
+        dialog, _ = create_dialog_with_message(text="Help", widget_id="public-widget")
+
+        append_message(dialog, speaker=DialogMessage.Speaker.CLIENT, text="Не знаю")
+
+        bot_texts = list(
+            dialog.messages.filter(speaker=DialogMessage.Speaker.BOT)
+            .order_by("created_at")
+            .values_list("text", flat=True)
+        )
+        self.assertEqual(bot_texts[-2:], ["Срочное уведомление", "Передаю оператору."])

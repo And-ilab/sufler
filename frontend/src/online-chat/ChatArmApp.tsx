@@ -64,7 +64,7 @@ export function ChatArmApp({
   const [toast, setToast] = useState<string | null>(null)
   const [presence, setPresence] = useState<OperatorPresence>(initialPresence)
   const [viewMode, setViewMode] = useState<'active' | 'colleague'>(viewOnly ? 'colleague' : 'active')
-  const [closeTopic, setCloseTopic] = useState<string>(CLOSE_TOPICS[0])
+  const [closeTopic, setCloseTopic] = useState<string>('')
 
   useEffect(() => {
     if (viewOnly) setViewMode('colleague')

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from django.db import models
 
 
@@ -89,3 +91,40 @@ class AsrTranscriptUtterance(models.Model):
 
     def __str__(self) -> str:
         return f"{self.session.session_id}:{self.turn_index}"
+
+
+class CcReportTemplate(models.Model):
+    """Saved CC report builder template."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255)
+    metrics = models.JSONField(default=list)
+    view_mode = models.CharField(max_length=32, default="table")
+    date_from = models.DateField(null=True, blank=True)
+    date_to = models.DateField(null=True, blank=True)
+    filters = models.JSONField(default=dict, blank=True)
+    owner_username = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+        verbose_name = "CC report template"
+        verbose_name_plural = "CC report templates"
+
+    def __str__(self) -> str:
+        return self.name
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "name": self.name,
+            "metrics": self.metrics,
+            "view_mode": self.view_mode,
+            "date_from": self.date_from.isoformat() if self.date_from else None,
+            "date_to": self.date_to.isoformat() if self.date_to else None,
+            "filters": self.filters or {},
+            "owner_username": self.owner_username,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }

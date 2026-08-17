@@ -3,7 +3,7 @@ import { LiveOpsScreen } from './LiveOpsScreen'
 import { AsrQaScreen } from './AsrQaScreen'
 import './ReportsTheme.css'
 
-export type ReportsSection = 'overview' | 'live' | 'builder' | 'asr-qa'
+export type ReportsSection = 'overview' | 'live' | 'asr-qa'
 
 interface AiHubReportsAppProps {
   username?: string
@@ -14,38 +14,27 @@ function resolveSection(pathname: string, explicit?: ReportsSection): ReportsSec
   if (explicit) return explicit
   if (pathname.includes('/asr')) return 'asr-qa'
   if (pathname.includes('/live')) return 'live'
-  if (pathname.includes('/builder')) return 'builder'
   return 'overview'
 }
 
-const TABS: { id: ReportsSection; label: string; path: string; subtitle: string; title: string }[] = [
+const TABS: { id: ReportsSection; label: string; path: string; title: string }[] = [
   {
     id: 'overview',
     label: 'Аналитика',
     path: '/ai-hub/reports',
-    title: 'Модуль «Отчётность» · аналитика КЦ',
-    subtitle: 'Готовые отчёты по онлайн-чату · таблица, диаграммы, выгрузка',
+    title: 'Аналитика контакт-центра',
   },
   {
     id: 'live',
     label: 'Оперативная панель',
     path: '/ai-hub/reports/live',
     title: 'Оперативная панель',
-    subtitle: 'Очередь, нагрузка операторов и лента диалогов',
-  },
-  {
-    id: 'builder',
-    label: 'Конструктор',
-    path: '/ai-hub/reports/builder',
-    title: 'Модуль «Отчётность» · аналитика КЦ',
-    subtitle: 'Сборка отчёта из показателей и фильтров',
   },
   {
     id: 'asr-qa',
     label: 'Записи разговоров',
     path: '/ai-hub/reports/asr',
     title: 'Записи разговоров',
-    subtitle: 'Каталог записей и транскриптов',
   },
 ]
 
@@ -64,25 +53,16 @@ export function AiHubReportsApp({
     <main className="rpt-app" data-testid="reports-app" data-scheme="belarusbank_emerald">
       <div className="rpt-frame">
         <header className="rpt-header">
-          <div>
+          <div className="rpt-header__brand">
+            <a
+              className="rpt-mark"
+              href="/"
+              title="На портал"
+              aria-label="Беларусбанк — на портал"
+            >
+              ББ
+            </a>
             <h1>{tab.title}</h1>
-            <p className="rpt-header__sub">{tab.subtitle}</p>
-          </div>
-          <div className="rpt-header__actions">
-            <button
-              type="button"
-              className="rpt-btn"
-              onClick={() => window.location.assign('/online-chat')}
-            >
-              АРМ чата
-            </button>
-            <button
-              type="button"
-              className="rpt-btn"
-              onClick={() => window.location.assign('/')}
-            >
-              На портал
-            </button>
           </div>
         </header>
 
@@ -99,8 +79,16 @@ export function AiHubReportsApp({
           ))}
         </nav>
 
-        {active === 'overview' ? <CcReportsScreen initialPanel="reports" /> : null}
-        {active === 'builder' ? <CcReportsScreen initialPanel="builder" /> : null}
+        {active === 'overview' ? (
+          <CcReportsScreen
+            initialPanel={
+              window.location.pathname.includes('/builder')
+              || window.location.search.includes('builder')
+                ? 'builder'
+                : 'reports'
+            }
+          />
+        ) : null}
         {active === 'live' ? <LiveOpsScreen /> : null}
         {active === 'asr-qa' ? <AsrQaScreen /> : null}
       </div>

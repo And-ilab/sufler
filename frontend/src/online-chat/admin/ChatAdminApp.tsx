@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
+  baseMessagesApi,
   channelsApi,
   botsApi,
   departmentsApi,
   getAnalytics,
+  getSlaSettings,
   operatorsApi,
   placementsApi,
   routingRulesApi,
+  updateSlaSettings,
   type AnalyticsResponse,
+  type BaseMessage,
   type ChatChannel,
   type BotConfiguration,
   type ChatOperator,
@@ -19,7 +23,16 @@ import {
 } from '../api/managementApi'
 import '../shell/Management.css'
 
-type Tab = 'operators' | 'departments' | 'placements' | 'channels' | 'routing' | 'bots' | 'analytics'
+type Tab =
+  | 'operators'
+  | 'departments'
+  | 'placements'
+  | 'channels'
+  | 'routing'
+  | 'bots'
+  | 'messages'
+  | 'analytics'
+  | 'sla'
 
 type ConfirmRequest = {
   title: string
@@ -35,10 +48,12 @@ type PerformFn = (
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'operators', label: 'Операторы' },
   { id: 'departments', label: 'Отделы' },
-  { id: 'placements', label: 'Размещения виджета' },
+  { id: 'placements', label: 'Виджеты' },
   { id: 'channels', label: 'Каналы платформы' },
   { id: 'routing', label: 'Маршрутизация' },
   { id: 'bots', label: 'Боты' },
+  { id: 'messages', label: 'Базовые сообщения' },
+  { id: 'sla', label: 'SLA' },
   { id: 'analytics', label: 'Аналитика' },
 ]
 
@@ -113,8 +128,6 @@ const CANONICAL_CHANNELS: Array<{ kind: string; name: string }> = [
 const emptyPlacement: Partial<WidgetPlacement> = {
   name: '',
   allowed_domains: [],
-  welcome_message: 'Здравствуйте! Чем можем помочь?',
-  offline_message: 'Сейчас операторы недоступны. Оставьте сообщение.',
   require_phone: false,
   theme_accent: '#007A43',
   form_fields: [],
@@ -146,6 +159,7 @@ export function ChatAdminApp() {
   const [channels, setChannels] = useState<ChatChannel[]>([])
   const [rules, setRules] = useState<RoutingRule[]>([])
   const [bots, setBots] = useState<BotConfiguration[]>([])
+  const [baseMessages, setBaseMessages] = useState<BaseMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -160,22 +174,39 @@ export function ChatAdminApp() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [departmentItems, operatorItems, placementItems, channelItems, ruleItems, botItems] =
-        await Promise.all([
-          departmentsApi.list(),
-          operatorsApi.list(),
-          placementsApi.list(),
-          channelsApi.list(),
-          routingRulesApi.list(),
-          botsApi.list(),
-        ])
-      setDepartments(departmentItems)
-      setOperators(operatorItems)
-      setPlacements(placementItems)
-      setChannels(channelItems)
-      setRules(ruleItems)
-      setBots(botItems)
-      setError('')
+      const results = await Promise.allSettled([
+        departmentsApi.list(),
+        operatorsApi.list(),
+        placementsApi.list(),
+        channelsApi.list(),
+        routingRulesApi.list(),
+        botsApi.list(),
+        baseMessagesApi.list(),
+      ])
+      const [
+        departmentResult,
+        operatorResult,
+        placementResult,
+        channelResult,
+        ruleResult,
+        botResult,
+        messageResult,
+      ] = results
+
+      if (departmentResult.status === 'fulfilled') setDepartments(departmentResult.value)
+      if (operatorResult.status === 'fulfilled') setOperators(operatorResult.value)
+      if (placementResult.status === 'fulfilled') setPlacements(placementResult.value)
+      if (channelResult.status === 'fulfilled') setChannels(channelResult.value)
+      if (ruleResult.status === 'fulfilled') setRules(ruleResult.value)
+      if (botResult.status === 'fulfilled') setBots(botResult.value)
+      if (messageResult.status === 'fulfilled') setBaseMessages(messageResult.value)
+
+      const failed = results.find((item) => item.status === 'rejected') as PromiseRejectedResult | undefined
+      if (failed) {
+        setError(failed.reason instanceof Error ? failed.reason.message : 'Не удалось загрузить часть настроек')
+      } else {
+        setError('')
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Не удалось загрузить настройки')
     } finally {
@@ -297,7 +328,12 @@ export function ChatAdminApp() {
           />
         )}
         {tab === 'channels' && (
-          <ChannelsTab items={channels} disabled={saving} perform={perform} />
+          <ChannelsTab
+            items={channels}
+            placements={placements}
+            disabled={saving}
+            perform={perform}
+          />
         )}
         {tab === 'routing' && (
           <RoutingTab
@@ -311,11 +347,20 @@ export function ChatAdminApp() {
         {tab === 'bots' && (
           <BotsTab
             items={bots}
-            departments={departments}
             disabled={saving}
             perform={perform}
           />
         )}
+        {tab === 'messages' && (
+          <BaseMessagesTab
+            items={baseMessages}
+            placements={placements}
+            channels={channels}
+            disabled={saving}
+            perform={perform}
+          />
+        )}
+        {tab === 'sla' && <SlaTab disabled={saving} perform={perform} />}
         {tab === 'analytics' && <AnalyticsTab />}
       </div>
     </main>
@@ -366,7 +411,7 @@ function AnalyticsTab() {
           ['Диалоги', kpis.dialogs ?? 0],
           ['Закрыто', kpis.closed ?? 0],
           ['В очереди', kpis.waiting ?? 0],
-          ['Решено, %', kpis.resolution_rate ?? '—'],
+          ['Доля закрытых, %', kpis.resolution_rate ?? '—'],
           ['Среднее время первого ответа, сек', kpis.average_first_response_seconds ?? '—'],
           ['Оценка клиентов (CSAT)', kpis.average_rating == null ? '—' : Number(kpis.average_rating).toFixed(2)],
         ].map(([label, value]) => (
@@ -374,6 +419,84 @@ function AnalyticsTab() {
             <span>{label}</span>
             <strong>{String(value)}</strong>
           </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function SlaTab({ disabled, perform }: TabProps) {
+  const [seconds, setSeconds] = useState(120)
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    void getSlaSettings()
+      .then((settings) => {
+        setSeconds(settings.first_response_seconds)
+        setLoaded(true)
+        setError('')
+      })
+      .catch((caught) => {
+        setError(caught instanceof Error ? caught.message : 'Не удалось загрузить SLA')
+        setLoaded(true)
+      })
+  }, [])
+
+  const minutes = Math.floor(seconds / 60)
+  const rest = seconds % 60
+
+  return (
+    <section className="chat-management__card" aria-labelledby="sla-heading">
+      <h2 id="sla-heading">Целевой SLA первого ответа</h2>
+      {error && <p className="chat-management__error" role="alert">{error}</p>}
+      {!loaded ? (
+        <p className="chat-management__muted">Загрузка…</p>
+      ) : (
+        <div className="chat-management__form-grid">
+          <label>
+            Цель, секунды
+            <input
+              type="number"
+              min={15}
+              max={3600}
+              step={5}
+              value={seconds}
+              disabled={disabled}
+              onChange={(event) => setSeconds(event.target.valueAsNumber || 15)}
+            />
+          </label>
+          <div className="chat-management__muted" style={{ alignSelf: 'end', paddingBottom: 10 }}>
+            Сейчас: <strong>{seconds} с</strong>
+            {minutes > 0 ? ` (${minutes} мин${rest ? ` ${rest} с` : ''})` : ''}
+          </div>
+        </div>
+      )}
+      <div className="chat-management__actions" style={{ marginTop: 14 }}>
+        <button
+          type="button"
+          disabled={disabled || !loaded}
+          onClick={() => void perform(
+            () => updateSlaSettings(seconds),
+            `Целевой SLA обновлён: ${seconds} с.`,
+            {
+              title: 'Сохранить целевой SLA?',
+              description: `Первый ответ оператора будет считаться в норме, если уложится в ${seconds} секунд.`,
+            },
+          )}
+        >
+          Сохранить SLA
+        </button>
+        {[60, 120, 180, 300].map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            className="is-secondary"
+            disabled={disabled}
+            onClick={() => setSeconds(preset)}
+          >
+            {preset} с
+          </button>
         ))}
       </div>
     </section>
@@ -443,7 +566,7 @@ function OperatorsTab({
             </select>
           </label>
           <label>
-            Вместимость
+            Лимит диалогов
             <input type="number" min="1" max="50" value={capacity} onChange={(event) => setCapacity(event.target.valueAsNumber)} />
           </label>
         </div>
@@ -662,7 +785,7 @@ function FormFieldsPicker({
     <div className="chat-management__field-picker is-wide">
       <div className="chat-management__field-picker-head">
         <strong>Поля формы</strong>
-        <span>Выберите поля для формы входа в виджет</span>
+        <span>Выберите поля для формы входа в выбранном канале</span>
       </div>
 
       <div className="chat-management__field-grid" role="group" aria-label="Доступные поля">
@@ -730,22 +853,16 @@ function PlacementsTab({
   const [editingId, setEditingId] = useState<EntityId | null>(null)
   const [form, setForm] = useState<Partial<WidgetPlacement>>(emptyPlacement)
   const [domains, setDomains] = useState('')
-  const [fields, setFields] = useState<WidgetFormField[]>([
-    POPULAR_FORM_FIELDS[0],
-    POPULAR_FORM_FIELDS[2],
-  ])
 
   const edit = (item: WidgetPlacement) => {
     setEditingId(item.id)
     setForm(item)
     setDomains((item.allowed_domains ?? []).join(', '))
-    setFields(item.form_fields?.length ? item.form_fields : [])
   }
   const reset = () => {
     setEditingId(null)
     setForm(emptyPlacement)
     setDomains('')
-    setFields([POPULAR_FORM_FIELDS[0], POPULAR_FORM_FIELDS[2]])
   }
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -753,7 +870,6 @@ function PlacementsTab({
       ...form,
       code: (form.code || '').trim() || slugHint(form.name || 'widget'),
       allowed_domains: domains.split(',').map((value) => value.trim()).filter(Boolean),
-      form_fields: fields,
     }
     await perform(
       async () => {
@@ -761,12 +877,12 @@ function PlacementsTab({
         else await placementsApi.update(editingId, payload)
         reset()
       },
-      editingId == null ? 'Размещение создано.' : 'Размещение обновлено.',
+      editingId == null ? 'Виджет создан.' : 'Виджет обновлён.',
       {
-        title: editingId == null ? 'Создать размещение?' : 'Сохранить размещение?',
+        title: editingId == null ? 'Создать виджет?' : 'Сохранить виджет?',
         description: editingId == null
-          ? `Будет создано размещение «${form.name || ''}» с ${fields.length} полями формы.`
-          : `Изменения размещения «${form.name || ''}» будут сохранены.`,
+          ? `Будет создан виджет «${form.name || ''}». Поля формы настраиваются в «Каналы платформы».`
+          : `Изменения виджета «${form.name || ''}» будут сохранены.`,
       },
     )
   }
@@ -776,7 +892,7 @@ function PlacementsTab({
   return (
     <div className="chat-management__split">
       <form className="chat-management__card" onSubmit={(event) => void submit(event)}>
-        <h2>{editingId == null ? 'Новое размещение' : 'Редактирование размещения'}</h2>
+        <h2>{editingId == null ? 'Новый виджет' : 'Редактирование виджета'}</h2>
         <div className="chat-management__form-grid">
           <label>Название<input required value={form.name ?? ''} onChange={(event) => set('name', event.target.value)} /></label>
           <label>
@@ -791,8 +907,6 @@ function PlacementsTab({
             Разрешённые домены (через запятую)
             <input placeholder="example.by, bank.example.by" value={domains} onChange={(event) => setDomains(event.target.value)} />
           </label>
-          <label className="is-wide">Приветствие<textarea value={form.welcome_message ?? ''} onChange={(event) => set('welcome_message', event.target.value)} /></label>
-          <label className="is-wide">Сообщение вне графика<textarea value={form.offline_message ?? ''} onChange={(event) => set('offline_message', event.target.value)} /></label>
           <label>
             Отдел
             <select value={entityDepartmentId(form)} onChange={(event) => set('department_id', event.target.value || null)}>
@@ -804,10 +918,9 @@ function PlacementsTab({
             Акцент темы
             <input type="color" value={form.theme_accent ?? '#007A43'} onChange={(event) => set('theme_accent', event.target.value)} />
           </label>
-          <FormFieldsPicker value={fields} onChange={setFields} />
           <label className="chat-management__check">
             <input type="checkbox" checked={form.is_active !== false} onChange={(event) => set('is_active', event.target.checked)} />
-            Размещение активно
+            Виджет активен
           </label>
         </div>
         <div className="chat-management__actions">
@@ -816,7 +929,7 @@ function PlacementsTab({
         </div>
       </form>
       <section className="chat-management__card">
-        <h2>Размещения</h2>
+        <h2>Виджеты</h2>
         <ul className="chat-management__list">
           {items.map((item) => (
             <li className="chat-management__list-item" key={item.id}>
@@ -845,10 +958,10 @@ function PlacementsTab({
                   disabled={disabled}
                   onClick={() => void perform(
                     () => placementsApi.remove(item.id),
-                    'Размещение удалено.',
+                    'Виджет удалён.',
                     {
-                      title: 'Удалить размещение?',
-                      description: `Размещение «${item.name}» будет удалено.`,
+                      title: 'Удалить виджет?',
+                      description: `Виджет «${item.name}» будет удалён.`,
                     },
                   )}
                 >
@@ -858,7 +971,7 @@ function PlacementsTab({
             </li>
           ))}
         </ul>
-        {!items.length && <div className="chat-management__empty">Размещений пока нет.</div>}
+        {!items.length && <div className="chat-management__empty">Виджетов пока нет.</div>}
       </section>
     </div>
   )
@@ -877,97 +990,248 @@ function healthLabel(status?: string): { text: string; tone: string } {
   }
 }
 
-function ChannelsTab({ items, disabled, perform }: TabProps & { items: ChatChannel[] }) {
-  const rows = CANONICAL_CHANNELS.map((canonical) => {
+function ChannelsTab({
+  items,
+  placements,
+  disabled,
+  perform,
+}: TabProps & { items: ChatChannel[]; placements: WidgetPlacement[] }) {
+  const [formTarget, setFormTarget] = useState<{
+    kind: 'channel' | 'placement'
+    id: EntityId
+    name: string
+    fields: WidgetFormField[]
+  } | null>(null)
+
+  const messengerRows = CANONICAL_CHANNELS.filter((item) => item.kind !== 'widget').map((canonical) => {
     const existing = items.find((item) => (item.kind ?? item.channel ?? '') === canonical.kind)
     return { ...canonical, existing }
   })
+  const widgetChannel = items.find((item) => (item.kind ?? item.channel ?? '') === 'widget')
+
+  const openChannelForm = (channel: ChatChannel) => {
+    setFormTarget({
+      kind: 'channel',
+      id: channel.id,
+      name: channel.name.replace(/\s*\(demo\)/gi, ''),
+      fields: channel.form_fields?.length
+        ? channel.form_fields
+        : [POPULAR_FORM_FIELDS[0], POPULAR_FORM_FIELDS[2]],
+    })
+  }
+  const openPlacementForm = (placement: WidgetPlacement) => {
+    setFormTarget({
+      kind: 'placement',
+      id: placement.id,
+      name: `Виджет · ${placement.name.replace(/\s*\(demo\)/gi, '')}`,
+      fields: placement.form_fields?.length
+        ? placement.form_fields
+        : [POPULAR_FORM_FIELDS[0], POPULAR_FORM_FIELDS[2]],
+    })
+  }
+  const saveFormFields = async () => {
+    if (!formTarget) return
+    const fields = formTarget.fields
+    await perform(async () => {
+      if (formTarget.kind === 'channel') {
+        await channelsApi.update(formTarget.id, { form_fields: fields })
+      } else {
+        await placementsApi.update(formTarget.id, { form_fields: fields })
+      }
+      setFormTarget(null)
+    }, `Поля формы для «${formTarget.name}» сохранены.`, {
+      title: 'Сохранить поля формы?',
+      description: `Для «${formTarget.name}» будет сохранено ${fields.length} полей.`,
+    })
+  }
 
   return (
-    <section className="chat-management__card" aria-labelledby="channels-heading">
-      <h2 id="channels-heading">Каналы платформы</h2>
-      <ul className="chat-management__list chat-management__channel-list">
-        {rows.map((row) => {
-          const active = row.existing?.is_active === true
-          const health = healthLabel(row.existing?.health_status)
-          const counters = row.existing?.counters
-          return (
-            <li className="chat-management__list-item" key={row.kind}>
-              <header>
-                <div>
-                  <strong>{row.name}</strong>
+    <>
+      <section className="chat-management__card" aria-labelledby="channels-heading">
+        <h2 id="channels-heading">Каналы платформы</h2>
+        <ul className="chat-management__list chat-management__channel-list">
+          {placements.map((placement) => {
+            const active = placement.is_active !== false
+            const health = healthLabel(widgetChannel?.health_status)
+            const counters = placement.counters
+            return (
+              <li className="chat-management__list-item" key={`placement-${placement.id}`}>
+                <header>
+                  <div>
+                    <strong>Виджет · {placement.name}</strong>
+                    <div className="chat-management__muted">{placement.code}</div>
+                  </div>
+                  <span className={`chat-management__pill chat-management__pill--lg ${active ? 'is-success' : 'is-error'}`}>
+                    {active ? 'активен' : 'выключен'}
+                  </span>
+                </header>
+                <div className="chat-management__channel-meta">
+                  <span className={`chat-management__pill ${health.tone}`}>{health.text}</span>
+                  {widgetChannel?.last_health_check_at ? (
+                    <span className="chat-management__muted">
+                      проверка: {new Date(widgetChannel.last_health_check_at).toLocaleString('ru-RU')}
+                    </span>
+                  ) : null}
                 </div>
-                <span className={`chat-management__pill chat-management__pill--lg ${active ? 'is-success' : 'is-error'}`}>
-                  {active ? 'активен' : 'выключен'}
+                <dl className="chat-management__channel-counters">
+                  <div><dt>В очереди</dt><dd>{counters?.waiting ?? 0}</dd></div>
+                  <div><dt>Активные</dt><dd>{counters?.active ?? 0}</dd></div>
+                  <div><dt>Сегодня</dt><dd>{counters?.today ?? 0}</dd></div>
+                  <div><dt>Закрыто сегодня</dt><dd>{counters?.closed_today ?? 0}</dd></div>
+                </dl>
+                <div className="chat-management__actions">
+                  <button className="is-secondary" disabled={disabled} onClick={() => openPlacementForm(placement)}>
+                    Настроить
+                  </button>
+                  <button
+                    className="is-secondary"
+                    disabled={disabled}
+                    onClick={() => void perform(async () => {
+                      const channel = widgetChannel ?? await channelsApi.create({
+                        name: 'Виджет сайта',
+                        kind: 'widget',
+                        is_active: true,
+                        account: 'channel-widget',
+                      })
+                      await channelsApi.checkHealth(channel.id)
+                    }, `Проверка виджета «${placement.name}» выполнена.`)}
+                  >
+                    Проверить соединение
+                  </button>
+                  <button
+                    className={active ? 'is-danger' : 'is-secondary'}
+                    disabled={disabled}
+                    onClick={() => void perform(
+                      () => placementsApi.update(placement.id, { is_active: !active }),
+                      active ? `Виджет «${placement.name}» выключен.` : `Виджет «${placement.name}» включён.`,
+                    )}
+                  >
+                    {active ? 'Выключить' : 'Включить'}
+                  </button>
+                </div>
+              </li>
+            )
+          })}
+          {!placements.length && widgetChannel ? (
+            <li className="chat-management__list-item">
+              <header>
+                <div><strong>Виджет сайта</strong></div>
+                <span className={`chat-management__pill chat-management__pill--lg ${widgetChannel.is_active ? 'is-success' : 'is-error'}`}>
+                  {widgetChannel.is_active ? 'активен' : 'выключен'}
                 </span>
               </header>
-              <div className="chat-management__channel-meta">
-                <span className={`chat-management__pill ${health.tone}`}>{health.text}</span>
-                {row.existing?.last_health_check_at ? (
-                  <span className="chat-management__muted">
-                    проверка: {new Date(row.existing.last_health_check_at).toLocaleString('ru-RU')}
-                  </span>
-                ) : null}
-              </div>
-              <dl className="chat-management__channel-counters">
-                <div>
-                  <dt>В очереди</dt>
-                  <dd>{counters?.waiting ?? 0}</dd>
-                </div>
-                <div>
-                  <dt>Активные</dt>
-                  <dd>{counters?.active ?? 0}</dd>
-                </div>
-                <div>
-                  <dt>Сегодня</dt>
-                  <dd>{counters?.today ?? 0}</dd>
-                </div>
-                <div>
-                  <dt>Закрыто сегодня</dt>
-                  <dd>{counters?.closed_today ?? 0}</dd>
-                </div>
-              </dl>
               <div className="chat-management__actions">
-                <button
-                  className="is-secondary"
-                  disabled={disabled || !row.existing}
-                  onClick={() => void perform(async () => {
-                    if (!row.existing) return
-                    await channelsApi.checkHealth(row.existing.id)
-                  }, `Проверка канала «${row.name}» выполнена.`, {
-                    title: 'Проверить соединение?',
-                    description: `Запустить проверку канала «${row.name}»?`,
-                  })}
-                >
-                  Проверить соединение
-                </button>
-                <button
-                  className={active ? 'is-danger' : 'is-secondary'}
-                  disabled={disabled}
-                  onClick={() => void perform(async () => {
-                    if (row.existing) {
-                      await channelsApi.update(row.existing.id, { is_active: !active })
-                      return
-                    }
-                    await channelsApi.create({
-                      name: row.name,
-                      kind: row.kind,
-                      is_active: true,
-                      account: `channel-${row.kind}`,
-                    })
-                  }, active ? `Канал «${row.name}» выключен.` : `Канал «${row.name}» включён.`, {
-                    title: active ? 'Выключить канал?' : 'Включить канал?',
-                    description: `Канал «${row.name}» будет ${active ? 'выключен' : 'включён'}.`,
-                  })}
-                >
-                  {active ? 'Выключить' : 'Включить'}
+                <button className="is-secondary" disabled={disabled} onClick={() => openChannelForm(widgetChannel)}>
+                  Настроить
                 </button>
               </div>
             </li>
-          )
-        })}
-      </ul>
-    </section>
+          ) : null}
+          {messengerRows.map((row) => {
+            const active = row.existing?.is_active === true
+            const health = healthLabel(row.existing?.health_status)
+            const counters = row.existing?.counters
+            return (
+              <li className="chat-management__list-item" key={row.kind}>
+                <header>
+                  <div>
+                    <strong>{row.name}</strong>
+                  </div>
+                  <span className={`chat-management__pill chat-management__pill--lg ${active ? 'is-success' : 'is-error'}`}>
+                    {active ? 'активен' : 'выключен'}
+                  </span>
+                </header>
+                <div className="chat-management__channel-meta">
+                  <span className={`chat-management__pill ${health.tone}`}>{health.text}</span>
+                  {row.existing?.last_health_check_at ? (
+                    <span className="chat-management__muted">
+                      проверка: {new Date(row.existing.last_health_check_at).toLocaleString('ru-RU')}
+                    </span>
+                  ) : null}
+                </div>
+                <dl className="chat-management__channel-counters">
+                  <div>
+                    <dt>В очереди</dt>
+                    <dd>{counters?.waiting ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt>Активные</dt>
+                    <dd>{counters?.active ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt>Сегодня</dt>
+                    <dd>{counters?.today ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt>Закрыто сегодня</dt>
+                    <dd>{counters?.closed_today ?? 0}</dd>
+                  </div>
+                </dl>
+                <div className="chat-management__actions">
+                  <button
+                    className="is-secondary"
+                    disabled={disabled || !row.existing}
+                    onClick={() => row.existing && openChannelForm(row.existing)}
+                  >
+                    Настроить
+                  </button>
+                  <button
+                    className="is-secondary"
+                    disabled={disabled || !row.existing}
+                    onClick={() => void perform(async () => {
+                      if (!row.existing) return
+                      await channelsApi.checkHealth(row.existing.id)
+                    }, `Проверка канала «${row.name}» выполнена.`, {
+                      title: 'Проверить соединение?',
+                      description: `Запустить проверку канала «${row.name}»?`,
+                    })}
+                  >
+                    Проверить соединение
+                  </button>
+                  <button
+                    className={active ? 'is-danger' : 'is-secondary'}
+                    disabled={disabled}
+                    onClick={() => void perform(async () => {
+                      if (row.existing) {
+                        await channelsApi.update(row.existing.id, { is_active: !active })
+                        return
+                      }
+                      await channelsApi.create({
+                        name: row.name,
+                        kind: row.kind,
+                        is_active: true,
+                        account: `channel-${row.kind}`,
+                      })
+                    }, active ? `Канал «${row.name}» выключен.` : `Канал «${row.name}» включён.`, {
+                      title: active ? 'Выключить канал?' : 'Включить канал?',
+                      description: `Канал «${row.name}» будет ${active ? 'выключен' : 'включён'}.`,
+                    })}
+                  >
+                    {active ? 'Выключить' : 'Включить'}
+                  </button>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      </section>
+
+      {formTarget ? (
+        <div className="chat-management__modal-backdrop" role="dialog" aria-modal="true">
+          <div className="chat-management__card chat-management__modal">
+            <h2>Поля формы · {formTarget.name.replace(/\s*\(demo\)/gi, '')}</h2>
+            <FormFieldsPicker
+              value={formTarget.fields}
+              onChange={(fields) => setFormTarget((current) => (current ? { ...current, fields } : current))}
+            />
+            <div className="chat-management__actions">
+              <button type="button" className="is-secondary" onClick={() => setFormTarget(null)}>Отмена</button>
+              <button type="button" disabled={disabled} onClick={() => void saveFormFields()}>Сохранить</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   )
 }
 
@@ -1099,14 +1363,12 @@ type BotTriggerRow = { id: string; trigger: string; response: string }
 
 function BotsTab({
   items,
-  departments,
   disabled,
   perform,
-}: TabProps & { items: BotConfiguration[]; departments: Department[] }) {
+}: TabProps & { items: BotConfiguration[] }) {
   const [name, setName] = useState('')
-  const [departmentId, setDepartmentId] = useState('')
-  const [welcome, setWelcome] = useState('Здравствуйте! Я виртуальный помощник банка.')
   const [handoff, setHandoff] = useState('Подключаю оператора. Пожалуйста, ожидайте.')
+  const [maxTurns, setMaxTurns] = useState(3)
   const [triggerRows, setTriggerRows] = useState<BotTriggerRow[]>([
     { id: '1', trigger: 'карт', response: 'Уточните, пожалуйста, вопрос по карте.' },
     { id: '2', trigger: 'вклад', response: 'Какой вклад вас интересует?' },
@@ -1123,13 +1385,11 @@ function BotsTab({
       async () => {
         await botsApi.create({
           name,
-          department_id: departmentId,
           is_active: false,
-          welcome_message: welcome,
           fallback_message: handoff,
           handoff_message: handoff,
           trigger_responses: triggerResponses,
-          max_bot_turns: 3,
+          max_bot_turns: maxTurns,
         })
         setName('')
       },
@@ -1148,13 +1408,9 @@ function BotsTab({
         <div className="chat-management__form-grid">
           <label>Название<input required value={name} onChange={(event) => setName(event.target.value)} /></label>
           <label>
-            Отдел
-            <select required value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
-              <option value="">Выберите отдел</option>
-              {departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
+            Максимум ходов
+            <input type="number" min="1" value={maxTurns} onChange={(event) => setMaxTurns(event.target.valueAsNumber || 1)} />
           </label>
-          <label className="is-wide">Приветствие<textarea value={welcome} onChange={(event) => setWelcome(event.target.value)} /></label>
           <label className="is-wide">Передача оператору<textarea value={handoff} onChange={(event) => setHandoff(event.target.value)} /></label>
           <div className="chat-management__field-picker is-wide">
             <div className="chat-management__field-picker-head">
@@ -1218,7 +1474,7 @@ function BotsTab({
           {items.map((item) => (
             <li className="chat-management__list-item" key={item.id}>
               <header>
-                <div><strong>{item.name}</strong><br /><small>{departmentName(item.department_id, departments)}</small></div>
+                <div><strong>{item.name}</strong></div>
                 <span className={`chat-management__pill ${item.is_active ? 'is-success' : 'is-error'}`}>
                   {item.is_active ? 'включён' : 'выключен'}
                 </span>
@@ -1260,6 +1516,235 @@ function BotsTab({
           ))}
         </ul>
         {!items.length && <div className="chat-management__empty">Ботов пока нет.</div>}
+      </section>
+    </div>
+  )
+}
+
+const SEND_PHASE_OPTIONS = [
+  { value: 'before_bot', label: 'До бота' },
+  { value: 'after_bot', label: 'После бота / при эскалации' },
+  { value: 'offline', label: 'Вне графика' },
+] as const
+
+function BaseMessagesTab({
+  items,
+  placements,
+  channels,
+  disabled,
+  perform,
+}: TabProps & {
+  items: BaseMessage[]
+  placements: WidgetPlacement[]
+  channels: ChatChannel[]
+}) {
+  const [sendPhase, setSendPhase] = useState<BaseMessage['send_phase']>('before_bot')
+  const [title, setTitle] = useState('')
+  const [text, setText] = useState('')
+  const [selectedChannels, setSelectedChannels] = useState<string[] | null>(null)
+
+  const channelOptions = [
+    ...placements.map((placement) => ({
+      value: `widget:${placement.id}`,
+      label: `Виджет · ${placement.name}`,
+    })),
+    ...CANONICAL_CHANNELS
+      .filter((canonical) => canonical.kind !== 'widget')
+      .map((canonical) => ({
+        value: canonical.kind,
+        label: channels.find(
+          (channel) => (channel.kind ?? channel.channel) === canonical.kind,
+        )?.name ?? canonical.name,
+      })),
+  ]
+  if (!placements.length && channels.some((channel) => (channel.kind ?? channel.channel) === 'widget')) {
+    channelOptions.unshift({ value: 'widget', label: 'Виджет сайта' })
+  }
+  const selected = selectedChannels ?? channelOptions.map((option) => option.value)
+  const allSelected = channelOptions.length > 0 && selected.length === channelOptions.length
+  const orderedItems = [...items].sort(
+    (left, right) => (left.sort_order ?? 100) - (right.sort_order ?? 100),
+  )
+
+  const toggleChannel = (value: string) => {
+    setSelectedChannels((current) => {
+      const active = current ?? channelOptions.map((option) => option.value)
+      return active.includes(value)
+        ? active.filter((item) => item !== value)
+        : [...active, value]
+    })
+  }
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!selected.length) {
+      window.alert('Выберите хотя бы один канал.')
+      return
+    }
+    await perform(
+      async () => {
+        await baseMessagesApi.create({
+          title: title.trim() || SEND_PHASE_OPTIONS.find((item) => item.value === sendPhase)?.label || '',
+          text,
+          channels: selected,
+          send_phase: sendPhase,
+          sort_order: Math.max(0, ...items.map((item) => item.sort_order ?? 0)) + 10,
+          is_active: true,
+        })
+        setTitle('')
+        setText('')
+      },
+      'Базовое сообщение создано.',
+      {
+        title: 'Создать сообщение?',
+        description: 'Клиенты выбранного канала получат этот текст без участия оператора (если сообщение активно).',
+      },
+    )
+  }
+
+  const moveMessage = (index: number, delta: -1 | 1) => {
+    const targetIndex = index + delta
+    if (targetIndex < 0 || targetIndex >= orderedItems.length) return
+    const reordered = [...orderedItems]
+    ;[reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]]
+    void perform(
+      () => Promise.all(reordered.map((message, position) => (
+        baseMessagesApi.update(message.id, { sort_order: (position + 1) * 10 })
+      ))),
+      'Приоритет сообщений обновлён.',
+    )
+  }
+
+  return (
+    <div className="chat-management__split">
+      <form className="chat-management__card" onSubmit={(event) => void submit(event)}>
+        <h2>Новое базовое сообщение</h2>
+        <p className="chat-management__muted">
+          Приветствия, сообщения вне графика и срочные оповещения
+        </p>
+        <div className="chat-management__form-grid">
+          <label>
+            Этап отправки
+            <select
+              value={sendPhase}
+              onChange={(event) => setSendPhase(event.target.value as BaseMessage['send_phase'])}
+            >
+              {SEND_PHASE_OPTIONS.map((item) => (
+                <option key={item.value} value={item.value}>{item.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>Название<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Например: Сбой оплаты" /></label>
+          <div className="chat-management__field-picker is-wide">
+            <div className="chat-management__field-picker-head">
+              <strong>Каналы</strong>
+            </div>
+            <label className="chat-management__check">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={() => setSelectedChannels(allSelected
+                  ? []
+                  : channelOptions.map((option) => option.value))}
+              />
+              Все каналы
+            </label>
+            {channelOptions.map((option) => (
+              <label className="chat-management__check" key={option.value}>
+                <input
+                  type="checkbox"
+                  checked={selected.includes(option.value)}
+                  onChange={() => toggleChannel(option.value)}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+          <label className="is-wide">
+            Текст
+            <textarea required value={text} onChange={(event) => setText(event.target.value)} rows={4} />
+          </label>
+        </div>
+        <div className="chat-management__actions">
+          <button disabled={disabled}>Создать сообщение</button>
+        </div>
+      </form>
+      <section className="chat-management__card">
+        <h2>Базовые сообщения</h2>
+        <ul className="chat-management__list">
+          {orderedItems.map((item, index) => (
+            <li className="chat-management__list-item" key={item.id}>
+              <header>
+                <div>
+                  <strong>{item.title || SEND_PHASE_OPTIONS.find((option) => option.value === item.send_phase)?.label}</strong>
+                  <br />
+                  <small>
+                    {SEND_PHASE_OPTIONS.find((option) => option.value === item.send_phase)?.label ?? item.send_phase}
+                    {' · '}
+                    {(item.channels?.length
+                      ? item.channels.map((value) => (
+                        channelOptions.find((option) => option.value === value)?.label ?? value
+                      )).join(', ')
+                      : 'Все каналы')}
+                  </small>
+                </div>
+                <span className={`chat-management__pill ${item.is_active ? 'is-success' : 'is-error'}`}>
+                  {item.is_active ? 'активно' : 'выключено'}
+                </span>
+              </header>
+              <p>{item.text}</p>
+              <div className="chat-management__actions">
+                <button
+                  type="button"
+                  className="is-secondary"
+                  disabled={disabled || index === 0}
+                  aria-label={`Повысить приоритет ${item.title}`}
+                  onClick={() => moveMessage(index, -1)}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="is-secondary"
+                  disabled={disabled || index === orderedItems.length - 1}
+                  aria-label={`Понизить приоритет ${item.title}`}
+                  onClick={() => moveMessage(index, 1)}
+                >
+                  ↓
+                </button>
+                <button
+                  className="is-secondary"
+                  disabled={disabled}
+                  onClick={() => void perform(
+                    () => baseMessagesApi.update(item.id, { is_active: !item.is_active }),
+                    'Статус сообщения обновлён.',
+                    {
+                      title: item.is_active ? 'Выключить сообщение?' : 'Включить сообщение?',
+                      description: `Сообщение «${item.title || item.send_phase}» будет ${item.is_active ? 'выключено' : 'включено'}.`,
+                    },
+                  )}
+                >
+                  {item.is_active ? 'Выключить' : 'Включить'}
+                </button>
+                <button
+                  className="is-danger"
+                  disabled={disabled}
+                  onClick={() => void perform(
+                    () => baseMessagesApi.remove(item.id),
+                    'Сообщение удалено.',
+                    {
+                      title: 'Удалить сообщение?',
+                      description: 'Сообщение будет удалено без восстановления.',
+                    },
+                  )}
+                >
+                  Удалить
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+        {!items.length && <div className="chat-management__empty">Базовых сообщений пока нет.</div>}
       </section>
     </div>
   )

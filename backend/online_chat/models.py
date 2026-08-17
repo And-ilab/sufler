@@ -178,11 +178,17 @@ class BotConfiguration(models.Model):
     name = models.CharField(max_length=160)
     department = models.ForeignKey(
         Department,
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="bots",
     )
     is_active = models.BooleanField(default=False, db_index=True)
     welcome_message = models.TextField(blank=True, default="")
+    offline_message = models.TextField(
+        blank=True,
+        default="Сейчас операторы недоступны. Оставьте сообщение.",
+    )
     fallback_message = models.TextField(
         blank=True,
         default="Передаю обращение оператору.",
@@ -198,6 +204,52 @@ class BotConfiguration(models.Model):
 
     class Meta:
         ordering = ("name",)
+
+
+class BaseMessage(models.Model):
+    """Channel-level client messages without an operator (welcome / offline / broadcast)."""
+
+    class MessageType(models.TextChoices):
+        WELCOME = "welcome", "Приветствие"
+        OFFLINE = "offline", "Вне графика"
+        BROADCAST = "broadcast", "Оповещение"
+
+    class SendPhase(models.TextChoices):
+        BEFORE_BOT = "before_bot", "До бота"
+        AFTER_BOT = "after_bot", "После бота / при эскалации"
+        OFFLINE = "offline", "Вне графика"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message_type = models.CharField(
+        max_length=32,
+        choices=MessageType.choices,
+        default=MessageType.WELCOME,
+        db_index=True,
+    )
+    title = models.CharField(max_length=160, blank=True, default="")
+    text = models.TextField()
+    channel = models.CharField(max_length=32, blank=True, default="")
+    channels = models.JSONField(default=list, blank=True)
+    send_phase = models.CharField(
+        max_length=32,
+        choices=SendPhase.choices,
+        default=SendPhase.BEFORE_BOT,
+        db_index=True,
+    )
+    sort_order = models.IntegerField(default=100, db_index=True)
+    placement = models.ForeignKey(
+        WidgetPlacement,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="base_messages",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("sort_order", "created_at")
 
 
 class Dialog(models.Model):
@@ -514,6 +566,34 @@ class AssignmentSettings(models.Model):
     @classmethod
     def get_solo(cls) -> AssignmentSettings:
         obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+
+class ServiceLevelSettings(models.Model):
+    """Singleton SLA targets for online-chat (admin-configurable)."""
+
+    DEFAULT_FIRST_RESPONSE_SECONDS = 120
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    first_response_seconds = models.PositiveIntegerField(
+        default=DEFAULT_FIRST_RESPONSE_SECONDS,
+        help_text="Целевое время первого ответа оператора, секунды",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Service level settings"
+        verbose_name_plural = "Service level settings"
+
+    def __str__(self) -> str:
+        return f"sla:first_response={self.first_response_seconds}s"
+
+    @classmethod
+    def get_solo(cls) -> ServiceLevelSettings:
+        obj, _ = cls.objects.get_or_create(
+            pk=1,
+            defaults={"first_response_seconds": cls.DEFAULT_FIRST_RESPONSE_SECONDS},
+        )
         return obj
 
 

@@ -54,6 +54,7 @@ export interface WidgetPlacement {
   theme_accent: string
   form_fields: WidgetFormField[]
   is_active?: boolean
+  counters?: ChannelCounters
 }
 
 export interface ChannelCounters {
@@ -75,6 +76,21 @@ export interface ChatChannel {
   health_status?: string
   last_health_check_at?: string | null
   counters?: ChannelCounters
+  form_fields?: WidgetFormField[]
+  config?: Record<string, unknown>
+}
+
+export interface BaseMessage {
+  id: EntityId
+  message_type?: 'welcome' | 'offline' | 'broadcast' | string
+  title: string
+  text: string
+  channel?: string
+  channels: string[]
+  send_phase: 'before_bot' | 'after_bot' | 'offline'
+  sort_order: number
+  placement_id?: EntityId | null
+  is_active: boolean
 }
 
 export interface RoutingRule {
@@ -92,9 +108,10 @@ export interface RoutingRule {
 export interface BotConfiguration {
   id: EntityId
   name: string
-  department_id: EntityId
+  department_id?: EntityId | null
   is_active: boolean
-  welcome_message: string
+  welcome_message?: string
+  offline_message?: string
   fallback_message: string
   handoff_message: string
   trigger_responses: Record<string, string>
@@ -113,6 +130,8 @@ export interface SupervisorKpis {
 
 export interface SupervisorOperator extends ChatOperator {
   load?: number
+  closed_today?: number
+  avg_first_response_seconds?: number | null
 }
 
 export interface SupervisorQueue {
@@ -261,6 +280,7 @@ export const channelsApi = {
 }
 export const routingRulesApi = resourceApi<RoutingRule>('routing-rules', 'routing_rule', true)
 export const botsApi = resourceApi<BotConfiguration>('bots', 'bot', true)
+export const baseMessagesApi = resourceApi<BaseMessage>('base-messages', 'base_message', true)
 
 export async function getSupervisorOverview(): Promise<SupervisorOverview> {
   return request<SupervisorOverview>('supervisor/overview/')
@@ -317,6 +337,23 @@ export async function getInternalUnreadCount(operatorName: string): Promise<{
     unread_count: body.unread_count ?? 0,
     operator_id: body.operator_id ?? null,
   }
+}
+
+export async function getSlaSettings(): Promise<{ first_response_seconds: number; updated_at?: string }> {
+  const body = await request<{ ok: boolean; settings: { first_response_seconds: number; updated_at?: string } }>(
+    'sla-settings/',
+  )
+  return body.settings
+}
+
+export async function updateSlaSettings(
+  firstResponseSeconds: number,
+): Promise<{ first_response_seconds: number; updated_at?: string }> {
+  const body = await request<{ ok: boolean; settings: { first_response_seconds: number; updated_at?: string } }>(
+    'sla-settings/',
+    { method: 'PATCH', ...json({ first_response_seconds: firstResponseSeconds }) },
+  )
+  return body.settings
 }
 
 export async function runRouting(): Promise<JsonObject> {

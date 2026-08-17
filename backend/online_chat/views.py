@@ -26,6 +26,7 @@ from auth.roles import (
 )
 from online_chat.models import (
     AssignmentSettings,
+    BaseMessage,
     BotConfiguration,
     ChannelConnection,
     ClientBlock,
@@ -36,6 +37,7 @@ from online_chat.models import (
     InternalMessage,
     OperatorProfile,
     RoutingRule,
+    ServiceLevelSettings,
     SuflerHintFeedback,
     WidgetPlacement,
     normalize_phone,
@@ -568,6 +570,41 @@ def dialog_close(request: HttpRequest, dialog_id: str) -> HttpResponse:
 
 @csrf_exempt
 @require_http_methods(["GET", "PUT", "PATCH"])
+@_chat_permissions(PERM_CC_ADMIN)
+def sla_settings(request: HttpRequest) -> HttpResponse:
+    settings_obj = ServiceLevelSettings.get_solo()
+    if request.method == "GET":
+        return JsonResponse(
+            {
+                "ok": True,
+                "settings": {
+                    "first_response_seconds": settings_obj.first_response_seconds,
+                    "updated_at": settings_obj.updated_at.isoformat(),
+                },
+            }
+        )
+    try:
+        payload = _json_body(request)
+        seconds = _int_field(payload, "first_response_seconds")
+        if seconds < 15 or seconds > 3600:
+            raise OnlineChatApiError("first_response_seconds must be between 15 and 3600")
+        settings_obj.first_response_seconds = seconds
+        settings_obj.save(update_fields=["first_response_seconds", "updated_at"])
+        return JsonResponse(
+            {
+                "ok": True,
+                "settings": {
+                    "first_response_seconds": settings_obj.first_response_seconds,
+                    "updated_at": settings_obj.updated_at.isoformat(),
+                },
+            }
+        )
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "PUT", "PATCH"])
 def assignment_settings(request: HttpRequest) -> HttpResponse:
     settings_obj = AssignmentSettings.get_solo()
     if request.method == "GET":
@@ -834,6 +871,7 @@ def _operator_dict(item: OperatorProfile) -> dict[str, Any]:
         str(value) for value in item.departments.values_list("id", flat=True)
     ]
     first_department = item.departments.order_by("priority", "name").first()
+    is_operator = item.role == OperatorProfile.Role.OPERATOR
     return {
         "id": str(item.id), "external_id": item.external_id,
         "display_name": item.display_name, "email": item.email, "role": item.role,
@@ -846,8 +884,12 @@ def _operator_dict(item: OperatorProfile) -> dict[str, Any]:
         "name": item.display_name,
         "username": item.external_id,
         "capacity": item.max_active_dialogs,
-        "department_id": str(first_department.id) if first_department else None,
-        "department_name": first_department.name if first_department else "",
+        "department_id": (
+            str(first_department.id) if first_department and is_operator else None
+        ),
+        "department_name": (
+            first_department.name if first_department and is_operator else ""
+        ),
         "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat(),
     }
 
@@ -868,6 +910,7 @@ def _placement_dict(item: WidgetPlacement, *, public: bool = False) -> dict[str,
         data.update({
             "id": str(item.id), "created_at": item.created_at.isoformat(),
             "updated_at": item.updated_at.isoformat(),
+            "counters": _channel_counters("widget", widget_id=item.widget_id),
         })
     return data
 
@@ -890,10 +933,12 @@ def _safe_config(value: object) -> object:
     return value
 
 
-def _channel_counters(channel: str) -> dict[str, int]:
+def _channel_counters(channel: str, *, widget_id: str = "") -> dict[str, int]:
 
     today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
     qs = Dialog.objects.filter(channel=channel)
+    if channel == "widget" and widget_id:
+        qs = qs.filter(widget_id=widget_id)
     return {
         "waiting": qs.filter(status=Dialog.Status.WAITING).count(),
         "active": qs.filter(status=Dialog.Status.ACTIVE).count(),
@@ -906,6 +951,9 @@ def _channel_counters(channel: str) -> dict[str, int]:
 
 def _channel_dict(item: ChannelConnection) -> dict[str, Any]:
     safe_config = _safe_config(item.config)
+    form_fields = []
+    if isinstance(safe_config, dict) and isinstance(safe_config.get("form_fields"), list):
+        form_fields = safe_config.get("form_fields") or []
     return {
         "id": str(item.id), "channel": item.channel, "name": item.name,
         "kind": item.channel,
@@ -913,6 +961,7 @@ def _channel_dict(item: ChannelConnection) -> dict[str, Any]:
         "account": item.external_id,
         "department_id": str(item.department_id) if item.department_id else None,
         "is_active": item.is_active, "config": safe_config,
+        "form_fields": form_fields,
         "endpoint": safe_config.get("endpoint", "") if isinstance(safe_config, dict) else "",
         "configured": bool(item.external_id or item.config),
         "health_status": item.health_status,
@@ -942,9 +991,10 @@ def _bot_dict(item: BotConfiguration) -> dict[str, Any]:
     return {
         "id": str(item.id),
         "name": item.name,
-        "department_id": str(item.department_id),
+        "department_id": str(item.department_id) if item.department_id else None,
         "is_active": item.is_active,
         "welcome_message": item.welcome_message,
+        "offline_message": item.offline_message,
         "fallback_message": item.fallback_message,
         "trigger_responses": item.trigger_responses,
         "max_bot_turns": item.max_bot_turns,
@@ -962,15 +1012,16 @@ def _bot_values(
     for field in (
         "name",
         "welcome_message",
+        "offline_message",
         "fallback_message",
         "handoff_message",
     ):
         if field in data:
             setattr(item, field, _str_field(data, field))
     if "department_id" in data:
-        item.department = get_object_or_404(
-            Department,
-            pk=data["department_id"],
+        department_id = data.get("department_id")
+        item.department = (
+            get_object_or_404(Department, pk=department_id) if department_id else None
         )
     if "trigger_responses" in data:
         item.trigger_responses = _json_field(
@@ -983,10 +1034,163 @@ def _bot_values(
         item.max_bot_turns = _int_field(data, "max_bot_turns")
     if "is_active" in data:
         item.is_active = _bool_field(data, "is_active")
-    if not item.name or not item.department_id:
-        raise OnlineChatApiError("name and department_id are required")
+    if not item.name:
+        raise OnlineChatApiError("name is required")
     item.save()
     return item
+
+
+def _base_message_dict(item: BaseMessage) -> dict[str, Any]:
+    return {
+        "id": str(item.id),
+        "message_type": item.message_type,
+        "title": item.title,
+        "text": item.text,
+        "channel": item.channel,
+        "channels": item.channels,
+        "send_phase": item.send_phase,
+        "sort_order": item.sort_order,
+        "placement_id": str(item.placement_id) if item.placement_id else None,
+        "is_active": item.is_active,
+        "created_at": item.created_at.isoformat(),
+        "updated_at": item.updated_at.isoformat(),
+    }
+
+
+def _sync_base_message_targets(item: BaseMessage) -> None:
+    """Keep widget/channel runtime fields in sync with base messages."""
+    targets = [str(value) for value in (item.channels or []) if str(value)]
+    if not targets:
+        if item.placement_id:
+            targets = [f"widget:{item.placement_id}"]
+        elif item.channel:
+            targets = [item.channel]
+
+    placement_ids = [
+        value.removeprefix("widget:")
+        for value in targets
+        if value.startswith("widget:")
+    ]
+    includes_all_widgets = not targets or "widget" in targets
+    placement_qs = WidgetPlacement.objects.filter(is_active=True)
+    if placement_ids and not includes_all_widgets:
+        placement_qs = placement_qs.filter(pk__in=placement_ids)
+
+    field = ""
+    if item.send_phase == BaseMessage.SendPhase.BEFORE_BOT:
+        field = "welcome_message"
+    elif item.send_phase == BaseMessage.SendPhase.OFFLINE:
+        field = "offline_message"
+    if field and (includes_all_widgets or placement_ids):
+        placement_qs.update(**{field: item.text})
+
+    if item.send_phase == BaseMessage.SendPhase.OFFLINE:
+        connection_qs = ChannelConnection.objects.all()
+        selected_channels = [value for value in targets if not value.startswith("widget:")]
+        if targets and selected_channels:
+            connection_qs = connection_qs.filter(channel__in=selected_channels)
+        elif targets and not includes_all_widgets:
+            connection_qs = connection_qs.none()
+        for connection in connection_qs:
+            config = dict(connection.config or {})
+            config["offline_message"] = item.text
+            connection.config = config
+            connection.save(update_fields=["config", "updated_at"])
+
+
+def _base_message_values(
+    data: Mapping[str, Any],
+    item: BaseMessage | None = None,
+) -> BaseMessage:
+    is_new = item is None
+    item = item or BaseMessage()
+    if "message_type" in data or item.message_type == "":
+        message_type = _str_field(data, "message_type", item.message_type or "welcome")
+        if message_type not in BaseMessage.MessageType.values:
+            raise OnlineChatApiError("invalid message_type")
+        item.message_type = message_type
+        if "send_phase" not in data:
+            item.send_phase = {
+                BaseMessage.MessageType.WELCOME: BaseMessage.SendPhase.BEFORE_BOT,
+                BaseMessage.MessageType.OFFLINE: BaseMessage.SendPhase.OFFLINE,
+                BaseMessage.MessageType.BROADCAST: BaseMessage.SendPhase.AFTER_BOT,
+            }[message_type]
+    if "title" in data:
+        item.title = _str_field(data, "title")
+    if "text" in data:
+        item.text = _str_field(data, "text")
+    if "channel" in data:
+        item.channel = _str_field(data, "channel")
+    if "channels" in data:
+        channels = _json_field(data, "channels", list, [])
+        if any(not isinstance(value, str) or not value.strip() for value in channels):
+            raise OnlineChatApiError("channels must contain non-empty strings")
+        item.channels = list(dict.fromkeys(value.strip() for value in channels))
+    if "send_phase" in data:
+        send_phase = _str_field(data, "send_phase")
+        if send_phase not in BaseMessage.SendPhase.values:
+            raise OnlineChatApiError("invalid send_phase")
+        item.send_phase = send_phase
+        item.message_type = {
+            BaseMessage.SendPhase.BEFORE_BOT: BaseMessage.MessageType.WELCOME,
+            BaseMessage.SendPhase.OFFLINE: BaseMessage.MessageType.OFFLINE,
+            BaseMessage.SendPhase.AFTER_BOT: BaseMessage.MessageType.BROADCAST,
+        }[send_phase]
+    if "sort_order" in data:
+        item.sort_order = _int_field(data, "sort_order")
+    if "placement_id" in data:
+        placement_id = data.get("placement_id")
+        item.placement = (
+            get_object_or_404(WidgetPlacement, pk=placement_id) if placement_id else None
+        )
+    if "is_active" in data:
+        item.is_active = _bool_field(data, "is_active")
+    if not item.text:
+        raise OnlineChatApiError("text is required")
+    if not item.message_type:
+        raise OnlineChatApiError("message_type is required")
+    item.save()
+    sync_fields = {
+        "message_type",
+        "send_phase",
+        "text",
+        "channel",
+        "channels",
+        "placement_id",
+        "is_active",
+    }
+    if item.is_active and (is_new or sync_fields.intersection(data)):
+        _sync_base_message_targets(item)
+    return item
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+@_chat_permissions(PERM_CC_ADMIN)
+def base_messages_collection(request: HttpRequest) -> HttpResponse:
+    if request.method == "GET":
+        items = [_base_message_dict(item) for item in BaseMessage.objects.all()]
+        return JsonResponse({"ok": True, "items": items, "count": len(items)})
+    try:
+        item = _base_message_values(_json_body(request))
+        return JsonResponse({"ok": True, "base_message": _base_message_dict(item)}, status=201)
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["PATCH", "DELETE"])
+@_chat_permissions(PERM_CC_ADMIN)
+def base_message_detail(request: HttpRequest, item_id: str) -> HttpResponse:
+    item = get_object_or_404(BaseMessage, pk=item_id)
+    if request.method == "DELETE":
+        item.delete()
+        return JsonResponse({"ok": True})
+    try:
+        item = _base_message_values(_json_body(request), item)
+        return JsonResponse({"ok": True, "base_message": _base_message_dict(item)})
+    except OnlineChatApiError as exc:
+        return _error(exc)
 
 
 @csrf_exempt
@@ -1251,6 +1455,11 @@ def _channel_values(data: Mapping[str, Any], item: ChannelConnection | None = No
         raise OnlineChatApiError("invalid channel")
     if "config" in data:
         item.config = _json_field(data, "config", dict, {})
+    if "form_fields" in data:
+        config = dict(item.config or {})
+        fields = data.get("form_fields")
+        config["form_fields"] = fields if isinstance(fields, list) else []
+        item.config = config
     if "endpoint" in data:
         config = dict(item.config or {})
         config["endpoint"] = _str_field(data, "endpoint")
@@ -1396,7 +1605,7 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
         max(0, int((now - item.created_at).total_seconds())) for item in waiting_dialogs
     ]
     average_wait = round(sum(wait_seconds) / len(wait_seconds)) if wait_seconds else 0
-    sla_window = timedelta(seconds=120)
+    sla_window = timedelta(seconds=ServiceLevelSettings.get_solo().first_response_seconds)
     answered = list(
         Dialog.objects.filter(
             first_response_at__isnull=False,
@@ -1414,10 +1623,33 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
     operators = []
     for item in OperatorProfile.objects.prefetch_related("departments"):
         data = _operator_dict(item)
-        data["active_dialogs"] = Dialog.objects.filter(
+        active_dialogs = Dialog.objects.filter(
             operator=item, status=Dialog.Status.ACTIVE
         ).count()
-        data["load"] = data["active_dialogs"]
+        closed_today = Dialog.objects.filter(
+            operator=item,
+            status=Dialog.Status.CLOSED,
+            closed_at__gte=today_start,
+        ).count()
+        answered_today = list(
+            Dialog.objects.filter(
+                operator=item,
+                first_response_at__isnull=False,
+                first_response_at__gte=today_start,
+            ).only("created_at", "first_response_at")[:500]
+        )
+        response_secs = [
+            (row.first_response_at - row.created_at).total_seconds()
+            for row in answered_today
+            if row.first_response_at and row.created_at
+        ]
+        avg_first_response = (
+            round(sum(response_secs) / len(response_secs)) if response_secs else None
+        )
+        data["active_dialogs"] = active_dialogs
+        data["load"] = active_dialogs
+        data["closed_today"] = closed_today
+        data["avg_first_response_seconds"] = avg_first_response
         operators.append(data)
 
     queues = []

@@ -431,9 +431,7 @@ function App() {
       ? 'asr-qa' as const
       : route.includes('/live')
         ? 'live' as const
-        : route.includes('/builder')
-          ? 'builder' as const
-          : 'overview' as const
+        : 'overview' as const
     return (
       <AiHubReportsApp
         username={auth.username ?? undefined}
@@ -467,7 +465,7 @@ function App() {
             </Button>
             <Button
               variant="ghost"
-              onClick={() => window.location.assign('/ai-hub/reports/builder')}
+              onClick={() => window.location.assign('/ai-hub/reports?builder=1')}
             >
               Конструктор
             </Button>

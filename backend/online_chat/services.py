@@ -18,6 +18,7 @@ from audit.service import emit
 from online_chat.mail import send_dialog_transcript
 from online_chat.models import (
     AssignmentSettings,
+    BaseMessage,
     BotConfiguration,
     ClientBlock,
     Dialog,
@@ -25,6 +26,7 @@ from online_chat.models import (
     DialogMessage,
     DialogTranscriptEmail,
     OperatorProfile,
+    WidgetPlacement,
     format_phone_e164,
     normalize_phone,
 )
@@ -43,30 +45,92 @@ logger = logging.getLogger(__name__)
 ARM_GROUP = "online_chat_arm"
 
 
-def _active_bot(dialog: Dialog) -> BotConfiguration | None:
-    if not dialog.department_id:
-        return None
-    return (
-        BotConfiguration.objects.filter(
-            department_id=dialog.department_id,
-            is_active=True,
+def _active_bot_for_department(department_id: object | None) -> BotConfiguration | None:
+    if department_id:
+        department_bot = (
+            BotConfiguration.objects.filter(department_id=department_id, is_active=True)
+            .order_by("created_at")
+            .first()
         )
+        if department_bot:
+            return department_bot
+    return (
+        BotConfiguration.objects.filter(department__isnull=True, is_active=True)
         .order_by("created_at")
         .first()
     )
 
 
+def _active_bot(dialog: Dialog) -> BotConfiguration | None:
+    return _active_bot_for_department(dialog.department_id)
+
+
 def _create_bot_message(dialog: Dialog, text: str) -> DialogMessage:
+    delivery_status = DialogMessage.ChannelDeliveryStatus.NOT_REQUIRED
+    if dialog.channel != "widget":
+        delivery_status = DialogMessage.ChannelDeliveryStatus.PENDING
     message = DialogMessage.objects.create(
         dialog=dialog,
         speaker=DialogMessage.Speaker.BOT,
         text=text,
         receipt_status=DialogMessage.ReceiptStatus.DELIVERED,
+        channel_delivery_status=delivery_status,
     )
     payload = serialize_message(message)
     broadcast(dialog_group(str(dialog.id)), "message.created", payload)
     broadcast(ARM_GROUP, "message.created", payload)
+    if delivery_status == DialogMessage.ChannelDeliveryStatus.PENDING:
+        from online_chat.tasks import deliver_channel_message
+
+        try:
+            deliver_channel_message.delay(str(message.id))
+        except Exception:  # noqa: BLE001 — broker down: deliver inline
+            deliver_channel_message(str(message.id))
     return message
+
+
+def _base_message_matches(
+    message: BaseMessage,
+    dialog: Dialog,
+    placement_config: WidgetPlacement | None = None,
+) -> bool:
+    targets = [str(value) for value in (message.channels or []) if str(value)]
+    if not targets:
+        if message.placement_id:
+            targets = [f"widget:{message.placement_id}"]
+        elif message.channel:
+            targets = [message.channel]
+        else:
+            return True
+
+    if dialog.channel in targets:
+        return True
+    if dialog.channel != "widget":
+        return False
+    placement_config = placement_config or WidgetPlacement.objects.filter(
+        widget_id=dialog.widget_id
+    ).first()
+    return bool(
+        placement_config
+        and f"widget:{placement_config.id}" in targets
+    )
+
+
+def _send_base_messages(
+    dialog: Dialog,
+    phase: str,
+    placement_config: WidgetPlacement | None = None,
+) -> int:
+    sent = 0
+    messages = BaseMessage.objects.filter(
+        is_active=True,
+        send_phase=phase,
+    ).order_by("sort_order", "created_at")
+    for message in messages:
+        if _base_message_matches(message, dialog, placement_config):
+            _create_bot_message(dialog, message.text)
+            sent += 1
+    return sent
 
 
 def _handle_bot_turn(dialog: Dialog, client_text: str) -> None:
@@ -93,6 +157,7 @@ def _handle_bot_turn(dialog: Dialog, client_text: str) -> None:
                 "updated_at",
             ]
         )
+        _send_base_messages(dialog, BaseMessage.SendPhase.AFTER_BOT)
         _create_bot_message(
             dialog,
             bot.handoff_message or bot.fallback_message,
@@ -375,13 +440,7 @@ def create_dialog_with_message(
     queue_full = department_queue_is_full(department)
     if queue_full:
         routing_reason = f"{routing_reason};queue_full"
-    bot = (
-        BotConfiguration.objects.filter(department=department, is_active=True)
-        .order_by("created_at")
-        .first()
-        if department
-        else None
-    )
+    bot = _active_bot_for_department(department.id if department else None)
     now = timezone.now()
     dialog = Dialog.objects.create(
         widget_id=widget_id,
@@ -419,7 +478,12 @@ def create_dialog_with_message(
         text=text.strip(),
         channel_delivery_status=delivery_status,
     )
-    if bot and bot.welcome_message:
+    base_messages_sent = _send_base_messages(
+        dialog,
+        BaseMessage.SendPhase.BEFORE_BOT,
+        placement_config,
+    )
+    if not base_messages_sent and bot and bot.welcome_message:
         _create_bot_message(dialog, bot.welcome_message)
     record_event(
         dialog,
