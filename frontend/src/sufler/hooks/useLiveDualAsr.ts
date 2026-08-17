@@ -13,6 +13,7 @@ interface SpeechRecognitionLike {
   onresult: ((event: SpeechRecognitionEventLike) => void) | null
   onerror: ((event: { error?: string }) => void) | null
   onend: (() => void) | null
+  onspeechstart: (() => void) | null
 }
 
 interface SpeechRecognitionEventLike {
@@ -147,8 +148,15 @@ export interface LiveDualAsrState {
   micSpeaker: DualSpeaker
   systemSpeaker: DualSpeaker
   status: string
+  caption: string
   error: string
   systemCapture: boolean
+}
+
+function isInsecureRemoteOrigin(): boolean {
+  if (window.isSecureContext) return false
+  const host = window.location.hostname
+  return host !== 'localhost' && host !== '127.0.0.1'
 }
 
 export function useLiveDualAsr(
@@ -161,6 +169,7 @@ export function useLiveDualAsr(
     micSpeaker: 'client',
     systemSpeaker: 'operator',
     status: '',
+    caption: '',
     error: '',
     systemCapture: false,
   })
@@ -170,6 +179,8 @@ export function useLiveDualAsr(
   const onUtteranceRef = useRef(onUtterance)
   onUtteranceRef.current = onUtterance
   const cleanupRef = useRef<(() => void) | null>(null)
+  const finalizeTimerRef = useRef<number | null>(null)
+  const lastInterimRef = useRef('')
 
   const setPartial = useCallback((patch: Partial<LiveDualAsrState>) => {
     setState((current) => ({ ...current, ...patch }))
@@ -187,12 +198,17 @@ export function useLiveDualAsr(
 
   const stop = useCallback(() => {
     recordingRef.current = false
+    if (finalizeTimerRef.current != null) {
+      window.clearTimeout(finalizeTimerRef.current)
+      finalizeTimerRef.current = null
+    }
     cleanupRef.current?.()
     cleanupRef.current = null
     setPartial({
       recording: false,
       micLevel: 0,
       systemLevel: 0,
+      caption: '',
       status: 'Запись остановлена',
     })
   }, [setPartial])
@@ -200,41 +216,76 @@ export function useLiveDualAsr(
   const start = useCallback(async () => {
     if (recordingRef.current) return
     recordingRef.current = true
+
+    let micStream: MediaStream
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+        video: false,
+      })
+    } catch {
+      setPartial({ error: 'Нет доступа к микрофону. Разрешите его в браузере.' })
+      recordingRef.current = false
+      return
+    }
+
+    const insecure = isInsecureRemoteOrigin()
     const Recognition = speechCtor()
     const recognition = Recognition ? new Recognition() : null
+    const emitHeard = (text: string, isFinal: boolean) => {
+      const cleaned = text.trim()
+      if (!cleaned) return
+      setPartial({ caption: cleaned })
+      onUtteranceRef.current(micSpeakerRef.current, cleaned, isFinal)
+    }
     if (recognition) {
       recognition.lang = 'ru-RU'
       recognition.continuous = true
       recognition.interimResults = true
       recognition.onresult = (event) => {
-        let transcript = ''
-        let isFinal = false
-        for (let index = event.resultIndex; index < event.results.length; index += 1) {
-          const result = event.results[index]
-          transcript += result[0].transcript
-          isFinal = result.isFinal
-        }
-        const text = transcript.trim()
+        const result = event.results[event.results.length - 1]
+        const alternative = result?.[0]
+        const text = String(alternative?.transcript || '').trim()
         if (!text) return
-        onUtteranceRef.current(micSpeakerRef.current, text, isFinal)
+        lastInterimRef.current = text
+        const isFinal = Boolean(result?.isFinal)
+        emitHeard(text, isFinal)
+        if (finalizeTimerRef.current != null) {
+          window.clearTimeout(finalizeTimerRef.current)
+        }
+        if (!isFinal) {
+          finalizeTimerRef.current = window.setTimeout(() => {
+            const pending = lastInterimRef.current.trim()
+            if (pending) emitHeard(pending, true)
+            lastInterimRef.current = ''
+          }, 1200)
+        } else {
+          lastInterimRef.current = ''
+        }
+      }
+      recognition.onspeechstart = () => {
+        setPartial({ status: 'Слышу речь — ждите паузу, текст появится в ленте.' })
       }
       recognition.onerror = (event) => {
         if (event.error === 'no-speech' || event.error === 'aborted') return
         setPartial({
           error: '',
           status:
-            event.error === 'network' || event.error === 'service-not-allowed'
-              ? 'Облачное распознавание недоступно. Говорите паузами — отправим на локальный STT, либо введите реплику.'
+            event.error === 'network' || event.error === 'service-not-allowed' || insecure
+              ? `Chrome не отдаёт текст по HTTP (${window.location.host}). В chrome://flags найдите unsafely-treat-insecure-origin-as-secure, добавьте ${window.location.origin}, перезапустите Chrome. Пока введите реплику в поле.`
               : `Микрофон: ${event.error || 'ошибка распознавания'}`,
         })
       }
       recognition.onend = () => {
         if (recordingRef.current) {
-          try {
-            recognition.start()
-          } catch {
-            /* Chrome throws if start() races */
-          }
+          window.setTimeout(() => {
+            if (!recordingRef.current) return
+            try {
+              recognition.start()
+            } catch {
+              /* Chrome throws if start() races */
+            }
+          }, 200)
         }
       }
       try {
@@ -244,29 +295,15 @@ export function useLiveDualAsr(
       }
     }
 
-    let micStream: MediaStream
-    try {
-      micStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-        video: false,
-      })
-    } catch {
-      try {
-        recognition?.stop()
-      } catch {
-        /* ignore */
-      }
-      setPartial({ error: 'Нет доступа к микрофону. Разрешите его в браузере.' })
-      recordingRef.current = false
-      return
-    }
-
     setPartial({
       recording: true,
       error: '',
-      status: Recognition
-        ? 'Говорите в микрофон. Клиент пишется в ленту, подсказки — через DeepSeek.'
-        : 'Говорите паузами или введите реплику — облачного распознавания в этом браузере нет.',
+      caption: '',
+      status: insecure
+        ? `Микрофон включён, но Chrome по HTTP не пишет речь в страницу. Добавьте ${window.location.origin} в chrome://flags/#unsafely-treat-insecure-origin-as-secure и перезапустите Chrome — либо введите реплику в поле.`
+        : Recognition
+          ? 'Говорите в микрофон и сделайте паузу — текст должен появиться в ленте.'
+          : 'Говорите паузами или введите реплику — облачного распознавания в этом браузере нет.',
       systemCapture: false,
     })
 
@@ -289,65 +326,6 @@ export function useLiveDualAsr(
       },
     )
 
-    let systemStream: MediaStream | null = null
-    let systemContext: AudioContext | null = null
-    let systemCapture: { stop: () => void } | null = null
-
-    const attachSystem = async () => {
-      try {
-        systemStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-          },
-        })
-      } catch {
-        setPartial({
-          status: 'Микрофон пишется. Системный звук не выбран — в Chrome отметьте «Также системный звук».',
-        })
-        return
-      }
-      const audioTracks = systemStream.getAudioTracks()
-      if (!audioTracks.length) {
-        systemStream.getTracks().forEach((track) => track.stop())
-        systemStream = null
-        setPartial({
-          status: 'Микрофон пишется. В окне шаринга включите «Также системный звук».',
-        })
-        return
-      }
-      systemContext = new AudioContext({ sampleRate: 16000 })
-      void systemContext.resume()
-      systemCapture = attachPcmUtterances(
-        systemContext,
-        systemStream,
-        recordingRef,
-        (level) => setState((current) => ({ ...current, systemLevel: level })),
-        (wav) => {
-          const speaker = systemSpeakerRef.current
-          void transcribeUtterance(wav, speaker)
-            .then((text) => {
-              if (text) onUtteranceRef.current(speaker, text, true)
-            })
-            .catch((error: unknown) => {
-              setPartial({
-                error: error instanceof Error ? error.message : 'Системный звук не распознан',
-              })
-            })
-        },
-      )
-      systemStream.getVideoTracks().forEach((track) => {
-        track.enabled = false
-      })
-      setPartial({
-        systemCapture: true,
-        status: 'Два канала: микрофон и системный звук пишутся отдельно.',
-      })
-    }
-    void attachSystem()
-
     cleanupRef.current = () => {
       try {
         if (recognition) {
@@ -358,11 +336,8 @@ export function useLiveDualAsr(
         /* already stopped */
       }
       micCapture.stop()
-      systemCapture?.stop()
       micStream.getTracks().forEach((track) => track.stop())
-      systemStream?.getTracks().forEach((track) => track.stop())
       void micContext.close()
-      void systemContext?.close()
     }
   }, [setPartial])
 

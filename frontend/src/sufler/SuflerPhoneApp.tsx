@@ -284,9 +284,11 @@ export function SuflerPhoneApp({
           })}
           {!blocks.length && (
             <Card className="sufler-phone__empty">
-              {live.recording
-                ? 'Говорите паузами или введите реплику клиента внизу — она появится в ленте.'
-                : 'Нажмите «Начать имитацию»: микрофон — клиент, системный звук — оператор. Реплика клиента уходит в DeepSeek и собирает подсказки.'}
+              {live.caption
+                ? `Слышу: ${live.caption}`
+                : live.recording
+                  ? 'Говорите паузами или введите реплику клиента внизу — она появится в ленте.'
+                  : 'Нажмите «Начать имитацию»: микрофон — клиент. Реплика клиента уходит в DeepSeek и собирает подсказки.'}
             </Card>
           )}
         </section>
@@ -302,7 +304,9 @@ export function SuflerPhoneApp({
       <footer className="sufler-phone__footer">
         <span>
           {live.recording
-            ? live.status || 'Имитация разговора'
+            ? live.caption
+              ? `Слышу: ${live.caption}`
+              : live.status || 'Имитация разговора'
             : connected
               ? 'ASR активен · '
               : ''}
