@@ -18,6 +18,7 @@ import {
   markDialogRead,
   maskPhone,
   onlineChatArmWsUrl,
+  reportSuflerOutage,
   sendOperatorMessage,
   slaToneFromSeconds,
   submitSuflerHintFeedback,
@@ -35,6 +36,8 @@ import {
 import {
   getInternalUnreadCount,
   operatorsApi,
+  getWorkScheduleStatus,
+  controlWorkDay,
   type ChatOperator,
 } from '../api/managementApi'
 import {
@@ -295,7 +298,7 @@ const ARM_MENU_ITEMS: {
     id: "colleagues",
     label: "Диалоги коллег",
     hint: "Просмотр без ответа",
-    roles: ["operator", "supervisor"],
+    roles: ["supervisor"],
     contexts: ["operate", "view"],
   },
   {
@@ -524,6 +527,10 @@ type QueueItem = {
   needsReply?: boolean;
   isTestClient?: boolean;
   entryUrl?: string;
+  unreadCount?: number;
+  clientFields?: { label: string; value: string }[];
+  outcome?: string;
+  routingReason?: string;
 };
 
 function liveWaitSeconds(item: QueueItem, nowMs: number): number | null {
@@ -640,6 +647,9 @@ function dialogToQueueItem(
     refCode: dialogRefCode(dialog),
     needsReply,
     entryUrl: dialog.entry_url || undefined,
+    clientFields: dialog.client_fields || [],
+    outcome: dialog.outcome || undefined,
+    routingReason: dialog.routing_reason || undefined,
   };
 }
 
@@ -829,7 +839,7 @@ type QueueSectionDef = {
 };
 
 const QUEUE_SECTIONS: QueueSectionDef[] = [
-  { id: "waiting", title: "Ожидают ответа", count: 3, items: QUEUE, defaultExpanded: true },
+  // «Ожидают ответа» объединены с «В диалоге со мной» — непрочитанные показываем бейджем.
   { id: "mine", title: "В диалоге со мной", count: 2, items: MY_DIALOGUES, defaultExpanded: true },
   { id: "initiated", title: "Инициированные мной", count: 1, items: INITIATED_QUEUE, defaultExpanded: false },
   { id: "offline", title: "Офлайн", count: 1, items: OFFLINE_QUEUE, defaultExpanded: false },
@@ -846,15 +856,14 @@ const COLLEAGUES_SECTION: QueueSectionDef = {
 };
 
 function queueSectionsForRole(role: ArmRole): QueueSectionDef[] {
-  // «Общая очередь» всегда последняя; «Диалоги коллег» — после «В диалоге со мной».
+  // «Общая очередь» всегда последняя; «Диалоги коллег» — только супервизор.
   const withoutShared = QUEUE_SECTIONS.filter((section) => section.id !== "shared");
   const shared = QUEUE_SECTIONS.find((section) => section.id === "shared")!;
-  if (role === "operator" || role === "supervisor" || role === "admin") {
+  if (role === "supervisor") {
     return [
       withoutShared[0],
-      withoutShared[1],
       COLLEAGUES_SECTION,
-      ...withoutShared.slice(2),
+      ...withoutShared.slice(1),
       shared,
     ];
   }
@@ -1080,7 +1089,7 @@ function AutoFadeNotice({
 }: {
   message: string;
   onDone?: () => void;
-  tone?: "success" | "info" | "warning";
+  tone?: "success" | "info" | "warning" | "danger";
   style?: CSSProperties;
 }): JSX.Element {
   const [hiding, setHiding] = useState(false);
@@ -1148,7 +1157,7 @@ function ComposerOverlayNotices({
   notices,
   placement = "above",
 }: {
-  notices: Array<{ id: string; message: string; tone?: "success" | "info" | "warning"; onDone?: () => void }>;
+  notices: Array<{ id: string; message: string; tone?: "success" | "info" | "warning" | "danger"; onDone?: () => void }>;
   placement?: "above" | "bottom";
 }): JSX.Element | null {
   if (notices.length === 0) return null;
@@ -1384,6 +1393,93 @@ type SuflerHintData = {
   highlighted?: boolean;
 };
 
+/** Sufler found nothing usable in the knowledge base (non-bank chit-chat or no source). */
+const SUFLER_NO_KNOWLEDGE_MESSAGE =
+  "Информации для ответа на данный вопрос нет в базе знаний.";
+/** Sufler itself is down (exception / timeout / empty index) — offer to report. */
+const SUFLER_UNAVAILABLE_MESSAGE = "Ошибка, суфлёр недоступен.";
+
+/** Demo-only: which simulator test client should showcase the outage + report flow. */
+const DEMO_SUFLER_OUTAGE_CLIENT_NUMBER = 2;
+
+/**
+ * Wait this long after the last client message before asking the sufler. Lets a
+ * question typed as several single-word messages get batched into one query
+ * without noticeably delaying the hint for normal single-message questions.
+ */
+const SUFLER_FRAGMENT_DEBOUNCE_MS = 1400;
+
+const SHOW_WORKDAY_DEMO = import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1';
+
+function isSheipaOperator(name: string): boolean {
+  return name.trim().startsWith('Шейпа');
+}
+
+/** Demo leftovers / offline-widget clients reserved for Sheipa ARM. */
+function isSheipaReservedDialog(dialog: {
+  routing_reason?: string;
+  outcome?: string;
+}): boolean {
+  const reason = dialog.routing_reason || "";
+  return reason.includes("offline_demo") || reason.includes("sheipa_demo");
+}
+
+function isSheipaReservedQueueItem(item: {
+  routingReason?: string;
+  outcome?: string;
+  result?: string;
+}): boolean {
+  const reason = item.routingReason || "";
+  return reason.includes("offline_demo") || reason.includes("sheipa_demo");
+}
+
+function sheipaDemoQueueSort(
+  a: { routingReason?: string; outcome?: string },
+  b: { routingReason?: string; outcome?: string },
+): number {
+  const aOff = (a.routingReason || "").includes("offline_demo") || a.outcome === "offline";
+  const bOff = (b.routingReason || "").includes("offline_demo") || b.outcome === "offline";
+  if (aOff === bOff) return 0;
+  return aOff ? 1 : -1;
+}
+
+function testClientNumber(item: { lastName?: string; name?: string } | null | undefined): number | null {
+  if (!item) return null;
+  const fromLast = (item.lastName || "").trim();
+  if (/^\d+$/.test(fromLast)) return Number(fromLast);
+  const match = (item.name || "").match(/(\d+)/);
+  return match ? Number(match[1]) : null;
+}
+
+function isSuflerChitChat(text: string): boolean {
+  const cleaned = text.trim().toLowerCase().replace(/[.!?…,]/g, "");
+  if (!cleaned) return true;
+  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  if (tokens.length > 4) return false;
+  const chitChat = new Set([
+    "спасибо",
+    "спасибо большое",
+    "благодарю",
+    "ок",
+    "окей",
+    "хорошо",
+    "понял",
+    "поняла",
+    "ясно",
+    "ага",
+    "угу",
+    "да",
+    "нет",
+    "все",
+    "всё",
+    "все спасибо",
+    "всё спасибо",
+    "хорошо спасибо",
+    "спасибо большое",
+  ]);
+  return chitChat.has(cleaned) || tokens.every((token) => chitChat.has(token));
+}
+
 function mapApiHintToCard(hint: SuflerHint, index: number): SuflerHintData {
   const citation = hint.citations?.[0];
   const title = citation?.title?.trim() || `Подсказка ${hint.rank || index + 1}`;
@@ -1420,6 +1516,7 @@ type ClientInfoData = {
   device: string;
   email: string;
   channel: string;
+  fields?: { label: string; value: string }[];
 };
 
 const ACTIVE_CLIENT: ClientInfoData = {
@@ -1546,6 +1643,18 @@ function ClientInfoCard({
               <ClientInfoField t={t} label="Браузер / устройство" value={`${client.browser} · ${client.device}`} />
               <ClientInfoField t={t} label="Канал" value={client.channel} />
               <ClientInfoField t={t} label="E-mail" value={client.email} />
+              {client.fields && client.fields.length > 0
+                ? client.fields
+                    .filter((item) => !/e-?mail|почт/i.test(item.label))
+                    .map((item, index) => (
+                      <ClientInfoField
+                        key={`${item.label}-${index}`}
+                        t={t}
+                        label={item.label}
+                        value={item.value}
+                      />
+                    ))
+                : null}
               <ClientInfoField t={t} label="Телефон">
                 <Row style={{ gap: 6, alignItems: "center", marginTop: 2, flexWrap: "wrap" }}>
                   <Text style={{ fontSize: 12 }}>{phoneRevealed ? client.phoneFull : client.phoneMasked}</Text>
@@ -1638,7 +1747,7 @@ function SuflerHintCard({
           ) : null}
           <Row gap={6} wrap>
             <Button
-              variant={isExpanded || hint.highlighted ? "primary" : "secondary"}
+              variant="primary"
               size="sm"
               onClick={(e) => {
                 e.stopPropagation();
@@ -2128,7 +2237,8 @@ function QueueSectionHeader({
   t,
   scheme: _scheme,
   title,
-  count,
+  count: _count,
+  unreadTotal = 0,
   expanded,
   onToggle,
 }: {
@@ -2136,6 +2246,7 @@ function QueueSectionHeader({
   scheme: SchemePalette;
   title: string;
   count: number;
+  unreadTotal?: number;
   expanded: boolean;
   onToggle: () => void;
 }): JSX.Element {
@@ -2174,8 +2285,31 @@ function QueueSectionHeader({
           {expanded ? "▼" : "▶"}
         </Text>
         <Text weight="semibold" style={{ fontSize: 12, color: t.text.primary, textAlign: "left" }}>
-          {title} ({count})
+          {title}
         </Text>
+        {unreadTotal > 0 ? (
+          <span
+            aria-label={`Непрочитанных: ${unreadTotal}`}
+            style={{
+              display: "inline-grid",
+              placeItems: "center",
+              minWidth: 18,
+              height: 18,
+              padding: "0 5px",
+              borderRadius: 999,
+              background: "#007A43",
+              color: "#fff",
+              fontSize: 11,
+              fontWeight: 700,
+              fontVariantNumeric: "tabular-nums",
+              lineHeight: 1,
+              boxShadow: "0 0 0 2px rgba(0,122,67,0.25)",
+              animation: "oc-unread-pulse 1.6s ease-in-out infinite",
+            }}
+          >
+            {unreadTotal > 99 ? "99+" : unreadTotal}
+          </span>
+        ) : null}
       </Row>
     </button>
   );
@@ -2384,17 +2518,41 @@ function QueueCard({
           />
         )}
         <div style={{ minWidth: 0, flex: 1 }}>
-          <Text
-            weight="semibold"
-            style={{
-              fontSize: 13,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {item.name}
-          </Text>
+          <Row style={{ gap: 6, alignItems: "center", minWidth: 0 }}>
+            <Text
+              weight="semibold"
+              style={{
+                fontSize: 13,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                minWidth: 0,
+              }}
+            >
+              {item.name}
+            </Text>
+            {item.unreadCount && item.unreadCount > 0 && !selected ? (
+              <span
+                aria-label={`Непрочитанных: ${item.unreadCount}`}
+                style={{
+                  flexShrink: 0,
+                  minWidth: 18,
+                  height: 18,
+                  padding: "0 5px",
+                  borderRadius: 999,
+                  background: scheme.badge,
+                  color: "#fff",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  display: "inline-grid",
+                  placeItems: "center",
+                  lineHeight: 1,
+                }}
+              >
+                {item.unreadCount > 99 ? "99+" : item.unreadCount}
+              </span>
+            ) : null}
+          </Row>
           {item.operatorName ? (
             <Text style={{ fontSize: 11, color: t.text.secondary, marginTop: 2 }}>{item.operatorName}</Text>
           ) : null}
@@ -2527,6 +2685,7 @@ function MessageBubble({
   onQuote,
   onEdit,
   onDelete,
+  isHistory,
 }: {
   t: ArmTheme;
   scheme: SchemePalette;
@@ -2546,6 +2705,7 @@ function MessageBubble({
   onQuote?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  isHistory?: boolean;
 }): JSX.Element {
   if (side === "system") {
     return (
@@ -2555,6 +2715,7 @@ function MessageBubble({
           fontSize: 11,
           color: t.text.tertiary,
           padding: "8px 0",
+          opacity: isHistory ? 0.85 : 1,
         }}
       >
         {text}
@@ -2591,7 +2752,7 @@ function MessageBubble({
           display: "flex",
           flexDirection: "column",
           gap: 0,
-          opacity: isDeleted ? 0.65 : 1,
+          opacity: isDeleted || isHistory ? 0.65 : 1,
         }}
       >
         {label ? (
@@ -2788,30 +2949,50 @@ export function ArmOverlayMenu({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            gap: 10,
-            padding: "14px 16px",
+            gap: 12,
+            padding: "16px 18px 14px",
             background: scheme.headerBg,
-            borderBottom: `1px solid ${scheme.accent}`,
+            borderBottom: `1px solid ${scheme.accentWeak}`,
           }}
         >
-          <div>
-            <Text weight="semibold" style={{ fontSize: 20, letterSpacing: "-0.02em" }}>Меню АРМ</Text>
-          </div>
+          <Text
+            weight="semibold"
+            style={{
+              fontSize: 17,
+              letterSpacing: "-0.03em",
+              color: t.text.primary,
+              lineHeight: 1.2,
+            }}
+          >
+            Меню АРМ
+          </Text>
           <button
             type="button"
             aria-label="Закрыть"
             onClick={onClose}
             style={{
-              width: 32,
-              height: 32,
-              border: `1px solid ${t.stroke.secondary}`,
-              borderRadius: RADIUS_SM,
-              background: t.fill.secondary,
-              color: t.text.secondary,
+              width: 28,
+              height: 28,
+              border: "none",
+              borderRadius: 8,
+              background: "transparent",
+              color: t.text.tertiary,
               cursor: "pointer",
-              fontSize: 18,
+              fontSize: 22,
               lineHeight: 1,
               fontFamily: "inherit",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "background 120ms ease, color 120ms ease",
+            }}
+            onMouseEnter={(event) => {
+              event.currentTarget.style.background = t.fill.tertiary;
+              event.currentTarget.style.color = t.text.primary;
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.background = "transparent";
+              event.currentTarget.style.color = t.text.tertiary;
             }}
           >
             ×
@@ -2969,11 +3150,16 @@ export function ArmOperatorView({
   const [liveOffline, setLiveOffline] = useState<QueueItem[]>([]);
   const [liveClosed, setLiveClosed] = useState<QueueItem[]>([]);
   const [liveInitiated, setLiveInitiated] = useState<QueueItem[]>([]);
+  const [lineOpen, setLineOpen] = useState(true);
+  const [workDayStarted, setWorkDayStarted] = useState(false);
+  const sheipaDemo = SHOW_WORKDAY_DEMO && !viewOnly && isSheipaOperator(operatorName);
+  const demoOfflineArm = sheipaDemo && !workDayStarted;
   const [liveMessages, setLiveMessages] = useState<OnlineChatMessage[]>([]);
   const [clientDraft, setClientDraft] = useState("");
   const [quoteMessage, setQuoteMessage] = useState<OnlineChatMessage | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
-  const [composerTemplates, setComposerTemplates] = useState(() => loadReplyTemplates());
+  const [templateCategory, setTemplateCategory] = useState<string | null>(null);
+  const [composerTemplates, setComposerTemplates] = useState(() => loadReplyTemplates(operatorName));
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [transferTargetKind, setTransferTargetKind] = useState<"operator" | "supervisor">("operator");
   const [transferOperatorName, setTransferOperatorName] = useState("");
@@ -2983,7 +3169,15 @@ export function ArmOperatorView({
   const [suflerQuery, setSuflerQuery] = useState("");
   const [suflerLoading, setSuflerLoading] = useState(false);
   const [suflerError, setSuflerError] = useState("");
+  // Distinguish "not in KB" (calm, no button) from "sufler down" (warning + report button).
+  const [suflerReportVisible, setSuflerReportVisible] = useState(false);
+  const [suflerReportSent, setSuflerReportSent] = useState(false);
+  // Supervisor/admin banner when an operator reports a sufler outage.
+  const [suflerOutageNotice, setSuflerOutageNotice] = useState<
+    { operatorName: string; detail: string; query: string; at: string } | null
+  >(null);
   const [assignmentGraceUntil, setAssignmentGraceUntil] = useState<number | null>(null);
+  const [unreadByDialog, setUnreadByDialog] = useState<Record<string, number>>({});
   const [acceptingDialogId, setAcceptingDialogId] = useState<string | null>(null);
   const [operatorCapacity, setOperatorCapacity] = useState(3);
   const suflerTurnKeyRef = useRef<string>("");
@@ -2997,6 +3191,10 @@ export function ArmOperatorView({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Auto-scroll only when the operator is already near the bottom. Prevents the
+  // periodic queue refresh from yanking the view down while reading history.
+  const isAtBottomRef = useRef(true);
+  const lastDialogIdRef = useRef<string | undefined>(undefined);
   const readMessageIdsRef = useRef<Set<string>>(new Set());
   const selectedQueueRef = useRef(selectedQueue);
   const sharedPeekRef = useRef(false);
@@ -3012,9 +3210,20 @@ export function ArmOperatorView({
     const scroller = messagesScrollRef.current;
     if (scroller) {
       scroller.scrollTo({ top: scroller.scrollHeight, behavior });
+      isAtBottomRef.current = true;
       return;
     }
     messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+    isAtBottomRef.current = true;
+  }, []);
+
+  const handleMessagesScroll = useCallback(() => {
+    const scroller = messagesScrollRef.current;
+    if (!scroller) return;
+    const distanceFromBottom =
+      scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    // Treat "within ~80px of the bottom" as pinned so tiny layout shifts still autoscroll.
+    isAtBottomRef.current = distanceFromBottom <= 80;
   }, []);
 
   const refreshLiveQueues = useCallback(async () => {
@@ -3036,8 +3245,12 @@ export function ArmOperatorView({
       ]);
 
       // Общая очередь — все неназначенные (waiting), и для оператора, и в режиме просмотра.
+      // Офлайн/демо-заглушки Шейпы не показываем обычным операторам.
+      const sharedSource = sheipaDemo
+        ? waiting
+        : waiting.filter((dialog) => !isSheipaReservedDialog(dialog));
       setLiveShared(
-        waiting.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
+        sharedSource.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
       );
 
       if (viewOnly) {
@@ -3066,14 +3279,10 @@ export function ArmOperatorView({
           awaitingReply.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
         );
         setLiveMine(mineIdle.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })));
-        setLiveColleagues(
-          activeDialogs
-            .filter((dialog) => dialog.operator_name && dialog.operator_name !== operatorName)
-            .map((dialog) => ({ ...dialogToQueueItem(dialog), readOnly: true })),
-        );
+        setLiveColleagues([]);
       } else {
         const mineActive = activeDialogs.filter(
-          (dialog) => !dialog.operator_name || dialog.operator_name === operatorName,
+          (dialog) => dialog.operator_name === operatorName,
         );
         // Ожидают ответа — мои active, где последнее сообщение от клиента.
         const awaitingReply = mineActive.filter((dialog) => dialog.needs_reply);
@@ -3083,18 +3292,14 @@ export function ArmOperatorView({
           awaitingReply.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
         );
         setLiveMine(mineIdle.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })));
-
-        setLiveColleagues(
-          activeDialogs
-            .filter((dialog) => dialog.operator_name && dialog.operator_name !== operatorName)
-            .map((dialog) => ({ ...dialogToQueueItem(dialog), readOnly: true })),
-        );
+        // Операторам диалоги коллег недоступны — только супервизору.
+        setLiveColleagues([]);
       }
 
       const offlineMerged = [...offlineWaiting, ...offlineActive];
       const offlineUnique = Array.from(
         new Map(offlineMerged.map((dialog) => [dialog.id, dialog])).values(),
-      );
+      ).filter((dialog) => sheipaDemo || !isSheipaReservedDialog(dialog));
       setLiveOffline(
         offlineUnique.map((dialog) => ({
           ...dialogToQueueItem(dialog),
@@ -3132,7 +3337,26 @@ export function ArmOperatorView({
     } finally {
       setQueuesReady(true);
     }
-  }, [operatorName, viewOnly, armRole]);
+  }, [operatorName, viewOnly, armRole, sheipaDemo]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const syncSchedule = () => {
+      void getWorkScheduleStatus()
+        .then((status) => {
+          if (cancelled) return;
+          setLineOpen(status.is_open);
+          if (status.manual_override === "open") setWorkDayStarted(true);
+        })
+        .catch(() => undefined);
+    };
+    syncSchedule();
+    const timer = window.setInterval(syncSchedule, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     void refreshLiveQueues();
@@ -3163,6 +3387,21 @@ export function ArmOperatorView({
               .then((result) => setInternalUnread(result.unread_count))
               .catch(() => undefined);
           }
+          if (data.type === "sufler.outage") {
+            const notice = (data.payload || {}) as {
+              operator_name?: string;
+              detail?: string;
+              query?: string;
+              reported_at?: string;
+            };
+            setSuflerOutageNotice({
+              operatorName: notice.operator_name || "оператор",
+              detail: notice.detail || "Суфлёр недоступен",
+              query: notice.query || "",
+              at: notice.reported_at || new Date().toISOString(),
+            });
+            return;
+          }
           const dialogId = data.payload?.dialog_id;
           if (data.type === "typing.start") {
             if (
@@ -3192,9 +3431,21 @@ export function ArmOperatorView({
             }
             return;
           }
-          if (dialogId && dialogId !== selectedQueueRef.current) return;
           if (data.type === "message.created" && data.payload?.id) {
             const incoming = data.payload as OnlineChatMessage;
+            const msgDialogId = dialogId || incoming.dialog_id;
+            if (
+              incoming.speaker === "client"
+              && msgDialogId
+              && msgDialogId !== selectedQueueRef.current
+              && !sharedPeekRef.current
+            ) {
+              setUnreadByDialog((prev) => ({
+                ...prev,
+                [msgDialogId]: (prev[msgDialogId] || 0) + 1,
+              }));
+            }
+            if (msgDialogId && msgDialogId !== selectedQueueRef.current) return;
             const withReceipt =
               incoming.receipt_status === "read" ||
               readMessageIdsRef.current.has(incoming.id)
@@ -3208,11 +3459,12 @@ export function ArmOperatorView({
               }
               return [...prev, withReceipt];
             });
-            if (incoming.speaker === "client" && dialogId && !sharedPeekRef.current) {
-              void markDialogRead(dialogId, "operator").catch(() => {});
+            if (incoming.speaker === "client" && msgDialogId && !sharedPeekRef.current) {
+              void markDialogRead(msgDialogId, "operator").catch(() => {});
             }
             return;
           }
+          if (dialogId && dialogId !== selectedQueueRef.current) return;
           if (data.type === "message.updated" && data.payload?.id) {
             const updated = data.payload as OnlineChatMessage;
             setLiveMessages((prev) =>
@@ -3248,15 +3500,47 @@ export function ArmOperatorView({
   const liveMode = queuesReady;
 
   const liveSectionItems: Partial<Record<QueueSectionId, QueueItem[]>> = useMemo(
-    () => ({
-      waiting: liveWaiting,
-      mine: liveMine,
-      colleagues: liveColleagues,
-      offline: liveOffline,
-      closed: liveClosed,
-      shared: liveShared,
-      initiated: liveInitiated,
-    }),
+    () => {
+      const withUnread = (items: QueueItem[]) =>
+        items.map((item) => ({
+          ...item,
+          unreadCount: unreadByDialog[item.id] || (item.needsReply ? 1 : 0) || undefined,
+        }));
+      // waiting (нужен ответ) + mine → одна секция «В диалоге со мной»
+      const mineMerged = withUnread([
+        ...liveWaiting,
+        ...liveMine.filter((item) => !liveWaiting.some((wait) => wait.id === item.id)),
+      ]);
+      const offlineShared = withUnread(
+        liveShared
+          .filter((item) => isSheipaReservedQueueItem(item))
+          .sort(sheipaDemoQueueSort),
+      );
+      if (demoOfflineArm) {
+        // До старта смены: 2 обычных заглушки + 2 офлайн (обычные выше).
+        const preStartQueue = withUnread(
+          [...liveShared].sort(sheipaDemoQueueSort),
+        );
+        return {
+          waiting: [],
+          mine: [],
+          colleagues: [],
+          offline: [],
+          closed: [],
+          shared: preStartQueue.length ? preStartQueue : offlineShared,
+          initiated: [],
+        };
+      }
+      return {
+        waiting: [],
+        mine: mineMerged,
+        colleagues: withUnread(liveColleagues),
+        offline: liveOffline,
+        closed: liveClosed,
+        shared: withUnread(liveShared),
+        initiated: liveInitiated,
+      };
+    },
     [
       liveWaiting,
       liveShared,
@@ -3265,11 +3549,15 @@ export function ArmOperatorView({
       liveOffline,
       liveClosed,
       liveInitiated,
+      unreadByDialog,
+      demoOfflineArm,
     ],
   );
 
   const visibleSections = useMemo(() => {
-    const sections = queueSectionsForRole(armRole);
+    const sections = queueSectionsForRole(armRole).filter((section) => (
+      !demoOfflineArm || section.id === "shared" || section.id === "offline"
+    ));
     return sections.map((section) => {
       const items = liveMode ? (liveSectionItems[section.id] ?? []) : [];
       return {
@@ -3279,7 +3567,7 @@ export function ArmOperatorView({
         defaultExpanded: items.length > 0,
       };
     });
-  }, [armRole, liveMode, liveSectionItems]);
+  }, [armRole, liveMode, liveSectionItems, demoOfflineArm]);
 
   const remainingDialogs = visibleSections
     .flatMap((section) => section.items)
@@ -3320,7 +3608,19 @@ export function ArmOperatorView({
 
   useEffect(() => {
     if (!hasActiveDialog) return;
-    scrollMessagesToEnd(liveMessages.length <= 1 ? "auto" : "smooth");
+    const dialogChanged = lastDialogIdRef.current !== active?.id;
+    if (dialogChanged) {
+      // Switching into a dialog always lands on the latest message.
+      lastDialogIdRef.current = active?.id;
+      isAtBottomRef.current = true;
+      scrollMessagesToEnd("auto");
+      return;
+    }
+    // Otherwise only follow new content when the operator is already at the bottom;
+    // never steal their position while they scroll up to read history.
+    if (isAtBottomRef.current) {
+      scrollMessagesToEnd(liveMessages.length <= 1 ? "auto" : "smooth");
+    }
   }, [liveMessages, clientDraft, active?.id, hasActiveDialog, scrollMessagesToEnd]);
 
   const clientForCard: ClientInfoData = active?.live
@@ -3330,11 +3630,14 @@ export function ArmOperatorView({
         phoneFull: active.phone || "—",
         phoneMasked: active.phone ? maskPhone(active.phone) : "—",
         dialogNo: active.refCode ? `№ ${active.refCode}` : `№ ${dialogRefCode({ id: active.id })}`,
-        email: "—",
+        email:
+          active.clientFields?.find((item) => /e-?mail|почт/i.test(item.label))?.value ||
+          "—",
         channel: active.channel,
         entryPath: active.entryUrl || ACTIVE_CLIENT.entryPath,
         entryChannel: "Виджет сайта",
         visitorId: active.id.slice(0, 12),
+        fields: active.clientFields || [],
       }
     : ACTIVE_CLIENT;
 
@@ -3352,7 +3655,7 @@ export function ArmOperatorView({
     let cancelled = false;
     const dialogId = active.id;
     const peekShared = liveShared.some((item) => item.id === dialogId);
-    void getDialog(dialogId)
+    void getDialog(dialogId, { includeHistory: true })
       .then((dialog) => {
         if (!cancelled) {
           const messages = dialog.messages ?? [];
@@ -3431,124 +3734,168 @@ export function ArmOperatorView({
     };
   }, [active?.id, active?.live, active?.phone]);
 
-  const latestClientMessage = useMemo(() => {
-    return [...liveMessages]
-      .reverse()
-      .find((item) => item.speaker === "client" && item.text.trim()) ?? null;
+  // The "current turn" is the trailing run of consecutive client messages
+  // (after the last operator/bot/system reply). This lets the sufler treat a
+  // question split into single-word messages ("привет" "как открыть" "вклад")
+  // as ONE question, while never looking at older topics from the history.
+  const currentTurn = useMemo(() => {
+    const turn: OnlineChatMessage[] = [];
+    for (let i = liveMessages.length - 1; i >= 0; i -= 1) {
+      const item = liveMessages[i];
+      if (item.is_deleted || item.is_history) continue;
+      if (item.speaker === "client") {
+        if (item.text.trim()) turn.unshift(item);
+        continue;
+      }
+      // Welcome / offline bot notices and system lines must not wipe the current
+      // client question — only an operator reply ends the turn for the sufler.
+      if (item.speaker === "operator") break;
+    }
+    return turn;
   }, [liveMessages]);
 
-  const dialogContextForSufler = useMemo(() => {
-    const lines = liveMessages
-      .filter((item) => !item.is_deleted && item.text.trim())
-      .slice(-12)
-      .map((item) => {
-        const who =
-          item.speaker === "client"
-            ? "Клиент"
-            : item.speaker === "operator"
-              ? "Оператор"
-              : item.speaker === "bot"
-                ? "Бот"
-                : "Система";
-        return `${who}: ${item.text.trim()}`;
-      });
-    return lines.join("\n");
-  }, [liveMessages]);
+  const currentTurnText = useMemo(
+    () =>
+      currentTurn
+        .map((item) => item.text.trim())
+        .filter(Boolean)
+        .join(" "),
+    [currentTurn],
+  );
+  const currentTurnLastId = currentTurn.length
+    ? currentTurn[currentTurn.length - 1].id
+    : "";
+  const currentTurnCount = currentTurn.length;
 
   useEffect(() => {
+    // Sufler ran but has nothing relevant in the KB — calm notice, no report button.
+    const applyNoKnowledge = () => {
+      setLiveSuflerHints([]);
+      setLiveSuflerRaw([]);
+      setSuflerLoading(false);
+      setSuflerReportVisible(false);
+      setSuflerError(SUFLER_NO_KNOWLEDGE_MESSAGE);
+    };
+    // Sufler itself is down — warning + "Сообщить о проблеме".
+    const applyUnavailable = () => {
+      setLiveSuflerHints([]);
+      setLiveSuflerRaw([]);
+      setSuflerLoading(false);
+      setSuflerReportVisible(true);
+      setSuflerError(SUFLER_UNAVAILABLE_MESSAGE);
+    };
+    const applyIdle = () => {
+      setLiveSuflerHints([]);
+      setLiveSuflerRaw([]);
+      setSuflerLoading(false);
+      setSuflerReportVisible(false);
+      setSuflerError("");
+    };
+
     // Sufler is strictly scoped to the active dialog id (no cross-dialog leakage).
     if (!active?.live) {
       suflerTurnKeyRef.current = "";
-      setLiveSuflerHints([]);
-      setLiveSuflerRaw([]);
-      setSuflerError("");
-      setSuflerLoading(false);
+      applyIdle();
       return;
     }
     if (active.isTestClient) {
+      // Demo: one designated test client showcases the outage + report flow;
+      // every other test client shows the ordinary "not in KB" answer.
       suflerTurnKeyRef.current = `${active.id}:test`;
-      setLiveSuflerHints([]);
-      setLiveSuflerRaw([]);
-      setSuflerLoading(false);
-      setSuflerError("Ошибка суфлёра. Повторите попытку позже.");
+      setSuflerReportSent(false);
+      setSuflerQuery(currentTurnText);
+      if (testClientNumber(active) === DEMO_SUFLER_OUTAGE_CLIENT_NUMBER) {
+        applyUnavailable();
+      } else {
+        applyNoKnowledge();
+      }
       return;
     }
-    if (!latestClientMessage) {
+    if (!currentTurnCount || !currentTurnText.trim()) {
       suflerTurnKeyRef.current = "";
-      setLiveSuflerHints([]);
-      setLiveSuflerRaw([]);
-      setSuflerError("");
-      setSuflerLoading(false);
+      applyIdle();
       return;
     }
-    const turnKey = `${active.id}:${latestClientMessage.id}`;
+    // Key includes the fragment count so each new single-word message re-arms
+    // the debounce until the client finishes the current question.
+    const turnKey = `${active.id}:${currentTurnLastId}:${currentTurnCount}`;
     if (suflerTurnKeyRef.current === turnKey) {
       return;
     }
     const requestKey = turnKey;
     suflerTurnKeyRef.current = requestKey;
+    setSuflerReportSent(false);
+    setSuflerReportVisible(false);
     setSuflerLoading(true);
     setSuflerError("");
-    setSuflerQuery(latestClientMessage.text);
-    // Only summary of THIS client identity + transcript of THIS dialog.
-    const historyContext = summaryHistory.summary || "";
-    const timeoutId = window.setTimeout(() => {
-      if (suflerTurnKeyRef.current === requestKey) {
-        setSuflerLoading(false);
-        setSuflerError("Ошибка суфлёра. Повторите попытку позже.");
+    setSuflerQuery(currentTurnText);
+
+    let timeoutId = 0;
+    // Debounce so fragmented single-word messages get batched into one query.
+    const debounceId = window.setTimeout(() => {
+      if (suflerTurnKeyRef.current !== requestKey) return;
+      // Small talk / non-bank: sufler must not react — show "not in KB".
+      if (isSuflerChitChat(currentTurnText)) {
+        applyNoKnowledge();
+        return;
       }
-    }, 25000);
-    void requestSuflerSuggest(latestClientMessage.text, 3, {
-      clientHistory: historyContext,
-      dialogContext: dialogContextForSufler,
-    })
-      .then((result) => {
-        if (suflerTurnKeyRef.current !== requestKey) return;
-        window.clearTimeout(timeoutId);
-        setSuflerRequestId(result.request_id || "");
-        // Extra UI guard: drop anything ≤20% even if backend slips.
-        const usable = (result.hints || []).filter(
-          (hint) => (hint.relevance_percent ?? hint.relevance_score * 100) > 20,
-        );
-        setLiveSuflerRaw(usable);
-        setLiveSuflerHints(usable.map(mapApiHintToCard));
-        if (!usable.length) {
-          setSuflerError(
-            result.blocked_reason === "no_relevant_knowledge"
-              ? "Нет подсказок с релевантностью выше 20% — ответьте вручную."
-              : "Ошибка суфлёра. Повторите попытку позже.",
-          );
-        } else {
-          setSuflerError("");
-        }
-      })
-      .catch((err: unknown) => {
-        if (suflerTurnKeyRef.current !== requestKey) return;
-        window.clearTimeout(timeoutId);
-        setLiveSuflerHints([]);
-        setLiveSuflerRaw([]);
-        setSuflerError(
-          err instanceof Error
-            ? err.message
-            : "Ошибка суфлёра. Повторите попытку позже.",
-        );
-      })
-      .finally(() => {
+      timeoutId = window.setTimeout(() => {
         if (suflerTurnKeyRef.current === requestKey) {
-          window.clearTimeout(timeoutId);
-          setSuflerLoading(false);
+          applyUnavailable();
         }
-      });
+      }, 25000);
+      // Sufler sees ONLY the current question — never the chat history.
+      void requestSuflerSuggest(currentTurnText, 3)
+        .then((result) => {
+          if (suflerTurnKeyRef.current !== requestKey) return;
+          window.clearTimeout(timeoutId);
+          setSuflerRequestId(result.request_id || "");
+          const usable = (result.hints || []).filter(
+            (hint) => (hint.relevance_percent ?? hint.relevance_score * 100) > 20,
+          );
+          if (usable.length) {
+            setLiveSuflerRaw(usable);
+            setLiveSuflerHints(usable.map(mapApiHintToCard));
+            setSuflerReportVisible(false);
+            setSuflerError("");
+          } else if (result.blocked_reason === "sufler_unavailable") {
+            applyUnavailable();
+          } else {
+            // no_relevant_knowledge or only low-relevance hits → nothing in KB.
+            applyNoKnowledge();
+          }
+        })
+        .catch(() => {
+          if (suflerTurnKeyRef.current !== requestKey) return;
+          window.clearTimeout(timeoutId);
+          applyUnavailable();
+        })
+        .finally(() => {
+          if (suflerTurnKeyRef.current === requestKey) {
+            window.clearTimeout(timeoutId);
+            setSuflerLoading(false);
+          }
+        });
+    }, SUFLER_FRAGMENT_DEBOUNCE_MS);
+
     return () => {
+      window.clearTimeout(debounceId);
       window.clearTimeout(timeoutId);
     };
-    // Depend on stable client message id — not liveMessages array identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active?.id, active?.live, active?.isTestClient, latestClientMessage?.id, latestClientMessage?.text]);
+  }, [
+    active?.id,
+    active?.live,
+    active?.isTestClient,
+    currentTurnLastId,
+    currentTurnCount,
+    currentTurnText,
+  ]);
 
   useEffect(() => {
     if (assignmentGraceUntil == null) return;
     setGraceNoticeDismissed(false);
+    setExpandedSections((prev) => ({ ...prev, shared: true }));
     if (assignmentGraceUntil <= Date.now()) {
       setAssignmentGraceUntil(null);
       return;
@@ -3562,8 +3909,28 @@ export function ArmOperatorView({
     return () => window.clearInterval(timer);
   }, [assignmentGraceUntil, refreshLiveQueues]);
 
+  const handleReportSuflerOutage = useCallback(() => {
+    if (suflerReportSent) return;
+    setSuflerReportSent(true);
+    void reportSuflerOutage({
+      dialog_id: active?.id,
+      operator_name: operatorName,
+      query: suflerQuery,
+      detail: suflerError || SUFLER_UNAVAILABLE_MESSAGE,
+    }).catch(() => {
+      // Allow retry if the notification failed to reach the backend.
+      setSuflerReportSent(false);
+    });
+  }, [suflerReportSent, active?.id, operatorName, suflerQuery, suflerError]);
+
   const handleSelectQueue = (id: string) => {
     onSelectQueue(id);
+    setUnreadByDialog((prev) => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     const section = findSectionForQueueItem(id, visibleSections);
     if (section?.id === "colleagues") {
       onViewModeChange("colleague");
@@ -3576,6 +3943,7 @@ export function ArmOperatorView({
   const [leftWidth, setLeftWidth] = useState(ARM_LEFT_WIDTH_DEFAULT);
   const [rightWidth, setRightWidth] = useState(ARM_RIGHT_WIDTH_DEFAULT);
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [canvasBuild, setCanvasBuild] = useState("");
   const [statsDrawerOpenLocal, setStatsDrawerOpenLocal] = useState(false);
   const statsDrawerOpen = statsDrawerOpenProp ?? statsDrawerOpenLocal;
@@ -3586,14 +3954,25 @@ export function ArmOperatorView({
     },
     [onStatsDrawerOpenChange],
   );
-  const [statsTab, setStatsTab] = useState<ArmStatsTab>("dialogs");
+  const [statsTab, setStatsTab] = useState<ArmStatsTab>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("historyDialog") || params.get("historyOperator")) return "history";
+    } catch {
+      /* ignore */
+    }
+    return "dialogs";
+  });
   const [internalUnread, setInternalUnread] = useState(0);
 
   useEffect(() => {
     if (canvasBuild !== CANVAS_MOCKUP_VERSION) {
       setCanvasBuild(CANVAS_MOCKUP_VERSION);
       setStatsDrawerOpen(false);
-      setStatsTab("dialogs");
+      const params = new URLSearchParams(window.location.search);
+      if (!(params.get("historyDialog") || params.get("historyOperator"))) {
+        setStatsTab("dialogs");
+      }
     }
   }, [canvasBuild, setCanvasBuild, setStatsDrawerOpen, setStatsTab]);
 
@@ -3626,6 +4005,14 @@ export function ArmOperatorView({
   const [expandedClientCard, setExpandedClientCard] = useState(false);
   const [expandedSummaryCard, setExpandedSummaryCard] = useState(false);
   const [composerNotice, setComposerNotice] = useState<string | null>(null);
+  const [composerNoticeTone, setComposerNoticeTone] = useState<"success" | "info" | "warning" | "danger">("success");
+  const pushComposerNotice = (
+    message: string,
+    tone: "success" | "info" | "warning" | "danger" = "success",
+  ) => {
+    setComposerNoticeTone(tone);
+    setComposerNotice(message);
+  };
   const [graceNoticeDismissed, setGraceNoticeDismissed] = useState(false);
   const [aiImproveModal, setAiImproveModal] = useState<AiImproveModalState | null>(null);
   const [closeDialogConfirmOpen, setCloseDialogConfirmOpen] = useState(false);
@@ -3691,7 +4078,10 @@ export function ArmOperatorView({
     viewMode,
   ]);
 
-  const clearComposerNotice = () => setComposerNotice(null);
+  const clearComposerNotice = () => {
+    setComposerNotice(null);
+    setComposerNoticeTone("success");
+  };
 
   const visibleQueueSections = visibleSections.map((section) => {
     const items = section.items.filter((item) => !closedDialogIds[item.id]);
@@ -3716,7 +4106,7 @@ export function ArmOperatorView({
     const topic = closeTopic.trim();
     if (!topic) {
       setCloseDialogConfirmOpen(false);
-      setComposerNotice("Выберите тематику закрытия перед завершением диалога.");
+      pushComposerNotice("Выберите тематику закрытия перед завершением диалога.", "danger");
       return;
     }
     const closingId = active.id;
@@ -3733,47 +4123,65 @@ export function ArmOperatorView({
     if (wasLive) {
       void closeDialogRemote(closingId, topic)
         .then((result) => {
+          // Trust server grace window — it already checks capacity / mode.
           if (result.assignment_grace_until) {
             const until = Date.parse(result.assignment_grace_until);
             if (!Number.isNaN(until)) {
               setAssignmentGraceUntil(until);
             }
+          } else {
+            setAssignmentGraceUntil(null);
           }
           void refreshLiveQueues();
         })
         .catch(() => {
-          setComposerNotice("Не удалось закрыть диалог на сервере. Попробуйте ещё раз.");
+          setClosedDialogIds((prev) => {
+            const next = { ...prev };
+            delete next[closingId];
+            return next;
+          });
+          pushComposerNotice("Не удалось закрыть диалог на сервере. Попробуйте ещё раз.", "danger");
         });
     }
+    onCloseTopicChange("");
     const nextDialog = remainingDialogs.find((item) => item.id !== closingId);
     if (nextDialog) {
       onSelectQueue(nextDialog.id);
-      setComposerNotice(`Диалог с ${closedName} закрыт · ${topic}.`);
+      pushComposerNotice(`Диалог с ${closedName} закрыт · ${topic}.`);
     } else {
       onSelectQueue("");
-      setComposerNotice(`Диалог закрыт · ${topic}. Очередь пуста — можно взять из общей очереди.`);
+      pushComposerNotice(`Диалог закрыт · ${topic}. Очередь пуста — можно взять из общей очереди.`);
     }
   };
 
   const handleAcceptSharedDialog = (dialogId?: string, clientName?: string) => {
     const id = dialogId || active?.id;
     if (!id || acceptingDialogId || viewOnly) return;
+    if (demoOfflineArm || !lineOpen) {
+      pushComposerNotice(
+        demoOfflineArm
+          ? "До начала рабочего дня диалоги брать нельзя."
+          : "Сейчас нерабочее время. Диалоги копятся в очереди.",
+        "danger",
+      );
+      return;
+    }
     if (atCapacity) {
-      setComposerNotice(`Лимит диалогов ${myActiveCount}/${operatorCapacity}. Освободите слот, чтобы взять ещё.`);
+      pushComposerNotice(`Лимит диалогов ${myActiveCount}/${operatorCapacity}. Освободите слот, чтобы взять ещё.`);
       return;
     }
     setAcceptingDialogId(id);
-    void acceptDialog(id, actingName)
+    void acceptDialog(id, operatorName)
       .then(() => {
         setAssignmentGraceUntil(null);
         onSelectQueue(id);
         onViewModeChange("active");
-        setComposerNotice(`Диалог с ${clientName || active?.name || "клиентом"} принят.`);
+        pushComposerNotice(`Диалог с ${clientName || active?.name || "клиентом"} принят.`);
         void refreshLiveQueues();
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : "Не удалось принять диалог";
-        setComposerNotice(message);
+        pushComposerNotice(message, "danger");
       })
       .finally(() => setAcceptingDialogId(null));
   };
@@ -3782,12 +4190,12 @@ export function ArmOperatorView({
     if (!active?.live || !canTakeOverDialog) return;
     void transferDialogRemote(active.id, actingName, active.operatorName || "")
       .then(() => {
-        setComposerNotice(`Диалог с ${active.name} взят на себя.`);
+        pushComposerNotice(`Диалог с ${active.name} взят на себя.`);
         window.location.assign("/online-chat");
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : "Не удалось взять диалог";
-        setComposerNotice(message);
+        pushComposerNotice(message, "danger");
       });
   };
 
@@ -3803,7 +4211,7 @@ export function ArmOperatorView({
         .then(() => void refreshLiveQueues())
         .catch(() => {});
     }
-    setComposerNotice(`Клиент ${active.name} заблокирован.`);
+    pushComposerNotice(`Клиент ${active.name} заблокирован.`);
   };
 
   const deliverReply = (notice: string) => {
@@ -3838,7 +4246,7 @@ export function ArmOperatorView({
           onReplyChange("");
           setPendingAttachment(null);
           setQuoteMessage(null);
-          setComposerNotice(
+          pushComposerNotice(
             file
               ? text
                 ? `Файл «${file.name}» и сообщение отправлены.`
@@ -3848,14 +4256,17 @@ export function ArmOperatorView({
           void refreshLiveQueues();
         })
         .catch(() => {
-          setComposerNotice(file ? "Не удалось отправить файл." : "Не удалось отправить сообщение.");
+          pushComposerNotice(
+            file ? "Не удалось отправить файл." : "Не удалось отправить сообщение.",
+            "danger",
+          );
         });
       return;
     }
     onReplyChange("");
     setPendingAttachment(null);
     setQuoteMessage(null);
-    setComposerNotice(notice);
+    pushComposerNotice(notice);
   };
 
   const transferOperatorsOnly = useMemo(
@@ -3941,7 +4352,7 @@ export function ArmOperatorView({
     assignmentGraceUntil != null
       ? Math.max(0, Math.ceil((assignmentGraceUntil - nowMs) / 1000))
       : 0;
-  const showGraceNotice = graceSecondsLeft > 0 && !graceNoticeDismissed;
+  const showGraceTimer = graceSecondsLeft > 0;
 
   const showTakeToolbarButton =
     !!active?.live &&
@@ -3970,16 +4381,13 @@ export function ArmOperatorView({
   };
 
   const overlayNotices = [
-    ...(showGraceNotice
-      ? [{
-          id: "grace",
-          message: `У вас ${graceSecondsLeft} сек., чтобы вручную выбрать диалог из общей очереди. Затем следующий будет назначен автоматически.`,
-          tone: "info" as const,
-          onDone: () => setGraceNoticeDismissed(true),
-        }]
-      : []),
     ...(composerNotice
-      ? [{ id: "composer", message: composerNotice, tone: "success" as const, onDone: clearComposerNotice }]
+      ? [{
+          id: "composer",
+          message: composerNotice,
+          tone: composerNoticeTone,
+          onDone: clearComposerNotice,
+        }]
       : []),
     ...(toast
       ? [{ id: "toast", message: toast, tone: "success" as const, onDone: onClearToast }]
@@ -4000,11 +4408,11 @@ export function ArmOperatorView({
     else onSelectQueue("");
     void transferDialogRemote(transferredId, toName, operatorName)
       .then(async () => {
-        setComposerNotice(`Диалог с ${transferredName} переведён на ${toName}.`);
+        pushComposerNotice(`Диалог с ${transferredName} переведён на ${toName}.`);
         await refreshLiveQueues();
       })
       .catch(() => {
-        setComposerNotice("Не удалось перевести диалог.");
+        pushComposerNotice("Не удалось перевести диалог.", "danger");
         onSelectQueue(transferredId);
       });
   };
@@ -4012,14 +4420,14 @@ export function ArmOperatorView({
   const handleDownloadAttachment = (message: OnlineChatMessage) => {
     if (!active?.id || !message.attachment_name) return;
     void downloadAttachment(active.id, message.id, message.attachment_name).catch(() => {
-      setComposerNotice("Не удалось скачать файл.");
+      pushComposerNotice("Не удалось скачать файл.", "danger");
     });
   };
 
   const handleFilePick = (file: File) => {
     if (!active?.live || composerLocked) return;
     setPendingAttachment(file);
-    setComposerNotice(`Файл «${file.name}» прикреплён. Напишите сообщение при необходимости и нажмите «Отправить».`);
+    pushComposerNotice(`Файл «${file.name}» прикреплён. Напишите сообщение при необходимости и нажмите «Отправить».`);
   };
 
   const openEditMessage = (message: OnlineChatMessage) => {
@@ -4046,7 +4454,7 @@ export function ArmOperatorView({
         );
       })
       .catch(() => {
-        setComposerNotice("Не удалось изменить сообщение.");
+        pushComposerNotice("Не удалось изменить сообщение.", "danger");
       });
   };
 
@@ -4068,7 +4476,7 @@ export function ArmOperatorView({
         );
       })
       .catch(() => {
-        setComposerNotice("Не удалось удалить сообщение.");
+        pushComposerNotice("Не удалось удалить сообщение.", "danger");
       });
   };
 
@@ -4083,10 +4491,10 @@ export function ArmOperatorView({
     void liftClientBlock(activePhoneBlock.id, operatorName)
       .then(() => {
         setClientBlocks((prev) => prev.filter((block) => block.id !== activePhoneBlock.id));
-        setComposerNotice("Блокировка клиента снята.");
+        pushComposerNotice("Блокировка клиента снята.");
       })
       .catch(() => {
-        setComposerNotice("Не удалось снять блокировку.");
+        pushComposerNotice("Не удалось снять блокировку.", "danger");
       });
   };
 
@@ -4157,6 +4565,12 @@ export function ArmOperatorView({
         position: "relative",
       }}
     >
+      <style>{`
+        @keyframes oc-unread-pulse {
+          0%, 100% { box-shadow: 0 0 0 2px rgba(0, 122, 67, 0.22); }
+          50% { box-shadow: 0 0 0 4px rgba(0, 122, 67, 0.38); }
+        }
+      `}</style>
       <div
         style={{
           position: "relative",
@@ -4316,6 +4730,28 @@ export function ArmOperatorView({
                 </span>
                 {allSectionsCollapsed ? "Развернуть все" : "Свернуть все"}
               </button>
+              {showGraceTimer ? (
+                <span
+                  title="Выберите диалог из общей очереди до автоназначения"
+                  style={{
+                    flex: "1 1 auto",
+                    textAlign: "center",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    fontVariantNumeric: "tabular-nums",
+                    color: "#B45309",
+                    background: "#FFF7ED",
+                    border: "1px solid #FDBA74",
+                    borderRadius: 999,
+                    padding: "5px 10px",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Выбор · {graceSecondsLeft}с
+                </span>
+              ) : (
+                <span style={{ flex: 1 }} />
+              )}
               <button
                 type="button"
                 title="Свернуть панель очереди"
@@ -4335,6 +4771,45 @@ export function ArmOperatorView({
                 ««
               </button>
             </Row>
+            {(!lineOpen || demoOfflineArm) && !viewOnly ? (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  background: "#FFF7ED",
+                  border: "1px solid #FDBA74",
+                }}
+              >
+                <Text style={{ fontSize: 12, color: "#9A3412", fontWeight: 650 }}>
+                  {demoOfflineArm
+                    ? "Смена ещё не начата (демо 8:55). Автораспределение выключено, диалоги из офлайна копятся в очереди."
+                    : "Сейчас нерабочее время. Новые обращения копятся в очереди и не распределяются."}
+                </Text>
+                {sheipaDemo && !workDayStarted ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    style={{ marginTop: 8 }}
+                    onClick={() => {
+                      void controlWorkDay("start")
+                        .then(() => {
+                          setWorkDayStarted(true);
+                          setLineOpen(true);
+                          pushComposerNotice("Рабочий день начат. Очередь снова распределяется.");
+                          void refreshLiveQueues();
+                        })
+                        .catch((err: unknown) => {
+                          const message = err instanceof Error ? err.message : "Не удалось начать рабочий день";
+                          pushComposerNotice(message, "danger");
+                        });
+                    }}
+                  >
+                    Начать рабочий день
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
             </div>
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 12px 12px" }}>
             <Stack style={{ gap: 12 }}>
@@ -4347,6 +4822,11 @@ export function ArmOperatorView({
                       scheme={scheme}
                       title={section.title}
                       count={section.count}
+                      unreadTotal={
+                        section.id === "mine"
+                          ? section.items.reduce((sum, item) => sum + (item.unreadCount || 0), 0)
+                          : 0
+                      }
                       expanded={sectionExpanded}
                       onToggle={() => toggleSection(section.id)}
                     />
@@ -4392,7 +4872,7 @@ export function ArmOperatorView({
                                 section.id === "shared" &&
                                 !viewOnly &&
                                 armRole !== "supervisor"
-                                  ? atCapacity
+                                  ? atCapacity || demoOfflineArm || !lineOpen
                                   : undefined
                               }
                               acceptBusy={acceptingDialogId === q.id}
@@ -4569,6 +5049,7 @@ export function ArmOperatorView({
           </div>
           <div
             ref={messagesScrollRef}
+            onScroll={handleMessagesScroll}
             style={{
               flex: 1,
               minHeight: 0,
@@ -4583,6 +5064,7 @@ export function ArmOperatorView({
             {active.live ? (
               liveMessages.length > 0 ? (
                 liveMessages.map((message) => {
+                  const isHistory = Boolean(message.is_history);
                   if (message.speaker === "system") {
                     return (
                       <MessageBubble
@@ -4591,6 +5073,7 @@ export function ArmOperatorView({
                         scheme={scheme}
                         side="system"
                         text={message.text}
+                        isHistory={isHistory}
                       />
                     );
                   }
@@ -4615,9 +5098,11 @@ export function ArmOperatorView({
                         }
                         isDeleted={message.is_deleted}
                         editedAt={message.edited_at}
+                        isHistory={isHistory}
                         receiptStatus={
                           // Read receipts only for website widget — other channels have no read API.
                           message.is_deleted ||
+                          isHistory ||
                           (active.channel !== "Сайт" && active.channel !== "widget")
                             ? undefined
                             : message.receipt_status === "read" ||
@@ -4626,12 +5111,12 @@ export function ArmOperatorView({
                               : "delivered"
                         }
                         onEdit={
-                          !isReadOnly && !message.is_deleted
+                          !isHistory && !isReadOnly && !message.is_deleted
                             ? () => openEditMessage(message)
                             : undefined
                         }
                         onDelete={
-                          !isReadOnly && !message.is_deleted
+                          !isHistory && !isReadOnly && !message.is_deleted
                             ? () => openDeleteMessage(message)
                             : undefined
                         }
@@ -4649,8 +5134,10 @@ export function ArmOperatorView({
                         avatarInitials="Б"
                         text={message.text}
                         time={messageTimeLabel(message.created_at)}
+                        isHistory={isHistory}
                         receiptStatus={
-                          active.channel === "Сайт" || active.channel === "widget"
+                          !isHistory &&
+                          (active.channel === "Сайт" || active.channel === "widget")
                             ? message.receipt_status
                             : undefined
                         }
@@ -4677,8 +5164,9 @@ export function ArmOperatorView({
                           : undefined
                       }
                       isDeleted={message.is_deleted}
+                      isHistory={isHistory}
                       onQuote={
-                        !isReadOnly && !message.is_deleted
+                        !isHistory && !isReadOnly && !message.is_deleted
                           ? () => setQuoteMessage(message)
                           : undefined
                       }
@@ -4748,7 +5236,8 @@ export function ArmOperatorView({
                 disabled={composerLocked}
                 active={showTemplates}
                 onClick={() => {
-                  setComposerTemplates(loadReplyTemplates());
+                  setComposerTemplates(loadReplyTemplates(operatorName));
+                  setTemplateCategory(null);
                   setShowTemplates((open) => !open);
                 }}
               >
@@ -4800,21 +5289,69 @@ export function ArmOperatorView({
                       <Text weight="semibold" style={{ fontSize: 13, color: t.text.primary }}>
                         Шаблоны ответов
                       </Text>
-                      <Text style={{ fontSize: 11, color: t.text.tertiary, marginTop: 2 }}>
-                        Вставка в поле ответа · конструктор в меню АРМ
-                      </Text>
                     </div>
                     <Button
                       variant="ghost"
                       size="sm"
                       aria-label="Закрыть шаблоны"
-                      onClick={() => setShowTemplates(false)}
+                      onClick={() => {
+                        setShowTemplates(false);
+                        setTemplateCategory(null);
+                      }}
                     >
                       ✕
                     </Button>
                   </div>
                   <Stack gap={4} style={{ overflowY: "auto", minHeight: 0, flex: 1, paddingRight: 2 }}>
-                    {composerTemplates.map((template, index) => (
+                    {!templateCategory ? (
+                      [...new Set(composerTemplates.map((item) => item.category))].map((category) => {
+                        const count = composerTemplates.filter((item) => item.category === category).length;
+                        return (
+                          <button
+                            key={category}
+                            type="button"
+                            onClick={() => setTemplateCategory(category)}
+                            style={{
+                              border: `1px solid ${t.stroke.secondary}`,
+                              background: t.bg.editor,
+                              textAlign: "left",
+                              padding: "10px 12px",
+                              borderRadius: 10,
+                              cursor: "pointer",
+                              fontFamily: "inherit",
+                              fontSize: 13,
+                              color: t.text.primary,
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 8,
+                            }}
+                          >
+                            <span style={{ fontWeight: 600 }}>{category}</span>
+                            <span style={{ color: t.text.tertiary, fontSize: 12 }}>{count}</span>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setTemplateCategory(null)}
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            textAlign: "left",
+                            padding: "4px 6px 8px",
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            fontSize: 12,
+                            color: t.text.secondary,
+                          }}
+                        >
+                          ← Категории
+                        </button>
+                        {composerTemplates
+                          .filter((template) => template.category === templateCategory)
+                          .map((template, index) => (
                       <button
                         key={template.id}
                         type="button"
@@ -4825,6 +5362,7 @@ export function ArmOperatorView({
                             .replaceAll("{{operator_name}}", operatorName);
                           onReplyChange(text);
                           setShowTemplates(false);
+                          setTemplateCategory(null);
                         }}
                         style={{
                           border: `1px solid ${t.stroke.secondary}`,
@@ -4877,7 +5415,9 @@ export function ArmOperatorView({
                           {template.body}
                         </span>
                       </button>
-                    ))}
+                          ))}
+                      </>
+                    )}
                   </Stack>
                 </div>
               ) : null}
@@ -5014,6 +5554,12 @@ export function ArmOperatorView({
                         setAiImproveModal(null);
                       }
                     }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        if (!composerLocked) deliverReply("Сообщение отправлено.");
+                      }
+                    }}
                     disabled={composerLocked}
                   />
                   <IconButton
@@ -5097,6 +5643,37 @@ export function ArmOperatorView({
         />
 
         {/* Context + Sufler */}
+        {rightPanelCollapsed ? (
+          <div
+            style={{
+              width: 28,
+              flexShrink: 0,
+              ...panelStyle(t, { borderRadius: 0, borderLeft: "none" }),
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              paddingTop: 12,
+            }}
+          >
+            <button
+              type="button"
+              title="Развернуть панель клиента и суфлёра"
+              aria-label="Развернуть панель клиента и суфлёра"
+              onClick={() => setRightPanelCollapsed(false)}
+              style={{
+                border: "none",
+                background: "transparent",
+                color: scheme.accentControl,
+                fontSize: 12,
+                cursor: "pointer",
+                padding: "4px 2px",
+                fontFamily: "inherit",
+              }}
+            >
+              ««
+            </button>
+          </div>
+        ) : (
         <div
           style={{
             width: boundedRightWidth,
@@ -5109,7 +5686,28 @@ export function ArmOperatorView({
             overflow: "hidden",
           }}
         >
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 12 }}>
+          <div style={{ padding: "10px 12px 0", flexShrink: 0 }}>
+            <Row style={{ justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                title="Свернуть панель клиента и суфлёра"
+                aria-label="Свернуть панель клиента и суфлёра"
+                onClick={() => setRightPanelCollapsed(true)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: t.text.tertiary,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  padding: "2px 4px",
+                  fontFamily: "inherit",
+                }}
+              >
+                »»
+              </button>
+            </Row>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 12px 12px" }}>
           {viewOnly ? (
             <Callout tone="info" style={{ marginBottom: 12, fontSize: 12 }}>
               Просмотр АРМ оператора {operatorName}
@@ -5139,13 +5737,51 @@ export function ArmOperatorView({
           <Divider style={{ margin: "12px 0" }} />
           <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
             <H3 style={{ fontSize: 15, fontWeight: 700 }}>Суфлёр</H3>
-            <Pill tone={suflerError ? "warning" : suflerLoading ? "neutral" : "success"} size="sm">
-              {suflerLoading ? "загрузка…" : suflerError ? "недоступен" : "активен"}
+            <Pill
+              tone={
+                suflerLoading
+                  ? "neutral"
+                  : suflerReportVisible
+                    ? "warning"
+                    : suflerError
+                      ? "neutral"
+                      : "success"
+              }
+              size="sm"
+            >
+              {suflerLoading
+                ? "загрузка…"
+                : suflerReportVisible
+                  ? "недоступен"
+                  : suflerError
+                    ? "нет ответа"
+                    : "активен"}
             </Pill>
           </Row>
           {suflerError ? (
-            <Callout tone="warning" style={{ marginTop: 8, fontSize: 12 }}>
+            <Callout
+              tone={suflerReportVisible ? "warning" : "info"}
+              style={{ marginTop: 8, fontSize: 12 }}
+            >
               {suflerError}
+              {suflerReportVisible ? (
+                <div style={{ marginTop: 8 }}>
+                  {suflerReportSent ? (
+                    <Text style={{ fontSize: 12, color: t.text.secondary }}>
+                      Уведомление отправлено супервизору и администратору.
+                    </Text>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={handleReportSuflerOutage}
+                      disabled={isReadOnly}
+                    >
+                      Сообщить о проблеме
+                    </Button>
+                  )}
+                </div>
+              ) : null}
             </Callout>
           ) : null}
 
@@ -5189,6 +5825,7 @@ export function ArmOperatorView({
           </div>
           </div>
         </div>
+        )}
         </>
         )}
       </div>
@@ -5204,8 +5841,52 @@ export function ArmOperatorView({
           flexShrink: 0,
         }}
       >
-        Ctrl+Enter — отправить · Ctrl+K — шаблоны · F2 — следующий диалог
+        Enter — отправить · Shift+Enter — новая строка · Ctrl+K — шаблоны · F2 — следующий диалог
       </div>
+      ) : null}
+
+      {suflerOutageNotice && (armRole === "supervisor" || armRole === "admin") ? (
+        <div
+          role="alert"
+          style={{
+            position: "fixed",
+            top: 16,
+            right: 16,
+            zIndex: 1000,
+            maxWidth: 360,
+            padding: "12px 14px",
+            borderRadius: 10,
+            background: "#7a1f1f",
+            color: "#fff",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+            fontSize: 13,
+            lineHeight: 1.4,
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>Суфлёр недоступен</div>
+          <div>
+            {suflerOutageNotice.operatorName} сообщил(а) о проблеме с суфлёром.
+            {suflerOutageNotice.query
+              ? ` Запрос: «${suflerOutageNotice.query.slice(0, 80)}».`
+              : ""}
+          </div>
+          <button
+            type="button"
+            onClick={() => setSuflerOutageNotice(null)}
+            style={{
+              marginTop: 8,
+              background: "rgba(255,255,255,0.18)",
+              color: "#fff",
+              border: 0,
+              borderRadius: 6,
+              padding: "4px 10px",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            Понятно
+          </button>
+        </div>
       ) : null}
 
       {closeDialogConfirmOpen ? (

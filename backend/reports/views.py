@@ -37,7 +37,7 @@ from reports.cc_catalog import (
 )
 from reports.cc_live import build_live_dashboard
 from reports.cc_pdf import build_pdf_export
-from reports.models import AsrDialogueSession
+from reports.models import AsrDialogueSession, CcReportTemplate
 
 View = Callable[..., HttpResponse]
 
@@ -230,12 +230,88 @@ def cc_report_catalog(request: HttpRequest) -> JsonResponse:
         return JsonResponse(build_report_payload(request.GET))
     except CcAnalyticsError as exc:
         return _cc_validation_error(exc)
+    except Exception as exc:  # noqa: BLE001 — surface readable Russian error to UI
+        report = (request.GET.get("report") or "").strip()
+        label = report
+        for item in (
+            {"id": "chat-period", "label": "Обращения за период"},
+            {"id": "chat-sla", "label": "SLA и время ожидания"},
+            {"id": "chat-operators", "label": "Нагрузка и эффективность операторов"},
+            {"id": "usefulness", "label": "Полезность подсказок суфлёра"},
+            {"id": "relevance", "label": "Релевантность ответов"},
+            {"id": "chat_history", "label": "Диалоги онлайн-чата (реестр)"},
+            {"id": "chat-offline", "label": "Необработанные и отказные обращения"},
+            {"id": "performance", "label": "Производительность (время ответа, AHT)"},
+        ):
+            if item["id"] == report:
+                label = item["label"]
+                break
+        return JsonResponse(
+            {
+                "error": f"Не удалось сформировать отчёт «{label or 'выбранный'}». Попробуйте другой период или тип отчёта.",
+                "details": {"reason": str(exc), "report": report},
+            },
+            status=500,
+        )
 
 
-@require_http_methods(["GET"])
+@require_http_methods(["GET", "POST"])
 @require_cc_reports
 def cc_builder_templates(request: HttpRequest) -> JsonResponse:
-    return JsonResponse(list_builder_templates())
+    if request.method == "POST":
+        try:
+            body = json.loads(request.body or b"{}")
+            if not isinstance(body, Mapping):
+                raise CcAnalyticsError("Request body must be a JSON object")
+            name = str(body.get("name") or "").strip()
+            if not name:
+                raise CcAnalyticsError("name is required")
+            metrics = body.get("metrics") or []
+            if not isinstance(metrics, list):
+                raise CcAnalyticsError("metrics must be a list")
+            view_mode = str(body.get("view_mode") or "table").strip()
+            filters = body.get("filters") or {}
+            if not isinstance(filters, dict):
+                raise CcAnalyticsError("filters must be an object")
+            date_from = body.get("date_from")
+            date_to = body.get("date_to")
+            owner = (
+                request.user.get_username()
+                if getattr(request.user, "is_authenticated", False)
+                else str(body.get("owner_username") or "")
+            )
+            template = CcReportTemplate.objects.create(
+                name=name,
+                metrics=metrics,
+                view_mode=view_mode,
+                filters=filters,
+                owner_username=owner,
+                date_from=_parse_template_date(date_from),
+                date_to=_parse_template_date(date_to),
+            )
+            return JsonResponse({"saved": template.to_dict()}, status=201)
+        except json.JSONDecodeError:
+            return JsonResponse(
+                {"error": "validation_error", "details": {"request": ["Invalid JSON"]}},
+                status=400,
+            )
+        except CcAnalyticsError as exc:
+            return _cc_validation_error(exc)
+
+    saved = [item.to_dict() for item in CcReportTemplate.objects.all()[:50]]
+    payload = list_builder_templates(saved=saved)
+    return JsonResponse(payload)
+
+
+def _parse_template_date(value: Any) -> Any:
+    if value in (None, ""):
+        return None
+    from datetime import date as date_cls
+
+    try:
+        return date_cls.fromisoformat(str(value)[:10])
+    except ValueError as exc:
+        raise CcAnalyticsError("date_from/date_to must be YYYY-MM-DD") from exc
 
 
 @require_http_methods(["POST"])

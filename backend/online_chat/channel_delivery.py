@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
+import urllib.error
 import urllib.request
 from urllib.parse import urlencode
 from dataclasses import dataclass
@@ -13,6 +15,8 @@ from typing import Any
 from django.conf import settings
 
 from online_chat.models import ChannelConnection, DialogMessage
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -60,7 +64,7 @@ def send_telegram_text(
     reply_markup: dict[str, Any] | None = None,
 ) -> DeliveryResult:
     """Send a Telegram Bot API message (optionally with inline keyboard)."""
-    token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+    token = (getattr(settings, "TELEGRAM_BOT_TOKEN", "") or "").strip()
     if not token:
         return DeliveryResult(False, detail="telegram_not_configured")
     if not chat_id or not (text or "").strip():
@@ -73,9 +77,28 @@ def send_telegram_text(
             f"https://api.telegram.org/bot{token}/sendMessage",
             payload,
         )
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = (exc.read() or b"").decode("utf-8", errors="replace")[:300]
+        except Exception:  # noqa: BLE001
+            detail = str(exc)[:200]
+        logger.warning(
+            "telegram_send_failed chat=%s status=%s detail=%s",
+            chat_id,
+            exc.code,
+            detail or exc,
+        )
+        return DeliveryResult(False, detail=detail or str(exc.code))
     except Exception as exc:  # noqa: BLE001 — onboarding must not crash webhook
+        logger.warning("telegram_send_failed chat=%s detail=%s", chat_id, exc)
         return DeliveryResult(False, detail=str(exc)[:200])
     if not body.get("ok"):
+        logger.warning(
+            "telegram_send_rejected chat=%s detail=%s",
+            chat_id,
+            body.get("description") or body,
+        )
         return DeliveryResult(False, detail="telegram_rejected")
     result = body.get("result") or {}
     return DeliveryResult(True, str(result.get("message_id") or ""))
@@ -84,9 +107,10 @@ def send_telegram_text(
 def send_telegram_close_survey(dialog: Any) -> DeliveryResult:
     """After operator closes a Telegram dialog — farewell + 1..5 rating buttons."""
     chat_id = str(getattr(dialog, "client_external_id", "") or "").strip()
-    dialog_id = str(getattr(dialog, "id", "") or "")
+    dialog_id = str(getattr(dialog, "id", "") or "").replace("-", "")
     if not chat_id or not dialog_id:
         return DeliveryResult(False, detail="telegram_no_chat")
+    # callback_data max 64 bytes — compact uuid without dashes.
     keyboard = {
         "inline_keyboard": [
             [
@@ -95,12 +119,15 @@ def send_telegram_close_survey(dialog: Any) -> DeliveryResult:
             ]
         ]
     }
-    return send_telegram_text(
+    result = send_telegram_text(
         chat_id,
         "Диалог завершён. Спасибо за обращение!\n"
         "Оцените, пожалуйста, работу оператора:",
         reply_markup=keyboard,
     )
+    if not result.sent:
+        logger.warning("telegram_close_survey_failed chat=%s detail=%s", chat_id, result.detail)
+    return result
 
 
 def answer_telegram_callback(callback_query_id: str, text: str = "") -> DeliveryResult:

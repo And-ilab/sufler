@@ -9,6 +9,7 @@ export function TopicSelect({
   options,
   onChange,
   disabled = false,
+  placeholder = 'Тематика не выбрана',
   style,
 }: {
   t: ArmTheme
@@ -16,6 +17,7 @@ export function TopicSelect({
   options: string[]
   onChange: (next: string) => void
   disabled?: boolean
+  placeholder?: string
   style?: CSSProperties
 }): JSX.Element {
   const [open, setOpen] = useState(false)
@@ -38,7 +40,8 @@ export function TopicSelect({
     }
   }, [open])
 
-  const selected = options.includes(value) ? value : options[0] ?? value
+  const selected = options.includes(value) ? value : ''
+  const hasSelection = Boolean(selected)
 
   return (
     <div ref={rootRef} style={{ position: 'relative', minWidth: 220, ...style }}>
@@ -66,7 +69,11 @@ export function TopicSelect({
           fontFamily: 'inherit',
         }}
       >
-        <TopicChip t={t} topic={selected} size="sm" />
+        {hasSelection ? (
+          <TopicChip t={t} topic={selected} size="sm" />
+        ) : (
+          <span style={{ color: t.text.tertiary, fontSize: 12 }}>{placeholder}</span>
+        )}
         <span
           aria-hidden
           style={{

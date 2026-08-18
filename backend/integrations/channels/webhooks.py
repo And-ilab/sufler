@@ -118,7 +118,18 @@ def handle_telegram_update(payload: Mapping[str, Any]) -> dict[str, Any]:
                 rating = int(rating_raw)
             except ValueError:
                 rating = 0
-            dialog = Dialog.objects.filter(pk=dialog_id).first()
+            # Accept compact uuid (without dashes) or canonical form.
+            compact = dialog_id.replace("-", "")
+            dialog = None
+            if len(compact) == 32:
+                from uuid import UUID
+
+                try:
+                    dialog = Dialog.objects.filter(pk=UUID(hex=compact)).first()
+                except ValueError:
+                    dialog = None
+            if dialog is None:
+                dialog = Dialog.objects.filter(pk=dialog_id).first()
             if dialog is None or rating < 1 or rating > 5:
                 answer_telegram_callback(callback_id, "Не удалось сохранить оценку.")
                 return {"ok": True, "channel": "telegram", "routed_to": "rating_ignored"}
@@ -138,6 +149,15 @@ def handle_telegram_update(payload: Mapping[str, Any]) -> dict[str, Any]:
                 "dialog_id": str(dialog.id),
                 "rating": rating,
             }
+        if parts and parts[0] == "skip_field":
+            from online_chat.telegram_onboarding import handle_telegram_skip_field
+
+            chat = (callback.get("message") or {}).get("chat") or {}
+            chat_id = str(chat.get("id") or "")
+            answer_telegram_callback(callback_id, "Поле пропущено")
+            if chat_id:
+                return handle_telegram_skip_field(chat_id=chat_id)
+            return {"ok": True, "channel": "telegram", "routed_to": "skip_ignored"}
         answer_telegram_callback(callback_id)
         return {"ok": True, "channel": "telegram", "routed_to": "callback_ignored"}
 

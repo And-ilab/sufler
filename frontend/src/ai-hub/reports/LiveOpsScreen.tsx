@@ -31,6 +31,14 @@ export function LiveOpsScreen() {
   const [data, setData] = useState<LiveDashboard | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [alertsOpen, setAlertsOpen] = useState(false)
+  const [seenAlertIds, setSeenAlertIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('cc-live-seen-alerts') || '[]') as string[]
+    } catch {
+      return []
+    }
+  })
 
   const reload = useCallback(async () => {
     try {
@@ -65,6 +73,26 @@ export function LiveOpsScreen() {
   const feed = data?.dialog_feed?.length ? data.dialog_feed : []
   const llmFeed = data?.llm_feed || []
   const alerts = data?.alerts || []
+  const unreadAlerts = alerts.filter((alert) => !seenAlertIds.includes(alert.id))
+
+  const markAlertsSeen = () => {
+    const ids = alerts.map((alert) => alert.id)
+    setSeenAlertIds(ids)
+    try {
+      localStorage.setItem('cc-live-seen-alerts', JSON.stringify(ids))
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const openDialog = (dialogId?: string) => {
+    if (!dialogId) return
+    window.open(
+      `/online-chat?historyDialog=${encodeURIComponent(dialogId)}`,
+      '_blank',
+      'noopener,noreferrer',
+    )
+  }
 
   return (
     <div className="rpt-body" data-testid="cc-live-screen">
@@ -73,15 +101,50 @@ export function LiveOpsScreen() {
           {data?.generated_at ? `Обновлено ${formatTime(data.generated_at)}` : 'Оперативные показатели'}
         </span>
         <span className="rpt-spacer" />
+        <div style={{ position: 'relative' }}>
+          <button
+            type="button"
+            className="rpt-btn"
+            aria-label="Оповещения"
+            onClick={() => {
+              setAlertsOpen((open) => !open)
+              markAlertsSeen()
+            }}
+          >
+            🔔 {unreadAlerts.length ? `(${unreadAlerts.length})` : ''}
+          </button>
+          {alertsOpen ? (
+            <div
+              className="rpt-card"
+              style={{
+                position: 'absolute',
+                right: 0,
+                top: 'calc(100% + 6px)',
+                width: 360,
+                zIndex: 20,
+                boxShadow: '0 12px 28px rgba(0,0,0,0.16)',
+              }}
+            >
+              <div className="rpt-card__head">Оповещения</div>
+              <div className="rpt-card__body">
+                {alerts.length ? (
+                  <ul className="rpt-alerts">
+                    {alerts.map((alert) => (
+                      <li key={alert.id} className={`rpt-alert rpt-alert--${alert.tone}`}>
+                        <strong>{alert.title}</strong>
+                        <span>{alert.detail}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="rpt-muted">Активных оповещений нет.</p>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
         <button type="button" className="rpt-btn" disabled={loading} onClick={() => void reload()}>
           {loading ? 'Загрузка…' : 'Обновить'}
-        </button>
-        <button
-          type="button"
-          className="rpt-btn"
-          onClick={() => window.location.assign('/online-chat')}
-        >
-          Открыть АРМ
         </button>
       </div>
 
@@ -126,7 +189,7 @@ export function LiveOpsScreen() {
       </div>
 
       <div className="rpt-card">
-        <div className="rpt-card__head">Оповещения (пороги)</div>
+        <div className="rpt-card__head">Оповещения</div>
         <div className="rpt-card__body">
           {alerts.length ? (
             <ul className="rpt-alerts">
@@ -145,7 +208,7 @@ export function LiveOpsScreen() {
 
       <div className="rpt-grid-2">
         <div className="rpt-card">
-          <div className="rpt-card__head">Нагрузка по отделам / каналам</div>
+          <div className="rpt-card__head">Нагрузка по отделам</div>
           <div className="rpt-card__body">
             {departments.length ? (
               <div className="rpt-dept">
@@ -159,7 +222,7 @@ export function LiveOpsScreen() {
                       />
                     </div>
                     <strong>
-                      {dept.active}/{dept.queue}
+                      {dept.active} акт. / {dept.queue} очер.
                     </strong>
                   </div>
                 ))}
@@ -171,7 +234,7 @@ export function LiveOpsScreen() {
         </div>
 
         <div className="rpt-card">
-          <div className="rpt-card__head">Топ операторов по диалогам</div>
+          <div className="rpt-card__head">Топ операторов по активным диалогам</div>
           <div className="rpt-card__body">
             <div style={{ display: 'grid', gap: 8 }}>
               {operators
@@ -213,7 +276,7 @@ export function LiveOpsScreen() {
       </div>
 
       <div className="rpt-card">
-        <div className="rpt-card__head">Лента диалогов</div>
+        <div className="rpt-card__head">Лента диалогов · клик открывает просмотр</div>
         <div className="rpt-card__body">
           <DataTable
             headers={[
@@ -242,28 +305,19 @@ export function LiveOpsScreen() {
                   ])
                 : [['—', '—', '—', 'Нет диалогов', '—', '—', '—', '—', '—']]
             }
+            onRowClick={(_row, index) => {
+              const item = feed[index]
+              if (item?.id) openDialog(item.id)
+            }}
           />
-          {feed[0]?.id ? (
-            <div className="rpt-row" style={{ marginTop: 10 }}>
-              <button
-                type="button"
-                className="rpt-btn rpt-btn--primary"
-                onClick={() =>
-                  window.location.assign(`/online-chat?dialog=${encodeURIComponent(feed[0].id)}`)
-                }
-              >
-                Открыть последний в АРМ
-              </button>
-            </div>
-          ) : null}
         </div>
       </div>
 
       <div className="rpt-card">
-        <div className="rpt-card__head">Лента подсказок суфлёра</div>
+        <div className="rpt-card__head">Оценки подсказок суфлёра</div>
         <div className="rpt-card__body">
           <DataTable
-            headers={['Время', 'Канал', 'Оператор', 'Тематика', 'Релевантность', 'Отметка', 'Запрос']}
+            headers={['Время', 'Канал', 'Оператор', 'Тематика', 'Релевантность', 'Отметка', 'Вопрос']}
             rows={
               llmFeed.length
                 ? llmFeed.map((row) => [

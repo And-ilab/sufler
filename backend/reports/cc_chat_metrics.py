@@ -10,7 +10,7 @@ from typing import Any, Iterable
 from django.db.models import Avg, Count, Q, QuerySet
 from django.utils import timezone as dj_tz
 
-SLA_FIRST_RESPONSE_SECONDS = 120
+SLA_FIRST_RESPONSE_SECONDS = 120  # fallback if DB settings unavailable
 CHAT_MESSENGERS = frozenset({"widget", "telegram", "viber", "vk", "ok", "api", "email"})
 
 CHANNEL_LABELS = {
@@ -29,7 +29,14 @@ OUTCOME_LABELS = {
     "lost": "Потерянный",
     "offline": "Офлайн",
     "escalated": "Эскалация",
-    "": "Без outcome",
+    "": "Не определён",
+}
+
+STATUS_LABELS = {
+    "waiting": "В очереди",
+    "active": "В работе",
+    "closed": "Закрыт",
+    "blocked": "Заблокирован",
 }
 
 FEEDBACK_LABELS = {
@@ -134,11 +141,23 @@ def aht_seconds(dialog: Any) -> float | None:
     return _seconds_between(start, dialog.closed_at)
 
 
-def within_sla(dialog: Any, *, target: int = SLA_FIRST_RESPONSE_SECONDS) -> bool | None:
+def get_sla_first_response_seconds() -> int:
+    """Target seconds for first operator reply (admin-configurable)."""
+    try:
+        from online_chat.models import ServiceLevelSettings
+
+        value = int(ServiceLevelSettings.get_solo().first_response_seconds)
+        return value if value > 0 else SLA_FIRST_RESPONSE_SECONDS
+    except Exception:  # noqa: BLE001 — reports must not fail if chat app unavailable
+        return SLA_FIRST_RESPONSE_SECONDS
+
+
+def within_sla(dialog: Any, *, target: int | None = None) -> bool | None:
     frt = first_response_seconds(dialog)
     if frt is None:
         return None
-    return frt <= target
+    limit = get_sla_first_response_seconds() if target is None else target
+    return frt <= limit
 
 
 def sufler_stats(
@@ -176,9 +195,12 @@ def sufler_stats(
 
     topic_rows: list[dict[str, Any]] = []
     for fb in qs.select_related("dialog")[:2000]:
-        channel = getattr(fb.dialog, "channel", None) or "widget"
-        topic = (getattr(fb.dialog, "close_topic", None) or "").strip() or "Без тематики"
-        topic_rows.append((channel, topic, fb.relevance_percent, fb.choice))
+        dialog = fb.dialog
+        close_topic = (getattr(dialog, "close_topic", None) or "").strip()
+        if not close_topic:
+            continue
+        channel = getattr(dialog, "channel", None) or "widget"
+        topic_rows.append((channel, close_topic, fb.relevance_percent, fb.choice))
 
     grouped: dict[tuple[str, str], list[Any]] = defaultdict(list)
     for channel, topic, rel, choice in topic_rows:
@@ -453,11 +475,18 @@ def report_chat_sla(date_from: date, date_to: date, **filters: Any) -> dict[str,
             }
         )
     rows.sort(key=lambda item: item["created_at"], reverse=True)
+    target = get_sla_first_response_seconds()
     chart = [
-        {"label": "≤60 с", "value": sum(1 for v in frts if v <= 60)},
-        {"label": "60–120 с", "value": sum(1 for v in frts if 60 < v <= 120)},
-        {"label": "120–300 с", "value": sum(1 for v in frts if 120 < v <= 300)},
-        {"label": ">300 с", "value": sum(1 for v in frts if v > 300)},
+        {"label": f"≤{target} с", "value": sum(1 for v in frts if v <= target)},
+        {
+            "label": f"{target}–{target * 2} с",
+            "value": sum(1 for v in frts if target < v <= target * 2),
+        },
+        {
+            "label": f"{target * 2}–{target * 3} с",
+            "value": sum(1 for v in frts if target * 2 < v <= target * 3),
+        },
+        {"label": f">{target * 3} с", "value": sum(1 for v in frts if v > target * 3)},
     ]
     return {
         "rows": rows[:200],
@@ -465,9 +494,8 @@ def report_chat_sla(date_from: date, date_to: date, **filters: Any) -> dict[str,
         "summary": {
             "sla_ok_pct": round(100 * sla_ok / sla_total, 1) if sla_total else None,
             "avg_first_response_sec": _avg(frts),
-            "p95_first_response_sec": _percentile(frts, 0.95),
             "avg_wait_sec": _avg(waits),
-            "target_sec": SLA_FIRST_RESPONSE_SECONDS,
+            "target_sec": target,
             "answered": sla_total,
         },
         "stub": False,
@@ -475,11 +503,20 @@ def report_chat_sla(date_from: date, date_to: date, **filters: Any) -> dict[str,
 
 
 def report_chat_operators(date_from: date, date_to: date, **filters: Any) -> dict[str, Any]:
+    from online_chat.models import OperatorProfile
+
     dialogs = list(dialogs_in_period(date_from, date_to, **filters))
     by_op: dict[str, list[Any]] = defaultdict(list)
     for dialog in dialogs:
-        name = (dialog.operator_name or "").strip() or "Без оператора"
+        name = (dialog.operator_name or "").strip()
+        if not name:
+            continue
         by_op[name].append(dialog)
+
+    roles = {
+        p.display_name: p.role
+        for p in OperatorProfile.objects.filter(display_name__in=list(by_op.keys()))
+    }
 
     rows = []
     for name, group in sorted(by_op.items(), key=lambda item: -len(item[1])):
@@ -487,9 +524,12 @@ def report_chat_operators(date_from: date, date_to: date, **filters: Any) -> dic
         frt_flags = [within_sla(d) for d in group]
         known = [f for f in frt_flags if f is not None]
         ratings = [dialog_rating(d) for d in group]
+        role = roles.get(name) or "operator"
         rows.append(
             {
                 "operator": name,
+                "role": role,
+                "role_label": "Супервизор" if role == "supervisor" else ("Админ" if role == "admin" else "Оператор"),
                 "dialogs": len(group),
                 "closed": len(closed),
                 "active": sum(1 for d in group if d.status == "active"),
@@ -606,31 +646,30 @@ def report_chat_offline(date_from: date, date_to: date, **filters: Any) -> dict[
             counts[dialog.status] += 1
     rows = [
         {
-            "outcome": key,
-            "label": OUTCOME_LABELS.get(key, key),
+            "result": OUTCOME_LABELS.get(key) or STATUS_LABELS.get(key, key),
             "count": count,
             "pct": round(100 * count / max(1, len(dialogs)), 1),
         }
         for key, count in counts.most_common()
     ]
-    chart = [{"label": row["label"], "value": row["count"]} for row in rows]
+    chart = [{"label": row["result"], "value": row["count"]} for row in rows]
     detail = [
         {
             "ref": d.ref_code(),
             "client": d.client_display_name(),
             "channel": channel_label(d.channel),
-            "status": d.status,
-            "outcome": OUTCOME_LABELS.get(d.outcome, d.outcome or "—"),
+            "status": STATUS_LABELS.get(d.status, d.status),
+            "result": OUTCOME_LABELS.get(d.outcome or "") or STATUS_LABELS.get(d.status, "Не определён"),
             "operator": d.operator_name or "—",
             "created_at": d.created_at.isoformat(),
         }
         for d in dialogs
-        if d.outcome in {"lost", "offline", "rejected"} or d.status == "blocked"
+        if d.outcome in {"lost", "offline", "rejected"} or d.status in {"blocked", "waiting", "active"}
     ][:100]
     return {
         "rows": detail or rows,
         "chart": chart,
-        "summary": {"dialogs": len(dialogs), "by_outcome": rows},
+        "summary": {"dialogs": len(dialogs)},
         "stub": False,
     }
 
@@ -638,7 +677,11 @@ def report_chat_offline(date_from: date, date_to: date, **filters: Any) -> dict[
 def report_chat_history(date_from: date, date_to: date, **filters: Any) -> dict[str, Any]:
     qs = dialogs_in_period(date_from, date_to, **filters).order_by("-updated_at")[:150]
     rows = []
+    status_counts: Counter[str] = Counter()
+    channel_counts: Counter[str] = Counter()
     for dialog in qs:
+        status_counts[dialog.status] += 1
+        channel_counts[channel_label(dialog.channel)] += 1
         rows.append(
             {
                 "ref": dialog.ref_code(),
@@ -646,8 +689,8 @@ def report_chat_history(date_from: date, date_to: date, **filters: Any) -> dict[
                 "client": dialog.client_display_name(),
                 "phone": dialog.client_phone or "—",
                 "operator": dialog.operator_name or "—",
-                "status": dialog.status,
-                "outcome": dialog.outcome or "—",
+                "status": STATUS_LABELS.get(dialog.status, dialog.status),
+                "result": OUTCOME_LABELS.get(dialog.outcome or "", "Не определён"),
                 "topic": dialog.close_topic or "—",
                 "channel": channel_label(dialog.channel),
                 "created_at": dialog.created_at.isoformat(),
@@ -657,9 +700,16 @@ def report_chat_history(date_from: date, date_to: date, **filters: Any) -> dict[
                 "summary": (dialog.summary_short or "")[:200],
             }
         )
+    chart = [
+        {"label": STATUS_LABELS.get(key, key), "value": count}
+        for key, count in status_counts.most_common()
+    ] or [
+        {"label": label, "value": count}
+        for label, count in channel_counts.most_common()
+    ]
     return {
         "rows": rows,
-        "chart": [],
+        "chart": chart,
         "summary": {"rows": len(rows)},
         "stub": False,
     }
@@ -669,8 +719,7 @@ def report_usefulness(date_from: date, date_to: date, **_filters: Any) -> dict[s
     stats = sufler_stats(date_from, date_to)
     rows = [
         {
-            "channel": "online_chat",
-            "label": "Онлайн-чат",
+            "channel": "Онлайн-чат",
             "useful_pct": stats["used_pct"] or 0,
             "incomplete_pct": stats["partial_pct"] or 0,
             "unused_pct": stats["unused_pct"] or 0,
@@ -679,7 +728,7 @@ def report_usefulness(date_from: date, date_to: date, **_filters: Any) -> dict[s
         }
     ]
     chart = [
-        {"label": item["label"], "value": item["pct"]}
+        {"label": item["label"], "value": item["value"], "pct": item["pct"]}
         for item in stats["by_choice"]
     ]
     return {
@@ -694,13 +743,74 @@ def report_usefulness(date_from: date, date_to: date, **_filters: Any) -> dict[s
     }
 
 
-def report_relevance(date_from: date, date_to: date, **_filters: Any) -> dict[str, Any]:
+def report_relevance(date_from: date, date_to: date, **filters: Any) -> dict[str, Any]:
     stats = sufler_stats(date_from, date_to)
-    rows = stats["by_channel_topic"]
-    chart = [
-        {"label": f"{row['topic'][:24]}", "value": row["avg_relevance"] or 0}
-        for row in rows[:12]
+    raw_rows = stats["by_channel_topic"]
+    group_by = (filters.get("group_by") or "channel").strip().lower()
+
+    rows = [
+        {
+            "channel": row["channel_label"],
+            "topic": row["topic"],
+            "avg_relevance": row["avg_relevance"],
+            "answers": row["answers"],
+            "used_pct": row["used_pct"],
+        }
+        for row in raw_rows
     ]
+
+    if group_by == "topic":
+        by_topic: dict[str, list[float]] = defaultdict(list)
+        for row in raw_rows:
+            if row["avg_relevance"] is not None:
+                by_topic[row["topic"]].append(float(row["avg_relevance"]))
+        chart = [
+            {
+                "label": topic[:24],
+                "value": round(mean(rels), 1),
+            }
+            for topic, rels in sorted(by_topic.items(), key=lambda x: -len(x[1]))[:12]
+            if rels
+        ]
+        agg_rows = [
+            {
+                "topic": topic,
+                "avg_relevance": round(mean(rels), 1),
+                "answers": len(rels),
+            }
+            for topic, rels in sorted(by_topic.items(), key=lambda x: -len(x[1]))
+        ]
+        rows = agg_rows or rows
+    elif group_by in {"", "none"}:
+        rels = [
+            float(row["avg_relevance"])
+            for row in raw_rows
+            if row["avg_relevance"] is not None
+        ]
+        avg = round(mean(rels), 1) if rels else 0
+        chart = [{"label": "Средняя релевантность", "value": avg}]
+        rows = [{"avg_relevance": avg, "answers": stats["total"]}] if rels else rows
+    else:
+        by_channel: dict[str, list[float]] = defaultdict(list)
+        for row in raw_rows:
+            label = row["channel_label"]
+            if row["avg_relevance"] is not None:
+                by_channel[label].append(float(row["avg_relevance"]))
+        chart = [
+            {"label": label, "value": round(mean(rels), 1)}
+            for label, rels in sorted(by_channel.items(), key=lambda x: x[0])
+            if rels
+        ]
+        agg_rows = [
+            {
+                "channel": label,
+                "avg_relevance": round(mean(rels), 1),
+                "answers": len(rels),
+            }
+            for label, rels in sorted(by_channel.items(), key=lambda x: -len(x[1]))
+        ]
+        rows = agg_rows or rows
+
     return {
         "rows": rows,
         "chart": chart,
@@ -711,8 +821,15 @@ def report_relevance(date_from: date, date_to: date, **_filters: Any) -> dict[st
 
 def report_correctness(date_from: date, date_to: date, **_filters: Any) -> dict[str, Any]:
     stats = sufler_stats(date_from, date_to)
-    rows = stats["by_choice"]
-    chart = [{"label": row["label"], "value": row["pct"]} for row in rows]
+    rows = [
+        {
+            "mark": row["label"],
+            "value": row["value"],
+            "pct": row["pct"],
+        }
+        for row in stats["by_choice"]
+    ]
+    chart = [{"label": row["mark"], "value": row["pct"]} for row in rows]
     return {
         "rows": rows,
         "chart": chart,
@@ -734,14 +851,12 @@ def report_performance(date_from: date, date_to: date, **filters: Any) -> dict[s
             {
                 "date": day,
                 "dialogs": len(group),
-                "p95_first_response_sec": _percentile(frts, 0.95),
                 "avg_first_response_sec": _avg(frts),
                 "aht_sec": _avg(ahts),
-                "p95_ms": int((_percentile(frts, 0.95) or 0) * 1000),
             }
         )
     chart = [
-        {"label": row["date"][5:], "value": row["p95_first_response_sec"] or 0}
+        {"label": row["date"][5:], "value": row["avg_first_response_sec"] or 0}
         for row in rows
     ]
     return {
@@ -749,9 +864,8 @@ def report_performance(date_from: date, date_to: date, **filters: Any) -> dict[s
         "chart": chart,
         "summary": {
             "avg_aht_sec": _avg(aht_seconds(d) for d in dialogs if d.status == "closed"),
-            "p95_first_response_sec": _percentile(
-                [v for v in (first_response_seconds(d) for d in dialogs) if v is not None],
-                0.95,
+            "avg_first_response_sec": _avg(
+                v for v in (first_response_seconds(d) for d in dialogs) if v is not None
             ),
         },
         "stub": not dialogs,
@@ -761,19 +875,26 @@ def report_performance(date_from: date, date_to: date, **filters: Any) -> dict[s
 def report_errors(date_from: date, date_to: date, **_filters: Any) -> dict[str, Any]:
     stats = sufler_stats(date_from, date_to)
     rows = stats["examples_not_used"]
-    # Aggregate by reason label
     reason_counts = Counter(row["reason"] for row in rows)
     aggregated = [
         {
             "reason": reason,
             "count": count,
             "example": next(r["example"] for r in rows if r["reason"] == reason),
-            "channel": "online_chat",
+            "channel": channel_label(
+                next((r.get("channel") for r in rows if r["reason"] == reason), "widget")
+            ),
         }
         for reason, count in reason_counts.most_common()
     ]
     return {
-        "rows": aggregated or rows,
+        "rows": aggregated or [
+            {
+                **row,
+                "channel": channel_label(row.get("channel") or "widget"),
+            }
+            for row in rows
+        ],
         "chart": [{"label": r["reason"][:28], "value": r["count"]} for r in aggregated],
         "summary": {"cases": len(rows)},
         "stub": not rows,
@@ -1121,10 +1242,9 @@ def builder_metric_value(
         return sufler["avg_relevance"], "%"
     if metric_id == "incorrect_llm":
         return sufler["unused_pct"], "%"
-    if metric_id == "p95_ms":
+    if metric_id == "avg_first_response_sec":
         frts = [v for v in (first_response_seconds(d) for d in dialogs) if v is not None]
-        p95 = _percentile(frts, 0.95)
-        return (int(p95 * 1000) if p95 is not None else None), "мс"
+        return _avg(frts), "с"
     if metric_id == "topics_top":
         topics = report_chat_topics(date_from, date_to)
         top = topics["rows"][0]["topic"] if topics["rows"] else "—"

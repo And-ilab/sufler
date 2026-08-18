@@ -125,7 +125,7 @@ export function AsrQaScreen() {
 
       <div className="rpt-asr-layout">
         <div className="rpt-card">
-          <div className="rpt-card__head">Каталог записей</div>
+          <div className="rpt-card__head">Записи</div>
           <div className="rpt-asr-list">
             {items.map((item) => (
               <button

@@ -8,41 +8,56 @@ import { Button, Row, Text } from '../primitives'
 import { ArmModuleFrame } from './ArmModuleFrame'
 import type { ArmModuleProps, ArmUiSettings } from './types'
 
-const STORAGE_KEY = 'arm-ui-settings-v1'
+export const ARM_UI_SETTINGS_KEY = 'arm-ui-settings-v1'
+export const ARM_UI_SETTINGS_EVENT = 'arm-ui-settings-changed'
 
 const DEFAULT_SETTINGS: ArmUiSettings = {
   soundEnabled: true,
   desktopNotify: false,
   compactQueue: false,
   autoExpandSummary: true,
-  showColleagueSection: true,
-  enterToSend: false,
   fontScale: 'md',
 }
 
-function loadSettings(): ArmUiSettings {
+export function loadArmUiSettings(): ArmUiSettings {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(ARM_UI_SETTINGS_KEY)
     if (!raw) return DEFAULT_SETTINGS
-    return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<ArmUiSettings>) }
+    const parsed = JSON.parse(raw) as Partial<ArmUiSettings>
+    return {
+      ...DEFAULT_SETTINGS,
+      ...parsed,
+      // Enter-to-send is fixed product behavior — ignore legacy localStorage overrides.
+    }
   } catch {
     return DEFAULT_SETTINGS
   }
 }
 
-export function SettingsModule({ t, scheme, armRole, onBack }: ArmModuleProps) {
-  const [settings, setSettings] = useState<ArmUiSettings>(() => loadSettings())
+export function armFontScaleFactor(scale: ArmUiSettings['fontScale']): number {
+  if (scale === 'sm') return 0.9
+  if (scale === 'lg') return 1.12
+  return 1
+}
+
+function persistSettings(settings: ArmUiSettings) {
+  try {
+    localStorage.setItem(ARM_UI_SETTINGS_KEY, JSON.stringify(settings))
+  } catch {
+    /* ignore */
+  }
+  window.dispatchEvent(new CustomEvent(ARM_UI_SETTINGS_EVENT, { detail: settings }))
+}
+
+export function SettingsModule({ t, scheme, onBack }: ArmModuleProps) {
+  const [settings, setSettings] = useState<ArmUiSettings>(() => loadArmUiSettings())
   const [saved, setSaved] = useState(false)
   const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>('strict_auto')
   const [assignmentSaving, setAssignmentSaving] = useState(false)
   const [assignmentNotice, setAssignmentNotice] = useState('')
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
-    } catch {
-      /* ignore */
-    }
+    persistSettings(settings)
   }, [settings])
 
   useEffect(() => {
@@ -80,9 +95,6 @@ export function SettingsModule({ t, scheme, armRole, onBack }: ArmModuleProps) {
     >
       <div style={{ padding: 16, maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <Section t={t} title="Распределение диалогов">
-          <Text style={{ fontSize: 12, color: t.text.secondary, marginBottom: 8 }}>
-            Глобальный режим очереди (по ТЗ: автоназначение и ручной выбор из общей очереди).
-          </Text>
           <Row style={{ gap: 8, flexWrap: 'wrap' }}>
             <Button
               size="sm"
@@ -90,7 +102,7 @@ export function SettingsModule({ t, scheme, armRole, onBack }: ArmModuleProps) {
               disabled={assignmentSaving}
               onClick={() => saveAssignmentMode('strict_auto')}
             >
-              Только авто
+              Авто
             </Button>
             <Button
               size="sm"
@@ -98,7 +110,7 @@ export function SettingsModule({ t, scheme, armRole, onBack }: ArmModuleProps) {
               disabled={assignmentSaving}
               onClick={() => saveAssignmentMode('manual_plus_auto')}
             >
-              Ручной + авто (10 сек)
+              Авто + Ручной
             </Button>
           </Row>
           {assignmentNotice ? (
@@ -137,16 +149,9 @@ export function SettingsModule({ t, scheme, armRole, onBack }: ArmModuleProps) {
             checked={settings.autoExpandSummary}
             onChange={(v) => patch('autoExpandSummary', v)}
           />
-          <Toggle
-            label="Показывать секцию «Диалоги коллег» в очереди"
-            checked={settings.showColleagueSection}
-            onChange={(v) => patch('showColleagueSection', v)}
-          />
-          <Toggle
-            label="Enter отправляет ответ клиенту (Shift+Enter — новая строка)"
-            checked={settings.enterToSend}
-            onChange={(v) => patch('enterToSend', v)}
-          />
+          <Text style={{ fontSize: 12, color: t.text.secondary, lineHeight: 1.45 }}>
+            Enter отправляет ответ клиенту, Shift+Enter — новая строка. Это поведение зафиксировано для всех ролей.
+          </Text>
         </Section>
 
         <Section t={t} title="Отображение">
@@ -169,10 +174,6 @@ export function SettingsModule({ t, scheme, armRole, onBack }: ArmModuleProps) {
               </Button>
             ))}
           </Row>
-          <Text style={{ fontSize: 12, color: t.text.tertiary, marginTop: 10 }}>
-            Тема оформления (светлая / тёмная) переключается кнопкой в шапке платформы чата.
-            Роль текущей сессии: {armRole}.
-          </Text>
         </Section>
 
         <Section t={t} title="Сброс">

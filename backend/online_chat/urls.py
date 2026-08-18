@@ -1,8 +1,11 @@
 from django.urls import path
 
 from online_chat.views import (
+    ad_pending_operators,
     analytics,
     assignment_settings,
+    base_message_detail,
+    base_messages_collection,
     bot_detail,
     bots_collection,
     channel_detail,
@@ -32,6 +35,7 @@ from online_chat.views import (
     internal_messages_collection,
     internal_messages_mark_read,
     operator_detail,
+    operator_photo,
     operator_presence,
     operators_collection,
     placement_detail,
@@ -39,15 +43,25 @@ from online_chat.views import (
     routing_rule_detail,
     routing_rules_collection,
     routing_run,
+    sla_settings,
     sufler_hint_feedback,
+    sufler_outage_report,
     supervisor_overview,
     widget_config,
+    work_day_control,
+    work_schedule_settings,
+    work_schedule_status,
 )
 
 urlpatterns = [
     path("departments/", departments_collection, name="online_chat_departments"),
     path("departments/<uuid:item_id>/", department_detail, name="online_chat_department"),
     path("operators/", operators_collection, name="online_chat_operators"),
+    path(
+        "operators/<uuid:item_id>/photo/",
+        operator_photo,
+        name="online_chat_operator_photo",
+    ),
     path("operators/<uuid:item_id>/", operator_detail, name="online_chat_operator"),
     path(
         "operators/<uuid:item_id>/presence/",
@@ -66,14 +80,30 @@ urlpatterns = [
     path("routing-rules/", routing_rules_collection, name="online_chat_routing_rules"),
     path("bots/", bots_collection, name="online_chat_bots"),
     path("bots/<uuid:item_id>/", bot_detail, name="online_chat_bot"),
+    path("base-messages/", base_messages_collection, name="online_chat_base_messages"),
+    path(
+        "base-messages/<uuid:item_id>/",
+        base_message_detail,
+        name="online_chat_base_message",
+    ),
     path(
         "routing-rules/<uuid:item_id>/",
         routing_rule_detail,
         name="online_chat_routing_rule",
     ),
     path("supervisor/overview/", supervisor_overview, name="online_chat_supervisor"),
+    path("ad/pending-operators/", ad_pending_operators, name="online_chat_ad_pending"),
     path("assignment-settings/", assignment_settings, name="online_chat_assignment_settings"),
+    path("sla-settings/", sla_settings, name="online_chat_sla_settings"),
+    path("work-schedule/", work_schedule_settings, name="online_chat_work_schedule"),
+    path(
+        "work-schedule/status/",
+        work_schedule_status,
+        name="online_chat_work_schedule_status",
+    ),
+    path("work-schedule/control/", work_day_control, name="online_chat_work_day_control"),
     path("sufler-feedback/", sufler_hint_feedback, name="online_chat_sufler_feedback"),
+    path("sufler-outage/", sufler_outage_report, name="online_chat_sufler_outage"),
     path("analytics/", analytics, name="online_chat_analytics"),
     path("history/", client_history, name="online_chat_client_history"),
     path(

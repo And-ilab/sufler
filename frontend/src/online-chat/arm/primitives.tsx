@@ -1,4 +1,4 @@
-import type { CSSProperties, MouseEvent, ReactNode } from 'react'
+import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 
 export function Row({
   children,
@@ -280,6 +280,7 @@ export function TextArea({
   rows,
   disabled,
   style,
+  onKeyDown,
 }: {
   value: string
   onChange: (value: string) => void
@@ -287,11 +288,13 @@ export function TextArea({
   rows?: number
   disabled?: boolean
   style?: CSSProperties
+  onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void
 }) {
   return (
     <textarea
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onKeyDown={onKeyDown}
       placeholder={placeholder}
       rows={rows}
       disabled={disabled}
@@ -320,7 +323,7 @@ export function Callout({
   className,
 }: {
   children?: ReactNode
-  tone?: 'info' | 'warning' | 'success'
+  tone?: 'info' | 'warning' | 'success' | 'danger'
   title?: string
   style?: CSSProperties
   className?: string
@@ -329,6 +332,7 @@ export function Callout({
     info: { background: '#E3F2FD', borderColor: '#90CAF9', color: '#0D47A1' },
     warning: { background: '#FFF8E1', borderColor: '#FFE082', color: '#F57F17' },
     success: { background: '#E8F5E9', borderColor: '#A5D6A7', color: '#1B5E20' },
+    danger: { background: '#FFEBEE', borderColor: '#EF9A9A', color: '#B71C1C' },
   }
   return (
     <div

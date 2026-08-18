@@ -2,7 +2,7 @@
   {
     "id": "ASS-T-01",
     "module": "assistant",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "ASS-T-02",
@@ -17,7 +17,7 @@
   {
     "id": "ASS-T-04",
     "module": "assistant",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "ASS-T-04a",
@@ -277,7 +277,7 @@
   {
     "id": "DOC-T-01",
     "module": "documents",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "DOC-T-02",
@@ -292,7 +292,7 @@
   {
     "id": "DOC-T-04",
     "module": "documents",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "DOC-T-05",
@@ -367,7 +367,7 @@
   {
     "id": "INT-T-ASR-01",
     "module": "integration",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "INT-T-ASR-02",
@@ -387,7 +387,7 @@
   {
     "id": "INT-T-AUD-01",
     "module": "integration",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "INT-T-AUD-02",
@@ -402,7 +402,7 @@
   {
     "id": "INT-T-AUD-04",
     "module": "integration",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "INT-T-OKT",
@@ -412,7 +412,7 @@
   {
     "id": "INT-T-OKT-01",
     "module": "integration",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "INT-T-OKT-02",
@@ -427,7 +427,7 @@
   {
     "id": "INT-T-OKT-04",
     "module": "integration",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "INT-T-OKT-05",
@@ -452,7 +452,7 @@
   {
     "id": "INT-T-OKTELL-MRCP-01",
     "module": "integration",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "INT-T-OKTELL-MRCP-02",
@@ -467,7 +467,7 @@
   {
     "id": "INT-T-SUZ-01",
     "module": "integration",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "INT-T-SUZ-02",
@@ -482,7 +482,7 @@
   {
     "id": "INT-T-SUZ-04",
     "module": "integration",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "INT-T-SUZ-05",
@@ -507,7 +507,7 @@
   {
     "id": "SUF-T-01",
     "module": "sufler",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "SUF-T-02",
@@ -522,7 +522,7 @@
   {
     "id": "SUF-T-04",
     "module": "sufler",
-    "status": "pending"
+    "status": "pass"
   },
   {
     "id": "SUF-T-05",

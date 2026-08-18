@@ -17,7 +17,16 @@ from online_chat.models import (
     OperatorProfile,
     RoutingRule,
     WidgetPlacement,
+    WorkScheduleSettings,
 )
+
+
+def line_is_open(now=None) -> bool:
+    """Whether the online-chat line currently distributes dialogs to operators."""
+    try:
+        return WorkScheduleSettings.get_solo().is_open(now)
+    except Exception:  # pragma: no cover - never block on settings lookup
+        return True
 
 
 def record_event(
@@ -110,7 +119,12 @@ def _held_operator_ids() -> set[Any]:
 
 
 def start_post_close_grace(operator: OperatorProfile | None) -> OperatorAssignmentHold | None:
-    """In manual+auto mode, give the operator 5s to pick before auto-assign."""
+    """In manual+auto mode, give the operator time to pick before auto-assign.
+
+    Grace applies when closing freed a slot that was at capacity. If the operator
+    already had spare capacity (limit raised / underloaded), skip the hold so
+    auto-assign can fill immediately.
+    """
     if operator is None:
         return None
     settings = AssignmentSettings.get_solo()
@@ -118,18 +132,44 @@ def start_post_close_grace(operator: OperatorProfile | None) -> OperatorAssignme
         return None
     if operator.role == OperatorProfile.Role.SUPERVISOR:
         return None
+    # Dialog is already closed → current active count is post-close.
+    active_now = Dialog.objects.filter(
+        operator=operator,
+        status=Dialog.Status.ACTIVE,
+    ).count()
+    capacity = max(1, int(getattr(operator, "max_active_dialogs", None) or 1))
+    # Before close they had active_now + 1. Need grace only if that was >= capacity.
+    if active_now + 1 < capacity:
+        return None
     until = timezone.now() + timedelta(seconds=AssignmentSettings.GRACE_SECONDS)
     OperatorAssignmentHold.objects.filter(operator=operator, until__gt=timezone.now()).delete()
     hold = OperatorAssignmentHold.objects.create(operator=operator, until=until)
+    operator_id = str(operator.id)
+    delay = AssignmentSettings.GRACE_SECONDS + 1
+    scheduled = False
     try:
         from online_chat.tasks import run_assignments_after_delay
 
         run_assignments_after_delay.apply_async(
-            countdown=AssignmentSettings.GRACE_SECONDS + 1,
-            kwargs={"operator_id": str(operator.id)},
+            countdown=delay,
+            kwargs={"operator_id": operator_id},
         )
-    except Exception:  # noqa: BLE001 — celery may be unavailable in some tests
-        pass
+        scheduled = True
+    except Exception:  # noqa: BLE001 — celery may be unavailable
+        scheduled = False
+    if not scheduled:
+        # Local / no-worker fallback so grace still ends with auto-assign.
+        import threading
+
+        def _fallback() -> None:
+            try:
+                from online_chat.tasks import run_assignments_after_delay
+
+                run_assignments_after_delay(operator_id=operator_id)
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Timer(delay, _fallback).start()
     return hold
 
 
@@ -221,14 +261,29 @@ def _max_load_for_dialog(dialog: Dialog) -> int | None:
 def auto_assign_dialog(dialog: Dialog) -> Dialog | None:
     if dialog.status != Dialog.Status.WAITING:
         return None
+    # Offline-parked dialogs (arrived outside working hours / via offline widget)
+    # are not distributed until the working day starts.
+    if dialog.outcome == Dialog.Outcome.OFFLINE:
+        return None
+    # Demo leftovers reserved for Sheipa until "Начать рабочий день".
+    if "sheipa_demo" in (dialog.routing_reason or ""):
+        return None
+    # Outside working hours the line does not auto-distribute at all.
+    if not line_is_open():
+        return None
     max_load = _max_load_for_dialog(dialog)
-    for candidate in _eligible_operators(dialog, max_load=max_load)[:20]:
+    candidates = list(_eligible_operators(dialog, max_load=max_load)[:20])
+    # Offline-widget demo clients stay with Sheipa — never regular operators.
+    if "offline_demo" in (dialog.routing_reason or ""):
+        candidates = [
+            op for op in candidates if op.external_id == "dev-operator-sheipa"
+        ]
+    for candidate in candidates:
         try:
             return accept_waiting_dialog(dialog.pk, operator=candidate)
         except ValueError:
             continue
     return None
-
 
 def waiting_queue_queryset(*, department: Department | None = None):
     """FIFO by last client activity — newest writers go to the end of the queue."""
@@ -244,9 +299,45 @@ def waiting_queue_queryset(*, department: Department | None = None):
     return qs
 
 
+def release_offline_queue(*, include_demo: bool = False) -> int:
+    """Move parked offline dialogs back into the live waiting queue.
+
+    Calendar opening releases only real after-hours dialogs. The demo offline
+    widget keeps its queue until an operator explicitly starts the working day.
+    """
+    qs = Dialog.objects.filter(
+        status=Dialog.Status.WAITING,
+        outcome=Dialog.Outcome.OFFLINE,
+    )
+    if not include_demo:
+        qs = qs.exclude(routing_reason__contains="offline_demo")
+    updated = qs.update(outcome="")
+    return int(updated)
+
+
+def release_sheipa_demo_holds() -> int:
+    """Allow Sheipa demo leftovers to enter normal auto-assignment."""
+    updated = 0
+    for dialog in Dialog.objects.filter(
+        status=Dialog.Status.WAITING,
+        routing_reason__contains="sheipa_demo",
+    ):
+        reason = (dialog.routing_reason or "").replace("sheipa_demo", "").strip(";")
+        while ";;" in reason:
+            reason = reason.replace(";;", ";")
+        dialog.routing_reason = reason
+        dialog.save(update_fields=["routing_reason", "updated_at"])
+        updated += 1
+    return updated
+
+
 def run_assignments(*, department: Department | None = None) -> list[Dialog]:
+    # Outside working hours nothing is distributed (offline queue only).
+    if not line_is_open():
+        return []
     # Drop expired holds opportunistically.
     OperatorAssignmentHold.objects.filter(until__lte=timezone.now()).delete()
+    release_offline_queue(include_demo=False)
     qs = waiting_queue_queryset(department=department)
     assigned: list[Dialog] = []
     for dialog in qs[:500]:

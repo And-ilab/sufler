@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
-from reports.cc_analytics import CHANNEL_ONLINE_CHAT, parse_analytics_filters
+from reports.cc_analytics import CHANNEL_ONLINE_CHAT, CcAnalyticsError, parse_analytics_filters
 from reports.cc_chat_metrics import (
     builder_metric_value,
     report_chat_history,
@@ -63,7 +63,7 @@ REPORT_TYPES = (
     {
         "id": "chat-offline",
         "fr": "FR-RPT-CC-12",
-        "label": "Офлайн / потерянные / отказы",
+        "label": "Необработанные и отказные обращения",
         "default_view": "pie",
         "group": "Онлайн-чат",
     },
@@ -84,7 +84,7 @@ REPORT_TYPES = (
     {
         "id": "relevance",
         "fr": "FR-RPT-CC-07",
-        "label": "Релевантность по каналам и тематикам",
+        "label": "Релевантность ответов",
         "default_view": "bar",
         "group": "Суфлёр / LLM",
     },
@@ -105,7 +105,7 @@ REPORT_TYPES = (
     {
         "id": "errors",
         "fr": "FR-RPT-CC-09",
-        "label": "Неиспользованные / слабые подсказки",
+        "label": "Неиспользованные подсказки",
         "default_view": "table",
         "group": "Суфлёр / LLM",
     },
@@ -182,6 +182,10 @@ def _parse_filters(query: Any) -> dict[str, Any]:
     filters["topic"] = topic
     filters["status"] = status
     filters["department_id"] = department
+    group_by = str(query.get("group_by") or "channel").strip().lower()
+    if group_by not in {"", "none", "channel", "topic"}:
+        group_by = "channel"
+    filters["group_by"] = group_by or "channel"
     return filters
 
 
@@ -198,7 +202,15 @@ def build_report_payload(query: Any) -> dict[str, Any]:
         "topic": filters.get("topic") or "",
         "status": filters.get("status") or "",
     }
-    built = builder(date_from, date_to, **kwargs)
+    # group_by applies only to relevance report; other builders reject unknown kwargs.
+    if report_id == "relevance":
+        kwargs["group_by"] = filters.get("group_by") or "channel"
+    try:
+        built = builder(date_from, date_to, **kwargs)
+    except TypeError as exc:
+        raise CcAnalyticsError(
+            f"Не удалось построить отчёт «{meta.get('label') or report_id}»: {exc}"
+        ) from exc
     rows = built.get("rows") or []
     chart = built.get("chart") or []
     summary = {
@@ -207,6 +219,9 @@ def build_report_payload(query: Any) -> dict[str, Any]:
         "period": f"{filters['date_from']} — {filters['date_to']}",
         **(built.get("summary") or {}),
     }
+    # Hide technical ids / advanced percentiles from KPI strip.
+    summary.pop("p95_first_response_sec", None)
+    summary.pop("p95_ms", None)
     return {
         "filters": filters,
         "catalog": list(REPORT_TYPES),
@@ -220,9 +235,16 @@ def build_report_payload(query: Any) -> dict[str, Any]:
     }
 
 
-def list_builder_templates() -> dict[str, Any]:
+def list_builder_templates(*, saved: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     return {
         "templates": [
+            {
+                "id": "tpl-quality-demo",
+                "name": "Качество сервиса и суфлёра",
+                "metrics": ["sla_pct", "useful_pct", "relevance_avg", "incorrect_llm"],
+                "filters": {"channel": "online_chat", "period": "week"},
+                "view_mode": "bar",
+            },
             {
                 "id": "tpl-chat-week",
                 "name": "Онлайн-чат — неделя",
@@ -245,17 +267,20 @@ def list_builder_templates() -> dict[str, Any]:
                 "view_mode": "pie",
             },
         ],
+        "saved": saved or [],
         "metric_catalog": [
             {"id": "dialogs_total", "label": "Число диалогов"},
             {"id": "dialogs_closed", "label": "Закрытых диалогов"},
             {"id": "sla_pct", "label": "Соблюдение SLA первого ответа, %"},
             {"id": "csat", "label": "Средняя оценка клиента"},
             {"id": "useful_pct", "label": "Полезность суфлёра, %"},
-            {"id": "relevance_avg", "label": "Средняя релевантность"},
+            {"id": "sufler_used_pct", "label": "Использование суфлёра, %"},
+            {"id": "relevance_avg", "label": "Средняя релевантность, %"},
             {"id": "incorrect_llm", "label": "Доля «не использовал», %"},
-            {"id": "p95_ms", "label": "p95 времени первого ответа, мс"},
+            {"id": "avg_first_response_sec", "label": "Среднее время первого ответа, с"},
             {"id": "topics_top", "label": "Число тематик"},
             {"id": "aht_sec", "label": "Среднее время обработки, с"},
+            {"id": "aht", "label": "Среднее время обработки, с"},
         ],
         "stub": False,
     }
@@ -283,12 +308,36 @@ def preview_builder(body: dict[str, Any]) -> dict[str, Any]:
 
     rows = []
     chart = []
+    metric_labels = {
+        "dialogs_total": "Число диалогов",
+        "dialogs_closed": "Закрытых диалогов",
+        "sla_pct": "Соблюдение SLA первого ответа, %",
+        "csat": "Средняя оценка клиента",
+        "useful_pct": "Полезность суфлёра, %",
+        "sufler_used_pct": "Использование суфлёра, %",
+        "relevance_avg": "Средняя релевантность, %",
+        "incorrect_llm": "Доля «не использовал», %",
+        "avg_first_response_sec": "Среднее время первого ответа, с",
+        "topics_top": "Число тематик",
+        "aht_sec": "Среднее время обработки, с",
+        "aht": "Среднее время обработки, с",
+    }
     for metric in metrics:
-        value, unit = builder_metric_value(str(metric), date_from, date_to)
+        metric_id = str(metric)
+        value, unit = builder_metric_value(metric_id, date_from, date_to)
+        label = metric_labels.get(metric_id, metric_id)
         display = value if value is not None else "—"
-        rows.append({"metric": metric, "value": display if not isinstance(display, str) else 0, "unit": unit, "display": display})
+        rows.append(
+            {
+                "metric": label,
+                "metric_id": metric_id,
+                "value": display if not isinstance(display, str) else 0,
+                "unit": unit or "—",
+                "display": display,
+            }
+        )
         if isinstance(value, (int, float)):
-            chart.append({"label": str(metric), "value": float(value)})
+            chart.append({"label": label, "value": float(value)})
     return {
         "name": name,
         "view_mode": view_mode,

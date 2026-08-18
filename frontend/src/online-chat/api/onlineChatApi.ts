@@ -16,14 +16,17 @@ export type OnlineChatDialog = {
   channel: string
   status: DialogStatus
   outcome?: string
+  routing_reason?: string
   initiated_by?: 'client' | 'operator'
   client_first_name: string
   client_last_name: string
   client_phone: string
   client_external_id?: string
   client_name: string
+  client_fields?: { label: string; value: string }[]
   client_online?: boolean
   operator_name: string
+  operator_avatar?: string
   department_id?: string | null
   department_name?: string | null
   preview: string
@@ -131,6 +134,7 @@ export type OnlineChatMessage = {
   attachment_size?: number
   attachment_scan_status?: string
   created_at: string
+  is_history?: boolean
 }
 
 export type OnlineChatClientBlock = {
@@ -180,21 +184,45 @@ export function dialogRefCode(dialog: Pick<OnlineChatDialog, 'id' | 'ref_code'>)
 
 export async function listDialogs(
   status?: DialogStatus,
-  extras?: { client_online?: boolean; initiated_by?: 'client' | 'operator' },
+  extras?: {
+    client_online?: boolean
+    initiated_by?: 'client' | 'operator'
+    operator_name?: string
+    channel?: string
+    q?: string
+    date_from?: string
+    date_to?: string
+    has_feedback?: boolean
+    outcome?: string
+    close_topic?: string
+  },
 ): Promise<OnlineChatDialog[]> {
   const params = new URLSearchParams()
   if (status) params.set('status', status)
   if (extras?.client_online === true) params.set('client_online', 'true')
   if (extras?.client_online === false) params.set('client_online', 'false')
   if (extras?.initiated_by) params.set('initiated_by', extras.initiated_by)
+  if (extras?.operator_name) params.set('operator_name', extras.operator_name)
+  if (extras?.channel) params.set('channel', extras.channel)
+  if (extras?.q) params.set('q', extras.q)
+  if (extras?.date_from) params.set('date_from', extras.date_from)
+  if (extras?.date_to) params.set('date_to', extras.date_to)
+  if (extras?.has_feedback === true) params.set('has_feedback', 'true')
+  if (extras?.has_feedback === false) params.set('has_feedback', 'false')
+  if (extras?.outcome) params.set('outcome', extras.outcome)
+  if (extras?.close_topic) params.set('close_topic', extras.close_topic)
   const query = params.toString() ? `?${params.toString()}` : ''
   const response = await fetch(`/api/v1/online-chat/dialogs/${query}`)
   const body = await parseJson<{ ok: boolean; items: OnlineChatDialog[] }>(response)
   return body.items
 }
 
-export async function getDialog(dialogId: string): Promise<OnlineChatDialog> {
-  const response = await fetch(`/api/v1/online-chat/dialogs/${dialogId}/`)
+export async function getDialog(
+  dialogId: string,
+  extras?: { includeHistory?: boolean },
+): Promise<OnlineChatDialog> {
+  const query = extras?.includeHistory ? '?include_history=1' : ''
+  const response = await fetch(`/api/v1/online-chat/dialogs/${dialogId}/${query}`)
   const body = await parseJson<{ ok: boolean; dialog: OnlineChatDialog }>(response)
   return body.dialog
 }
@@ -271,6 +299,20 @@ export async function submitSuflerHintFeedback(payload: {
   request_id?: string
 }): Promise<void> {
   const response = await fetch('/api/v1/online-chat/sufler-feedback/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  await parseJson<{ ok: boolean }>(response)
+}
+
+export async function reportSuflerOutage(payload: {
+  dialog_id?: string
+  operator_name?: string
+  query?: string
+  detail?: string
+}): Promise<void> {
+  const response = await fetch('/api/v1/online-chat/sufler-outage/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

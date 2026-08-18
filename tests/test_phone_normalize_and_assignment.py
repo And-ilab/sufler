@@ -122,6 +122,19 @@ class AssignmentQueueTest(TestCase):
         settings = AssignmentSettings.get_solo()
         settings.mode = AssignmentSettings.Mode.MANUAL_PLUS_AUTO
         settings.save(update_fields=["mode", "updated_at"])
+        # Grace only when closing freed a slot that was at capacity.
+        # Post-close: capacity-1 active → before close they were full.
+        capacity = self.operator.max_active_dialogs
+        for index in range(max(0, capacity - 1)):
+            Dialog.objects.create(
+                channel="widget",
+                status=Dialog.Status.ACTIVE,
+                operator=self.operator,
+                operator_name=self.operator.display_name,
+                client_first_name="Клиент",
+                client_last_name=str(index),
+                preview="grace",
+            )
         before = timezone.now()
         with patch(
             "online_chat.tasks.run_assignments_after_delay.apply_async",
@@ -134,3 +147,15 @@ class AssignmentQueueTest(TestCase):
             before + timedelta(seconds=AssignmentSettings.GRACE_SECONDS - 1),
         )
         self.assertGreater(hold.until, before)
+
+    def test_manual_plus_auto_grace_skipped_when_under_capacity(self):
+        settings = AssignmentSettings.get_solo()
+        settings.mode = AssignmentSettings.Mode.MANUAL_PLUS_AUTO
+        settings.save(update_fields=["mode", "updated_at"])
+        # Operator underloaded (0 active, max 3) → no hold after close.
+        with patch(
+            "online_chat.tasks.run_assignments_after_delay.apply_async",
+            return_value=None,
+        ):
+            hold = start_post_close_grace(self.operator)
+        self.assertIsNone(hold)

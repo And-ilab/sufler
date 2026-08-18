@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
+import logging
 import re
 import uuid
 from collections.abc import Mapping
+from datetime import timedelta
 from functools import wraps
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -13,7 +17,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
 from django.db.models import Avg, Count, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, redirect
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -26,6 +30,7 @@ from auth.roles import (
 )
 from online_chat.models import (
     AssignmentSettings,
+    BaseMessage,
     BotConfiguration,
     ChannelConnection,
     ClientBlock,
@@ -36,13 +41,19 @@ from online_chat.models import (
     InternalMessage,
     OperatorProfile,
     RoutingRule,
+    ServiceLevelSettings,
     SuflerHintFeedback,
     WidgetPlacement,
-    normalize_phone,
+    WorkScheduleSettings,
+    normalize_form_fields,
 )
 from online_chat.storage import get_chat_object_store
 from online_chat.routing_services import (
     accept_waiting_dialog,
+    line_is_open,
+    record_event,
+    release_offline_queue,
+    release_sheipa_demo_holds,
     run_assignments,
     transfer_to_operator,
     update_operator_presence,
@@ -64,6 +75,8 @@ from online_chat.services import (
     serialize_dialog,
     serialize_feedback,
     serialize_message,
+    history_identity_query,
+    channel_label,
     serialize_transcript_email,
     set_client_presence,
     transfer_dialog,
@@ -71,6 +84,8 @@ from online_chat.services import (
 )
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+logger = logging.getLogger(__name__)
 
 
 class OnlineChatApiError(ValueError):
@@ -217,6 +232,39 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
             qs = qs.filter(department_id=request.GET["department_id"])
         if request.GET.get("channel"):
             qs = qs.filter(channel=request.GET["channel"])
+        if request.GET.get("outcome"):
+            qs = qs.filter(outcome=request.GET["outcome"])
+        if request.GET.get("close_topic"):
+            qs = qs.filter(close_topic__icontains=request.GET["close_topic"].strip())
+        has_feedback = (request.GET.get("has_feedback") or "").strip().lower()
+        if has_feedback in {"1", "true", "yes"}:
+            qs = qs.filter(feedback__isnull=False).distinct()
+        elif has_feedback in {"0", "false", "no"}:
+            qs = qs.filter(feedback__isnull=True)
+        date_from = (request.GET.get("date_from") or "").strip()
+        date_to = (request.GET.get("date_to") or "").strip()
+        if date_from:
+            qs = qs.filter(created_at__date__gte=date_from)
+        if date_to:
+            qs = qs.filter(created_at__date__lte=date_to)
+        q_raw = (request.GET.get("q") or "").strip()
+        if q_raw:
+            from django.db.models import Q
+            tokens = [token for token in re.split(r"\s+", q_raw) if token]
+            for token in tokens:
+                token_q = (
+                    Q(client_first_name__icontains=token)
+                    | Q(client_last_name__icontains=token)
+                    | Q(client_phone__icontains=token)
+                    | Q(operator_name__icontains=token)
+                    | Q(close_topic__icontains=token)
+                    | Q(preview__icontains=token)
+                    | Q(channel__icontains=token)
+                    | Q(id__icontains=token)
+                    | Q(messages__text__icontains=token)
+                )
+                qs = qs.filter(token_q)
+            qs = qs.distinct()
         # Waiting queue: oldest first so the newest writer is at the bottom in UI.
         if status == Dialog.Status.WAITING:
             qs = qs.annotate(
@@ -259,6 +307,10 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
                 channel=_str_field(payload, "channel", "widget") or "widget",
                 initiated_by=initiated_by,
                 operator_name=_str_field(payload, "operator_name"),
+                client_fields=payload.get("fields")
+                if isinstance(payload.get("fields"), list)
+                else None,
+                force_offline=_bool_field(payload, "offline_demo", False),
             )
         except PermissionError as exc:
             return JsonResponse(
@@ -285,8 +337,20 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET"])
 def dialog_detail(request: HttpRequest, dialog_id: str) -> HttpResponse:
     dialog = get_object_or_404(Dialog, pk=dialog_id)
+    include_history = (request.GET.get("include_history") or "").strip().casefold() in {
+        "1",
+        "true",
+        "yes",
+    }
     return JsonResponse(
-        {"ok": True, "dialog": serialize_dialog(dialog, include_messages=True)},
+        {
+            "ok": True,
+            "dialog": serialize_dialog(
+                dialog,
+                include_messages=True,
+                include_history=include_history,
+            ),
+        },
     )
 
 
@@ -467,6 +531,14 @@ def dialog_accept(request: HttpRequest, dialog_id: str) -> HttpResponse:
         operator_name = _str_field(payload, "operator_name", "Иванов И.И.") or "Иванов И.И."
         if dialog.status == Dialog.Status.CLOSED:
             raise OnlineChatApiError("dialog is closed")
+        if not line_is_open():
+            raise OnlineChatApiError(
+                "Сейчас нерабочее время. Диалоги можно брать после начала рабочего дня."
+            )
+        if dialog.outcome == Dialog.Outcome.OFFLINE:
+            raise OnlineChatApiError(
+                "Диалог из офлайн-очереди станет доступен после начала рабочего дня."
+            )
         operator_id = _str_field(payload, "operator_id")
         if operator_id:
             operator = get_object_or_404(OperatorProfile, pk=operator_id)
@@ -474,7 +546,14 @@ def dialog_accept(request: HttpRequest, dialog_id: str) -> HttpResponse:
         else:
             dialog = accept_dialog(dialog, operator_name)
         return JsonResponse(
-            {"ok": True, "dialog": serialize_dialog(dialog, include_messages=True)},
+            {
+                "ok": True,
+                "dialog": serialize_dialog(
+                    dialog,
+                    include_messages=True,
+                    include_history=True,
+                ),
+            },
         )
     except (OnlineChatApiError, ValueError) as exc:
         return _error(OnlineChatApiError(str(exc)), status=409 if isinstance(exc, ValueError) else 400)
@@ -568,6 +647,195 @@ def dialog_close(request: HttpRequest, dialog_id: str) -> HttpResponse:
 
 @csrf_exempt
 @require_http_methods(["GET", "PUT", "PATCH"])
+@_chat_permissions(PERM_CC_ADMIN)
+def sla_settings(request: HttpRequest) -> HttpResponse:
+    settings_obj = ServiceLevelSettings.get_solo()
+    if request.method == "GET":
+        return JsonResponse(
+            {
+                "ok": True,
+                "settings": {
+                    "first_response_seconds": settings_obj.first_response_seconds,
+                    "updated_at": settings_obj.updated_at.isoformat(),
+                },
+            }
+        )
+    try:
+        payload = _json_body(request)
+        seconds = _int_field(payload, "first_response_seconds")
+        if seconds < 15 or seconds > 3600:
+            raise OnlineChatApiError("first_response_seconds must be between 15 and 3600")
+        settings_obj.first_response_seconds = seconds
+        settings_obj.save(update_fields=["first_response_seconds", "updated_at"])
+        return JsonResponse(
+            {
+                "ok": True,
+                "settings": {
+                    "first_response_seconds": settings_obj.first_response_seconds,
+                    "updated_at": settings_obj.updated_at.isoformat(),
+                },
+            }
+        )
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+def _work_schedule_dict(obj: WorkScheduleSettings) -> dict[str, Any]:
+    return {
+        "enabled": obj.enabled,
+        "start_time": obj.start_time.strftime("%H:%M"),
+        "end_time": obj.end_time.strftime("%H:%M"),
+        "workdays": list(obj.workdays or []),
+        "holidays": list(obj.holidays or []),
+        "day_overrides": dict(obj.day_overrides or {}),
+        "manual_override": obj.manual_override,
+        "is_open": obj.is_open(),
+        "updated_at": obj.updated_at.isoformat(),
+    }
+
+
+def _parse_hhmm(value: str, field: str):
+    from datetime import datetime as _dt
+
+    try:
+        return _dt.strptime(str(value).strip(), "%H:%M").time()
+    except (ValueError, TypeError) as exc:
+        raise OnlineChatApiError(f"{field} must be HH:MM") from exc
+
+
+def _normalize_day_overrides(raw) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise OnlineChatApiError("day_overrides must be an object")
+    cleaned: dict[str, Any] = {}
+    for key, value in raw.items():
+        date_key = str(key).strip()
+        if len(date_key) != 10 or date_key[4] != "-" or date_key[7] != "-":
+            raise OnlineChatApiError(f"invalid day_overrides date: {date_key}")
+        if not isinstance(value, dict):
+            raise OnlineChatApiError(f"day_overrides[{date_key}] must be an object")
+        entry: dict[str, Any] = {
+            "is_workday": bool(value.get("is_workday")),
+        }
+        if "start_time" in value and value.get("start_time"):
+            start = _parse_hhmm(str(value.get("start_time")), "start_time")
+            entry["start_time"] = start.strftime("%H:%M")
+        if "end_time" in value and value.get("end_time"):
+            end = _parse_hhmm(str(value.get("end_time")), "end_time")
+            entry["end_time"] = end.strftime("%H:%M")
+        cleaned[date_key] = entry
+    return cleaned
+
+
+@csrf_exempt
+@require_http_methods(["GET", "PUT", "PATCH"])
+@_chat_permissions(PERM_CC_ADMIN)
+def work_schedule_settings(request: HttpRequest) -> HttpResponse:
+    obj = WorkScheduleSettings.get_solo()
+    if request.method == "GET":
+        return JsonResponse({"ok": True, "settings": _work_schedule_dict(obj)})
+    try:
+        payload = _json_body(request)
+        if "enabled" in payload:
+            obj.enabled = _bool_field(payload, "enabled", obj.enabled)
+        if "start_time" in payload:
+            obj.start_time = _parse_hhmm(payload.get("start_time"), "start_time")
+        if "end_time" in payload:
+            obj.end_time = _parse_hhmm(payload.get("end_time"), "end_time")
+        if "workdays" in payload:
+            raw = payload.get("workdays")
+            if not isinstance(raw, list):
+                raise OnlineChatApiError("workdays must be a list of 0..6")
+            days = sorted({int(x) for x in raw if isinstance(x, (int, float)) and 0 <= int(x) <= 6})
+            obj.workdays = days
+        if "holidays" in payload:
+            raw = payload.get("holidays")
+            if not isinstance(raw, list):
+                raise OnlineChatApiError("holidays must be a list of YYYY-MM-DD")
+            obj.holidays = [str(x).strip() for x in raw if str(x).strip()]
+        if "day_overrides" in payload:
+            obj.day_overrides = _normalize_day_overrides(payload.get("day_overrides"))
+        if "manual_override" in payload:
+            override = str(payload.get("manual_override") or "").strip()
+            if override not in WorkScheduleSettings.Override.values:
+                raise OnlineChatApiError("invalid manual_override")
+            obj.manual_override = override
+        obj.save()
+        # Applying settings may re-open the line — flush the offline backlog.
+        if obj.is_open():
+            run_assignments()
+        return JsonResponse({"ok": True, "settings": _work_schedule_dict(obj)})
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@require_http_methods(["GET"])
+def work_schedule_status(request: HttpRequest) -> HttpResponse:
+    """Public status the ARM polls to show the line state / start-day button."""
+    obj = WorkScheduleSettings.get_solo()
+    is_open = obj.is_open()
+    # When the clock crosses opening time, release overnight leftovers.
+    if is_open and Dialog.objects.filter(
+        status=Dialog.Status.WAITING,
+        outcome=Dialog.Outcome.OFFLINE,
+    ).exists():
+        run_assignments()
+        is_open = obj.is_open()
+    return JsonResponse(
+        {
+            "ok": True,
+            "is_open": is_open,
+            "enabled": obj.enabled,
+            "manual_override": obj.manual_override,
+            "start_time": obj.start_time.strftime("%H:%M"),
+            "end_time": obj.end_time.strftime("%H:%M"),
+        }
+    )
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def work_day_control(request: HttpRequest) -> HttpResponse:
+    """Start / stop the working day (demo button + prod manual override)."""
+    try:
+        payload = _json_body(request)
+        action = str(payload.get("action") or "").strip()
+        obj = WorkScheduleSettings.get_solo()
+        if action == "start":
+            obj.manual_override = WorkScheduleSettings.Override.OPEN
+        elif action == "stop":
+            obj.manual_override = WorkScheduleSettings.Override.CLOSED
+        elif action == "auto":
+            obj.manual_override = WorkScheduleSettings.Override.AUTO
+        else:
+            raise OnlineChatApiError("action must be start, stop or auto")
+        obj.save(update_fields=["manual_override", "updated_at"])
+        assigned = 0
+        if action == "start":
+            # Sheipa demo: enable auto-distribution and flush overnight + offline stubs.
+            OperatorProfile.objects.filter(
+                external_id="dev-operator-sheipa",
+            ).update(auto_assign=True, presence=OperatorProfile.Presence.ONLINE)
+            release_sheipa_demo_holds()
+            release_offline_queue(include_demo=True)
+            assigned = len(run_assignments())
+        elif obj.is_open():
+            release_offline_queue(include_demo=False)
+            assigned = len(run_assignments())
+        broadcast(ARM_GROUP, "work_schedule.updated", {
+            "is_open": obj.is_open(),
+            "manual_override": obj.manual_override,
+        })
+        return JsonResponse(
+            {"ok": True, "is_open": obj.is_open(), "assigned": assigned}
+        )
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "PUT", "PATCH"])
 def assignment_settings(request: HttpRequest) -> HttpResponse:
     settings_obj = AssignmentSettings.get_solo()
     if request.method == "GET":
@@ -653,6 +921,47 @@ def sufler_hint_feedback(request: HttpRequest) -> HttpResponse:
                 },
             }
         )
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def sufler_outage_report(request: HttpRequest) -> HttpResponse:
+    """Operator reports a sufler outage — notify supervisors/admins (FR-CC error path)."""
+    try:
+        payload = _json_body(request)
+        operator_name = _str_field(payload, "operator_name")
+        query = _str_field(payload, "query")
+        detail = _str_field(payload, "detail")
+        dialog_id = _str_field(payload, "dialog_id")
+        dialog = Dialog.objects.filter(pk=dialog_id).first() if dialog_id else None
+        reported_at = timezone.now().isoformat()
+        logger.error(
+            "sufler_outage_reported operator=%s dialog=%s detail=%s query=%s",
+            operator_name,
+            dialog_id or "-",
+            detail or "-",
+            (query or "")[:200],
+        )
+        if dialog is not None:
+            record_event(
+                dialog,
+                "sufler_outage_reported",
+                actor_name=operator_name,
+                payload={"query": query, "detail": detail},
+            )
+        notice = {
+            "kind": "sufler_outage",
+            "dialog_id": str(dialog.id) if dialog is not None else dialog_id,
+            "operator_name": operator_name,
+            "query": query,
+            "detail": detail or "Суфлёр недоступен",
+            "reported_at": reported_at,
+        }
+        # Supervisors and admins share the ARM socket group.
+        broadcast(ARM_GROUP, "sufler.outage", notice)
+        return JsonResponse({"ok": True, "notice": notice})
     except OnlineChatApiError as exc:
         return _error(exc)
 
@@ -834,6 +1143,7 @@ def _operator_dict(item: OperatorProfile) -> dict[str, Any]:
         str(value) for value in item.departments.values_list("id", flat=True)
     ]
     first_department = item.departments.order_by("priority", "name").first()
+    is_operator = item.role == OperatorProfile.Role.OPERATOR
     return {
         "id": str(item.id), "external_id": item.external_id,
         "display_name": item.display_name, "email": item.email, "role": item.role,
@@ -846,8 +1156,14 @@ def _operator_dict(item: OperatorProfile) -> dict[str, Any]:
         "name": item.display_name,
         "username": item.external_id,
         "capacity": item.max_active_dialogs,
-        "department_id": str(first_department.id) if first_department else None,
-        "department_name": first_department.name if first_department else "",
+        "department_id": (
+            str(first_department.id) if first_department and is_operator else None
+        ),
+        "department_name": (
+            first_department.name if first_department and is_operator else ""
+        ),
+        "photo_url": getattr(item, "photo_url", "") or "",
+        "skill_tags": list(getattr(item, "skill_tags", None) or []),
         "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat(),
     }
 
@@ -861,13 +1177,14 @@ def _placement_dict(item: WidgetPlacement, *, public: bool = False) -> dict[str,
         "is_active": item.is_active, "theme": item.theme, "config": item.config,
         "welcome_message": item.welcome_message, "queue_message": item.queue_message,
         "offline_message": item.offline_message, "require_phone": item.require_phone,
-        "form_fields": item.form_fields,
+        "form_fields": normalize_form_fields(item.form_fields, require_phone=False),
         "theme_accent": item.theme.get("accent", "#007A43"),
     }
     if not public:
         data.update({
             "id": str(item.id), "created_at": item.created_at.isoformat(),
             "updated_at": item.updated_at.isoformat(),
+            "counters": _channel_counters("widget", widget_id=item.widget_id),
         })
     return data
 
@@ -890,10 +1207,12 @@ def _safe_config(value: object) -> object:
     return value
 
 
-def _channel_counters(channel: str) -> dict[str, int]:
+def _channel_counters(channel: str, *, widget_id: str = "") -> dict[str, int]:
 
     today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
     qs = Dialog.objects.filter(channel=channel)
+    if channel == "widget" and widget_id:
+        qs = qs.filter(widget_id=widget_id)
     return {
         "waiting": qs.filter(status=Dialog.Status.WAITING).count(),
         "active": qs.filter(status=Dialog.Status.ACTIVE).count(),
@@ -906,6 +1225,12 @@ def _channel_counters(channel: str) -> dict[str, int]:
 
 def _channel_dict(item: ChannelConnection) -> dict[str, Any]:
     safe_config = _safe_config(item.config)
+    form_fields = []
+    if isinstance(safe_config, dict) and isinstance(safe_config.get("form_fields"), list):
+        form_fields = normalize_form_fields(
+            safe_config.get("form_fields") or [],
+            require_phone=False,
+        )
     return {
         "id": str(item.id), "channel": item.channel, "name": item.name,
         "kind": item.channel,
@@ -913,6 +1238,7 @@ def _channel_dict(item: ChannelConnection) -> dict[str, Any]:
         "account": item.external_id,
         "department_id": str(item.department_id) if item.department_id else None,
         "is_active": item.is_active, "config": safe_config,
+        "form_fields": form_fields,
         "endpoint": safe_config.get("endpoint", "") if isinstance(safe_config, dict) else "",
         "configured": bool(item.external_id or item.config),
         "health_status": item.health_status,
@@ -942,9 +1268,10 @@ def _bot_dict(item: BotConfiguration) -> dict[str, Any]:
     return {
         "id": str(item.id),
         "name": item.name,
-        "department_id": str(item.department_id),
+        "department_id": str(item.department_id) if item.department_id else None,
         "is_active": item.is_active,
         "welcome_message": item.welcome_message,
+        "offline_message": item.offline_message,
         "fallback_message": item.fallback_message,
         "trigger_responses": item.trigger_responses,
         "max_bot_turns": item.max_bot_turns,
@@ -962,15 +1289,16 @@ def _bot_values(
     for field in (
         "name",
         "welcome_message",
+        "offline_message",
         "fallback_message",
         "handoff_message",
     ):
         if field in data:
             setattr(item, field, _str_field(data, field))
     if "department_id" in data:
-        item.department = get_object_or_404(
-            Department,
-            pk=data["department_id"],
+        department_id = data.get("department_id")
+        item.department = (
+            get_object_or_404(Department, pk=department_id) if department_id else None
         )
     if "trigger_responses" in data:
         item.trigger_responses = _json_field(
@@ -983,10 +1311,168 @@ def _bot_values(
         item.max_bot_turns = _int_field(data, "max_bot_turns")
     if "is_active" in data:
         item.is_active = _bool_field(data, "is_active")
-    if not item.name or not item.department_id:
-        raise OnlineChatApiError("name and department_id are required")
+    if not item.name:
+        raise OnlineChatApiError("name is required")
     item.save()
     return item
+
+
+def _base_message_dict(item: BaseMessage) -> dict[str, Any]:
+    return {
+        "id": str(item.id),
+        "message_type": item.message_type,
+        "title": item.title,
+        "text": item.text,
+        "channel": item.channel,
+        "channels": item.channels,
+        "send_phase": item.send_phase,
+        "sort_order": item.sort_order,
+        "delay_seconds": item.delay_seconds,
+        "placement_id": str(item.placement_id) if item.placement_id else None,
+        "is_active": item.is_active,
+        "created_at": item.created_at.isoformat(),
+        "updated_at": item.updated_at.isoformat(),
+    }
+
+
+def _sync_base_message_targets(item: BaseMessage) -> None:
+    """Keep widget/channel runtime fields in sync with base messages."""
+    targets = [str(value) for value in (item.channels or []) if str(value)]
+    if not targets:
+        if item.placement_id:
+            targets = [f"widget:{item.placement_id}"]
+        elif item.channel:
+            targets = [item.channel]
+
+    placement_ids = [
+        value.removeprefix("widget:")
+        for value in targets
+        if value.startswith("widget:")
+    ]
+    includes_all_widgets = not targets or "widget" in targets
+    placement_qs = WidgetPlacement.objects.filter(is_active=True)
+    if placement_ids and not includes_all_widgets:
+        placement_qs = placement_qs.filter(pk__in=placement_ids)
+
+    field = ""
+    if item.send_phase == BaseMessage.SendPhase.BEFORE_BOT:
+        field = "welcome_message"
+    elif item.send_phase == BaseMessage.SendPhase.OFFLINE:
+        field = "offline_message"
+    if field and (includes_all_widgets or placement_ids):
+        placement_qs.update(**{field: item.text})
+
+    if item.send_phase == BaseMessage.SendPhase.OFFLINE:
+        connection_qs = ChannelConnection.objects.all()
+        selected_channels = [value for value in targets if not value.startswith("widget:")]
+        if targets and selected_channels:
+            connection_qs = connection_qs.filter(channel__in=selected_channels)
+        elif targets and not includes_all_widgets:
+            connection_qs = connection_qs.none()
+        for connection in connection_qs:
+            config = dict(connection.config or {})
+            config["offline_message"] = item.text
+            connection.config = config
+            connection.save(update_fields=["config", "updated_at"])
+
+
+def _base_message_values(
+    data: Mapping[str, Any],
+    item: BaseMessage | None = None,
+) -> BaseMessage:
+    is_new = item is None
+    item = item or BaseMessage()
+    if "message_type" in data or item.message_type == "":
+        message_type = _str_field(data, "message_type", item.message_type or "welcome")
+        if message_type not in BaseMessage.MessageType.values:
+            raise OnlineChatApiError("invalid message_type")
+        item.message_type = message_type
+        if "send_phase" not in data:
+            item.send_phase = {
+                BaseMessage.MessageType.WELCOME: BaseMessage.SendPhase.BEFORE_BOT,
+                BaseMessage.MessageType.OFFLINE: BaseMessage.SendPhase.OFFLINE,
+                BaseMessage.MessageType.BROADCAST: BaseMessage.SendPhase.AFTER_BOT,
+            }[message_type]
+    if "title" in data:
+        item.title = _str_field(data, "title")
+    if "text" in data:
+        item.text = _str_field(data, "text")
+    if "channel" in data:
+        item.channel = _str_field(data, "channel")
+    if "channels" in data:
+        channels = _json_field(data, "channels", list, [])
+        if any(not isinstance(value, str) or not value.strip() for value in channels):
+            raise OnlineChatApiError("channels must contain non-empty strings")
+        item.channels = list(dict.fromkeys(value.strip() for value in channels))
+    if "send_phase" in data:
+        send_phase = _str_field(data, "send_phase")
+        if send_phase not in BaseMessage.SendPhase.values:
+            raise OnlineChatApiError("invalid send_phase")
+        item.send_phase = send_phase
+        item.message_type = {
+            BaseMessage.SendPhase.BEFORE_BOT: BaseMessage.MessageType.WELCOME,
+            BaseMessage.SendPhase.OFFLINE: BaseMessage.MessageType.OFFLINE,
+            BaseMessage.SendPhase.AFTER_BOT: BaseMessage.MessageType.BROADCAST,
+            BaseMessage.SendPhase.MID_DIALOG: BaseMessage.MessageType.BROADCAST,
+            BaseMessage.SendPhase.HOLD: BaseMessage.MessageType.BROADCAST,
+        }[send_phase]
+    if "sort_order" in data:
+        item.sort_order = _int_field(data, "sort_order")
+    if "delay_seconds" in data:
+        item.delay_seconds = max(0, _int_field(data, "delay_seconds"))
+    if "placement_id" in data:
+        placement_id = data.get("placement_id")
+        item.placement = (
+            get_object_or_404(WidgetPlacement, pk=placement_id) if placement_id else None
+        )
+    if "is_active" in data:
+        item.is_active = _bool_field(data, "is_active")
+    if not item.text:
+        raise OnlineChatApiError("text is required")
+    if not item.message_type:
+        raise OnlineChatApiError("message_type is required")
+    item.save()
+    sync_fields = {
+        "message_type",
+        "send_phase",
+        "text",
+        "channel",
+        "channels",
+        "placement_id",
+        "is_active",
+    }
+    if item.is_active and (is_new or sync_fields.intersection(data)):
+        _sync_base_message_targets(item)
+    return item
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+@_chat_permissions(PERM_CC_ADMIN)
+def base_messages_collection(request: HttpRequest) -> HttpResponse:
+    if request.method == "GET":
+        items = [_base_message_dict(item) for item in BaseMessage.objects.all()]
+        return JsonResponse({"ok": True, "items": items, "count": len(items)})
+    try:
+        item = _base_message_values(_json_body(request))
+        return JsonResponse({"ok": True, "base_message": _base_message_dict(item)}, status=201)
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["PATCH", "DELETE"])
+@_chat_permissions(PERM_CC_ADMIN)
+def base_message_detail(request: HttpRequest, item_id: str) -> HttpResponse:
+    item = get_object_or_404(BaseMessage, pk=item_id)
+    if request.method == "DELETE":
+        item.delete()
+        return JsonResponse({"ok": True})
+    try:
+        item = _base_message_values(_json_body(request), item)
+        return JsonResponse({"ok": True, "base_message": _base_message_dict(item)})
+    except OnlineChatApiError as exc:
+        return _error(exc)
 
 
 @csrf_exempt
@@ -1105,6 +1591,8 @@ def operators_collection(request: HttpRequest) -> HttpResponse:
             max_active_dialogs=data.get("max_active_dialogs", data.get("capacity", 3)),
             auto_assign=_bool_field(data, "auto_assign", True),
             is_active=_bool_field(data, "is_active", True),
+            photo_url=_str_field(data, "photo_url"),
+            skill_tags=_json_field(data, "skill_tags", list, []) if "skill_tags" in data else [],
         )
         if "department_id" in data and "department_ids" not in data:
             data = {**data, "department_ids": [data["department_id"]] if data["department_id"] else []}
@@ -1112,6 +1600,30 @@ def operators_collection(request: HttpRequest) -> HttpResponse:
         return JsonResponse({"ok": True, "operator": _operator_dict(item)}, status=201)
     except (OnlineChatApiError, ValueError) as exc:
         return _error(OnlineChatApiError(str(exc)))
+
+
+@require_http_methods(["GET"])
+def operator_photo(request: HttpRequest, item_id: str) -> HttpResponse:
+    """Public operator photo for the client widget (avoids huge data URLs in WS payloads)."""
+    operator = get_object_or_404(OperatorProfile, pk=item_id, is_active=True)
+    raw = (operator.photo_url or "").strip()
+    if not raw:
+        return HttpResponse(status=404)
+    if raw.startswith("data:"):
+        match = re.match(r"data:([^;,]+)?(?:;[^,]*)?;base64,(.+)", raw, re.DOTALL)
+        if not match:
+            return HttpResponse(status=404)
+        content_type = match.group(1) or "application/octet-stream"
+        try:
+            body = base64.b64decode(match.group(2))
+        except (ValueError, binascii.Error):
+            return HttpResponse(status=404)
+        response = HttpResponse(body, content_type=content_type)
+        response["Cache-Control"] = "private, max-age=300"
+        return response
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return redirect(raw)
+    return HttpResponse(status=404)
 
 
 @csrf_exempt
@@ -1142,6 +1654,13 @@ def operator_detail(request: HttpRequest, item_id: str) -> HttpResponse:
         for field in ("auto_assign", "is_active"):
             if field in data:
                 setattr(item, field, _bool_field(data, field))
+        if "photo_url" in data:
+            item.photo_url = _str_field(data, "photo_url")
+        if "skill_tags" in data:
+            tags = _json_field(data, "skill_tags", list, [])
+            if any(not isinstance(value, str) for value in tags):
+                raise OnlineChatApiError("skill_tags must be a list of strings")
+            item.skill_tags = [value.strip() for value in tags if value.strip()]
         item.save()
         if "department_id" in data and "department_ids" not in data:
             data = {**data, "department_ids": [data["department_id"]] if data["department_id"] else []}
@@ -1188,6 +1707,11 @@ def _placement_values(data: Mapping[str, Any], item: WidgetPlacement | None = No
     ):
         if field in data:
             setattr(item, field, _json_field(data, field, expected, default))
+    if "form_fields" in data:
+        item.form_fields = normalize_form_fields(
+            item.form_fields,
+            require_phone=False,
+        )
     if "theme_accent" in data:
         theme = dict(item.theme or {})
         theme["accent"] = _str_field(data, "theme_accent")
@@ -1251,6 +1775,13 @@ def _channel_values(data: Mapping[str, Any], item: ChannelConnection | None = No
         raise OnlineChatApiError("invalid channel")
     if "config" in data:
         item.config = _json_field(data, "config", dict, {})
+    if "form_fields" in data:
+        config = dict(item.config or {})
+        config["form_fields"] = normalize_form_fields(
+            data.get("form_fields"),
+            require_phone=False,
+        )
+        item.config = config
     if "endpoint" in data:
         config = dict(item.config or {})
         config["endpoint"] = _str_field(data, "endpoint")
@@ -1384,23 +1915,39 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
     from datetime import timedelta
 
 
-    statuses = dict(Dialog.objects.values_list("status").annotate(count=Count("id")))
+    statuses = {
+        row["status"]: row["c"]
+        for row in Dialog.objects.values("status").annotate(c=Count("id"))
+    }
     now = timezone.now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    waiting_dialogs = list(
+
+    waiting_all = list(
         Dialog.objects.filter(status=Dialog.Status.WAITING).only(
-            "id", "created_at", "accepted_at", "status"
+            "id", "created_at", "outcome", "client_online"
         )
     )
-    wait_seconds = [
-        max(0, int((now - item.created_at).total_seconds())) for item in waiting_dialogs
+    waiting_offline = [
+        item
+        for item in waiting_all
+        if item.outcome == Dialog.Outcome.OFFLINE or item.client_online is False
     ]
-    average_wait = round(sum(wait_seconds) / len(wait_seconds)) if wait_seconds else 0
-    sla_window = timedelta(seconds=120)
+    waiting_online = [item for item in waiting_all if item not in waiting_offline]
+
+    def _avg_wait(rows: list) -> int:
+        if not rows:
+            return 0
+        secs = [max(0, int((now - item.created_at).total_seconds())) for item in rows]
+        return round(sum(secs) / len(secs))
+
+    average_wait_online = _avg_wait(waiting_online)
+    average_wait_offline = _avg_wait(waiting_offline)
+    average_wait = _avg_wait(waiting_all)
+    sla_window = timedelta(seconds=ServiceLevelSettings.get_solo().first_response_seconds)
     answered = list(
         Dialog.objects.filter(
             first_response_at__isnull=False,
-            created_at__gte=today_start - timedelta(days=1),
+            created_at__gte=today_start,
         ).only("created_at", "first_response_at")[:2000]
     )
     answered_count = len(answered)
@@ -1414,17 +1961,72 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
     operators = []
     for item in OperatorProfile.objects.prefetch_related("departments"):
         data = _operator_dict(item)
-        data["active_dialogs"] = Dialog.objects.filter(
-            operator=item, status=Dialog.Status.ACTIVE
-        ).count()
-        data["load"] = data["active_dialogs"]
+        active_qs = Dialog.objects.filter(operator=item, status=Dialog.Status.ACTIVE)
+        active_dialogs = active_qs.count()
+        closed_today_qs = Dialog.objects.filter(
+            operator=item,
+            status=Dialog.Status.CLOSED,
+            closed_at__gte=today_start,
+        )
+        closed_today = closed_today_qs.count()
+        answered_today = list(
+            Dialog.objects.filter(
+                operator=item,
+                first_response_at__isnull=False,
+                first_response_at__gte=today_start,
+            ).only("created_at", "first_response_at", "accepted_at", "closed_at")[:500]
+        )
+        response_secs = [
+            (row.first_response_at - row.created_at).total_seconds()
+            for row in answered_today
+            if row.first_response_at and row.created_at
+        ]
+        avg_first_response = (
+            round(sum(response_secs) / len(response_secs)) if response_secs else None
+        )
+        # Time in dialogs today: sum of (closed_at|now - accepted_at) for today's handled.
+        time_in_dialogs = 0
+        for row in Dialog.objects.filter(operator=item).filter(
+            Q(status=Dialog.Status.ACTIVE)
+            | Q(status=Dialog.Status.CLOSED, closed_at__gte=today_start)
+        ).only("accepted_at", "closed_at", "created_at", "status")[:500]:
+            start = row.accepted_at or row.created_at
+            end = row.closed_at if row.status == Dialog.Status.CLOSED and row.closed_at else now
+            if start and end and end >= start:
+                # Clip to today.
+                clipped_start = start if start >= today_start else today_start
+                time_in_dialogs += max(0, int((end - clipped_start).total_seconds()))
+        avg_dialog_seconds = (
+            round(time_in_dialogs / closed_today) if closed_today else None
+        )
+        channel_rows = (
+            Dialog.objects.filter(operator=item, status=Dialog.Status.ACTIVE)
+            .values("channel")
+            .annotate(count=Count("id"))
+        )
+        channels_breakdown = {
+            (row["channel"] or "widget"): row["count"] for row in channel_rows
+        }
+        data["active_dialogs"] = active_dialogs
+        data["load"] = active_dialogs
+        data["closed_today"] = closed_today
+        data["avg_first_response_seconds"] = avg_first_response
+        data["time_in_dialogs_seconds"] = time_in_dialogs
+        data["avg_dialog_seconds"] = avg_dialog_seconds
+        data["channels_breakdown"] = channels_breakdown
+        data["photo_url"] = getattr(item, "photo_url", "") or ""
+        data["skill_tags"] = list(getattr(item, "skill_tags", None) or [])
         operators.append(data)
 
     queues = []
     for item in Department.objects.filter(is_active=True):
-        dept_waiting = list(
-            item.dialogs.filter(status=Dialog.Status.WAITING).only("created_at")
+        dept_waiting_online = item.dialogs.filter(
+            status=Dialog.Status.WAITING, client_online=True
+        ).exclude(outcome=Dialog.Outcome.OFFLINE)
+        dept_waiting_offline = item.dialogs.filter(status=Dialog.Status.WAITING).filter(
+            Q(outcome=Dialog.Outcome.OFFLINE) | Q(client_online=False)
         )
+        dept_waiting = list(item.dialogs.filter(status=Dialog.Status.WAITING).only("created_at"))
         longest = (
             max(int((now - d.created_at).total_seconds()) for d in dept_waiting)
             if dept_waiting
@@ -1438,6 +2040,8 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
                 "name": item.name,
                 "department": item.name,
                 "waiting": len(dept_waiting),
+                "waiting_online": dept_waiting_online.count(),
+                "waiting_offline": dept_waiting_offline.count(),
                 "active": item.dialogs.filter(status=Dialog.Status.ACTIVE).count(),
                 "longest_wait_seconds": longest,
             }
@@ -1448,6 +2052,8 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
             "ok": True,
             "kpis": {
                 "waiting": statuses.get(Dialog.Status.WAITING, 0),
+                "waiting_online": len(waiting_online),
+                "waiting_offline": len(waiting_offline),
                 "active": statuses.get(Dialog.Status.ACTIVE, 0),
                 "closed": statuses.get(Dialog.Status.CLOSED, 0),
                 "closed_today": Dialog.objects.filter(
@@ -1457,6 +2063,8 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
                     is_active=True, presence=OperatorProfile.Presence.ONLINE
                 ).count(),
                 "average_wait_seconds": average_wait,
+                "average_wait_online_seconds": average_wait_online,
+                "average_wait_offline_seconds": average_wait_offline,
                 "sla_percent": sla_percent,
             },
             "operators": operators,
@@ -1468,15 +2076,40 @@ def supervisor_overview(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET"])
 @_chat_permissions(PERM_CC_REPORTS, PERM_CC_ADMIN)
 def analytics(request: HttpRequest) -> HttpResponse:
-    from datetime import timedelta
+    from datetime import datetime, timedelta
 
     period = (request.GET.get("period") or "7d").lower()
-    days = {
-        "today": 1, "day": 1, "7d": 7, "week": 7,
-        "30d": 30, "month": 30, "90d": 90,
-    }.get(period, 7)
-    start = timezone.now() - timedelta(days=days)
-    dialogs = Dialog.objects.filter(created_at__gte=start)
+    date_from = (request.GET.get("date_from") or "").strip()
+    date_to = (request.GET.get("date_to") or "").strip()
+    if date_from or date_to:
+        try:
+            start = (
+                datetime.fromisoformat(date_from).replace(tzinfo=timezone.get_current_timezone())
+                if date_from
+                else timezone.now() - timedelta(days=30)
+            )
+            end = (
+                datetime.fromisoformat(date_to).replace(
+                    hour=23, minute=59, second=59, tzinfo=timezone.get_current_timezone()
+                )
+                if date_to
+                else timezone.now()
+            )
+        except ValueError:
+            return JsonResponse(
+                {"ok": False, "error": "date_from/date_to must be ISO dates (YYYY-MM-DD)"},
+                status=400,
+            )
+        dialogs = Dialog.objects.filter(created_at__gte=start, created_at__lte=end)
+        period_label = f"{date_from or '…'}…{date_to or '…'}"
+    else:
+        days = {
+            "today": 1, "day": 1, "7d": 7, "week": 7,
+            "30d": 30, "month": 30, "90d": 90,
+        }.get(period, 7)
+        start = timezone.now() - timedelta(days=days)
+        dialogs = Dialog.objects.filter(created_at__gte=start)
+        period_label = period
     closed = dialogs.filter(status=Dialog.Status.CLOSED)
     feedback = DialogFeedback.objects.filter(dialog__in=dialogs).aggregate(avg=Avg("rating"))
     response_seconds = [
@@ -1484,7 +2117,7 @@ def analytics(request: HttpRequest) -> HttpResponse:
         for item in dialogs.exclude(first_response_at=None)
     ]
     return JsonResponse({
-        "ok": True, "period": period, "from": start.isoformat(),
+        "ok": True, "period": period_label, "from": start.isoformat(),
         "kpis": {
             "dialogs": dialogs.count(), "closed": closed.count(),
             "waiting": dialogs.filter(status=Dialog.Status.WAITING).count(),
@@ -1497,140 +2130,31 @@ def analytics(request: HttpRequest) -> HttpResponse:
     })
 
 
-_CHANNEL_LABELS = {
-    "widget": "Виджет сайта",
-    "telegram": "Telegram",
-    "viber": "Viber",
-    "api": "API",
-    "email": "E-mail",
-}
-
-
-def _channel_label(channel: str) -> str:
-    key = (channel or "").strip().lower()
-    return _CHANNEL_LABELS.get(key, channel or "неизвестный канал")
-
-
-def _phones_linked(left: str, right: str) -> bool:
-    """Same client phone: exact normalized, national BY mobile, or 1-digit typo."""
-    a = normalize_phone(left)
-    b = normalize_phone(right)
-    if not a or not b:
-        return False
-    if a == b:
-        return True
-    # Belarus mobile without country code: 29/25/33/44 + 7 digits.
-    if len(a) >= 9 and len(b) >= 9 and a[-9:] == b[-9:]:
-        return True
-    # One-digit typo tolerance for the same-length numbers (widget ↔ TG re-entry).
-    if len(a) == len(b) and len(a) >= 10:
-        diffs = sum(1 for x, y in zip(a, b) if x != y)
-        if diffs == 1:
-            return True
-    # Soft fallback for truncated numbers.
-    return len(a) >= 7 and len(b) >= 7 and a[-7:] == b[-7:]
-
-
-def _name_token_set(first_name: str, last_name: str) -> frozenset[str]:
-    parts = []
-    for raw in (first_name or "", last_name or ""):
-        for token in re.split(r"[\s\-]+", raw.strip().casefold()):
-            if len(token) >= 2:
-                parts.append(token)
-    return frozenset(parts)
-
-
-def _names_linked(
-    first_a: str,
-    last_a: str,
-    first_b: str,
-    last_b: str,
-) -> bool:
-    """Same person even if widget/TG swapped имя/фамилия fields."""
-    left = _name_token_set(first_a, last_a)
-    right = _name_token_set(first_b, last_b)
-    return len(left) >= 2 and left == right
-
-
-def _history_identity_query(
-    *,
-    phone: str = "",
-    external_id: str = "",
-    first_name: str = "",
-    last_name: str = "",
-) -> Q:
-    """Match dialogs by phone (primary), external id, and FIO tokens."""
-    normalized = normalize_phone(phone)
-    phones: set[str] = {normalized} if normalized else set()
-    external_ids: set[str] = {external_id.strip()} if external_id.strip() else set()
-    name_key = _name_token_set(first_name, last_name)
-    matched_ids: set[Any] = set()
-
-    # Expand TG chat_id ↔ phone ↔ widget phone ↔ FIO (order-independent).
-    for _ in range(3):
-        before = (frozenset(phones), frozenset(external_ids), frozenset(matched_ids))
-        for item in Dialog.objects.only(
-            "id",
-            "client_phone",
-            "client_external_id",
-            "client_first_name",
-            "client_last_name",
-        ).iterator(chunk_size=500):
-            phone_hit = bool(phones) and any(
-                _phones_linked(item.client_phone, p) for p in phones
-            )
-            external_hit = bool(
-                item.client_external_id and item.client_external_id in external_ids
-            )
-            same_fio = bool(name_key) and _names_linked(
-                first_name,
-                last_name,
-                item.client_first_name,
-                item.client_last_name,
-            )
-            candidate_phone = normalize_phone(item.client_phone)
-            # FIO helps when phone was mistyped once or fields were swapped.
-            # Do not merge all namesakes: require phone/external already known,
-            # or both sides anonymous.
-            if same_fio and not phone_hit and not external_hit:
-                if phones or external_ids:
-                    if candidate_phone and not any(
-                        _phones_linked(candidate_phone, p) for p in phones
-                    ):
-                        same_fio = False
-                else:
-                    same_fio = not candidate_phone and not (
-                        item.client_external_id or ""
-                    ).strip()
-            if not (phone_hit or external_hit or same_fio):
-                continue
-            matched_ids.add(item.id)
-            phone_norm = normalize_phone(item.client_phone)
-            if phone_norm:
-                phones.add(phone_norm)
-            if item.client_external_id:
-                external_ids.add(item.client_external_id)
-        after = (frozenset(phones), frozenset(external_ids), frozenset(matched_ids))
-        if after == before:
-            break
-
-    if not matched_ids and not phones and not external_ids:
-        return Q()
-
-    query = Q()
-    if matched_ids:
-        query |= Q(id__in=list(matched_ids))
-    if phones:
-        query |= Q(
-            id__in=[
-                item.id
-                for item in Dialog.objects.only("id", "client_phone")
-                if any(_phones_linked(item.client_phone, p) for p in phones)
-            ]
-        )
-    if external_ids:
-        query |= Q(client_external_id__in=list(external_ids))
-    return query if query else Q(pk__in=[])
+@require_http_methods(["GET"])
+@_chat_permissions(PERM_CC_ADMIN)
+def ad_pending_operators(request: HttpRequest) -> HttpResponse:
+    """Local stub: operators that appeared in AD and need chat settings."""
+    existing = set(OperatorProfile.objects.values_list("external_id", flat=True))
+    stub = [
+        {
+            "external_id": "ad.ivanova.kk",
+            "display_name": "Иванова К.К.",
+            "email": "ivanova.kk@belarusbank.by",
+            "ad_role": "operator_cc",
+            "detected_at": timezone.now().isoformat(),
+            "needs": ["limits", "photo", "chat_login"],
+        },
+        {
+            "external_id": "ad.petrov.ss",
+            "display_name": "Петров С.С.",
+            "email": "petrov.ss@belarusbank.by",
+            "ad_role": "operator_cc",
+            "detected_at": timezone.now().isoformat(),
+            "needs": ["limits", "photo", "skill_tags"],
+        },
+    ]
+    pending = [item for item in stub if item["external_id"] not in existing]
+    return JsonResponse({"ok": True, "items": pending, "count": len(pending)})
 
 
 @require_http_methods(["GET"])
@@ -1647,7 +2171,7 @@ def client_history(request: HttpRequest) -> HttpResponse:
         external_id = external_id or current.client_external_id
         first_name = current.client_first_name
         last_name = current.client_last_name
-    query = _history_identity_query(
+    query = history_identity_query(
         phone=phone,
         external_id=external_id,
         first_name=first_name,
@@ -1664,7 +2188,7 @@ def client_history(request: HttpRequest) -> HttpResponse:
         {
             "id": str(item.id),
             "channel": item.channel,
-            "channel_label": _channel_label(item.channel),
+            "channel_label": channel_label(item.channel),
             "status": item.status,
             "outcome": item.outcome,
             "topic": item.close_topic,
@@ -1682,7 +2206,7 @@ def client_history(request: HttpRequest) -> HttpResponse:
     previous_items = [
         item for item in items if current is None or item["id"] != str(current.id)
     ]
-    current_channel = _channel_label(current.channel) if current else (
+    current_channel = channel_label(current.channel) if current else (
         items[0]["channel_label"] if items else ""
     )
 
@@ -1699,7 +2223,7 @@ def client_history(request: HttpRequest) -> HttpResponse:
     blocks = packed.get("detailed_blocks") or []
     for block in blocks:
         raw_channel = block.get("channel") or ""
-        block["channel"] = _channel_label(raw_channel) if raw_channel else "—"
+        block["channel"] = channel_label(raw_channel) if raw_channel else "—"
     if blocks:
         packed["detailed_summary"] = "\n\n".join(
             (
@@ -2001,14 +2525,13 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
                 "welcome_message": "Здравствуйте! Чем можем помочь?",
                 "queue_message": "Ожидайте ответа оператора…",
                 "offline_message": "Сейчас операторы недоступны. Оставьте сообщение — ответим позже.",
-                "require_phone": False,
+                "require_phone": True,
                 "allowed_domains": ["localhost", "127.0.0.1"],
                 "theme": {"accent": "#2E7D52"},
                 "form_fields": [
                     {"key": "name", "label": "Имя", "required": True, "type": "text"},
                     {"key": "last_name", "label": "Фамилия", "required": False, "type": "text"},
-                    {"key": "phone", "label": "Телефон", "required": False, "type": "tel"},
-                    {"key": "question", "label": "Вопрос", "required": True, "type": "text"},
+                    {"key": "phone", "label": "Телефон", "required": True, "type": "tel"},
                 ],
             },
         )
@@ -2100,10 +2623,135 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
             },
         )
         supervisor.departments.set([department])
+        sheipa, _ = OperatorProfile.objects.update_or_create(
+            external_id="dev-operator-sheipa",
+            defaults={
+                "display_name": "Шейпа Дмитриевна Волкова",
+                "email": "sheipa@dev.local",
+                "presence": OperatorProfile.Presence.ONLINE,
+                "auto_assign": False,
+                "max_active_dialogs": 5,
+                "is_active": True,
+                "role": OperatorProfile.Role.OPERATOR,
+            },
+        )
+        sheipa.departments.set([department])
+        BaseMessage.objects.get_or_create(
+            title="Вне графика",
+            defaults={
+                "message_type": BaseMessage.MessageType.OFFLINE,
+                "send_phase": BaseMessage.SendPhase.OFFLINE,
+                "text": (
+                    "Сейчас нерабочее время, операторов на линии нет. "
+                    "Оставьте сообщение — ответим в начале следующего рабочего дня."
+                ),
+                "is_active": True,
+                "sort_order": 50,
+            },
+        )
+        leftover_regular = (
+            "Не успели подтвердить лимит по карте до закрытия смены.",
+            "Клиент ждал перевод на карту — диалог остался в очереди.",
+        )
+        leftover_offline = (
+            "Вопрос по вкладу поступил после 18:00 — офлайн-заглушка.",
+            "Клиент написал ночью про блокировку карты — офлайн-заглушка.",
+        )
+        leftover_payload = []
+        yesterday = timezone.now() - timedelta(hours=14)
+        Dialog.objects.filter(
+            client_external_id__startswith="offline-stub-"
+        ).delete()
+        Dialog.objects.filter(
+            client_external_id__startswith="sheipa-stub-"
+        ).delete()
+        for index, preview in enumerate(leftover_regular, start=1):
+            leftover, leftover_msg = create_dialog_with_message(
+                text=preview,
+                widget_id=placement.widget_id,
+                placement="website",
+                client_first_name="Клиент",
+                client_last_name=f"очередь {index}",
+                client_phone=_seed_client_phone(700 + index),
+                client_external_id=f"sheipa-stub-{index}",
+                skip_auto_assign=True,
+            )
+            leftover.created_at = yesterday
+            leftover.last_client_message_at = yesterday
+            leftover.client_online = False
+            leftover.client_last_seen_at = yesterday
+            leftover.save(
+                update_fields=[
+                    "created_at",
+                    "last_client_message_at",
+                    "client_online",
+                    "client_last_seen_at",
+                    "updated_at",
+                ]
+            )
+            leftover_msg.created_at = yesterday
+            leftover_msg.save(update_fields=["created_at"])
+            leftover_payload.append(
+                {
+                    "id": f"sheipa-stub-{index}",
+                    "dialog_id": str(leftover.id),
+                    "name": leftover.client_display_name(),
+                    "widget_url": (
+                        f"/widget/sample.html"
+                        f"?sim_client={quote(f'sheipa-stub-{index}')}"
+                    ),
+                    "status": leftover.status,
+                    "offline": False,
+                }
+            )
+        for index, preview in enumerate(leftover_offline, start=1):
+            leftover, leftover_msg = create_dialog_with_message(
+                text=preview,
+                widget_id=placement.widget_id,
+                placement="website",
+                client_first_name="Клиент",
+                client_last_name=f"офлайн {index}",
+                client_phone=_seed_client_phone(800 + index),
+                client_external_id=f"offline-stub-{index}",
+                force_offline=True,
+            )
+            leftover.created_at = yesterday
+            leftover.last_client_message_at = yesterday
+            leftover.client_online = False
+            leftover.client_last_seen_at = yesterday
+            leftover.save(
+                update_fields=[
+                    "created_at",
+                    "last_client_message_at",
+                    "client_online",
+                    "client_last_seen_at",
+                    "updated_at",
+                ]
+            )
+            leftover_msg.created_at = yesterday
+            leftover_msg.save(update_fields=["created_at"])
+            leftover_payload.append(
+                {
+                    "id": f"offline-stub-{index}",
+                    "dialog_id": str(leftover.id),
+                    "name": leftover.client_display_name(),
+                    "widget_url": (
+                        f"/widget/sample.html?offline=1"
+                        f"&sim_client={quote(f'offline-stub-{index}')}"
+                    ),
+                    "status": leftover.status,
+                    "offline": True,
+                }
+            )
         assignment = AssignmentSettings.get_solo()
         if assignment.mode != AssignmentSettings.Mode.MANUAL_PLUS_AUTO:
             assignment.mode = AssignmentSettings.Mode.MANUAL_PLUS_AUTO
             assignment.save(update_fields=["mode", "updated_at"])
+        schedule = WorkScheduleSettings.get_solo()
+        schedule.enabled = True
+        if schedule.manual_override != WorkScheduleSettings.Override.AUTO:
+            schedule.manual_override = WorkScheduleSettings.Override.AUTO
+        schedule.save(update_fields=["enabled", "manual_override", "updated_at"])
         dialogs = []
         clients_payload = []
         for index in range(client_count):
@@ -2161,11 +2809,14 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
                     "reset": should_reset,
                     "widget_id": placement.widget_id,
                 },
-                "operator_names": [item.display_name for item in operators],
-                "operators": [_operator_dict(item) for item in operators],
+                "operator_names": [item.display_name for item in operators] + [sheipa.display_name],
+                "operators": [_operator_dict(item) for item in operators] + [_operator_dict(sheipa)],
                 "client_ids": [item["id"] for item in clients_payload],
                 "clients": clients_payload,
                 "widget_id": placement.widget_id,
+                "sheipa_name": sheipa.display_name,
+                "offline_widget_url": "/widget/sample.html?offline=1",
+                "offline_stubs": leftover_payload,
             },
             status=201,
         )

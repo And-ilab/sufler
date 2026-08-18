@@ -21,26 +21,30 @@ const FIELD_LABELS: Record<string, string> = {
   client: 'Клиент',
   phone: 'Телефон',
   status: 'Статус',
-  outcome: 'Исход',
+  outcome: 'Результат обращения',
   topic: 'Тематика',
   topics: 'Тематик',
   created_at: 'Создан',
   closed_at: 'Закрыт',
   messages: 'Сообщений',
   summary: 'Краткое саммари',
-  wait_sec: 'Ожидание, с',
-  first_response_sec: 'Первый ответ, с',
+  wait_sec: 'Ожидание до назначения, с',
+  first_response_sec: 'Первый ответ клиенту, с',
+  result: 'Результат обращения',
+  mark: 'Отметка',
+  prev_dialogs: 'За прошлый период (такая же длительность)',
+  role: 'Роль',
+  role_label: 'Роль',
   comment: 'Комментарий',
   dialogs: 'Диалогов',
   share_pct: 'Доля, %',
   growth_pct: 'Рост, %',
-  prev_dialogs: 'За прошлый период',
   label: 'Показатель',
   count: 'Количество',
   pct: 'Доля, %',
   choice: 'Отметка',
   value: 'Значение',
-  useful_pct: 'Воспользовался, %',
+  useful_pct: 'Полезность суфлёра, %',
   incomplete_pct: 'Неполный ответ, %',
   unused_pct: 'Не воспользовался, %',
   avg_relevance: 'Средняя релевантность, %',
@@ -51,20 +55,21 @@ const FIELD_LABELS: Record<string, string> = {
   repeats: 'Повторов',
   channels: 'Каналы',
   metric: 'Показатель',
+  unit: 'Ед.',
   online_chat: 'Онлайн-чат',
   telephony: 'Телефония',
   total: 'Итого',
   p95_first_response_sec: 'p95 первого ответа, с',
   p95_ms: 'p95 первого ответа, мс',
-  avg_first_response_sec_summary: 'Среднее время первого ответа, с',
   dialogs_total: 'Число диалогов',
   dialogs_closed: 'Закрытых диалогов',
   sla_pct: 'Соблюдение SLA первого ответа, %',
   csat: 'Средняя оценка клиента',
-  relevance_avg: 'Средняя релевантность',
+  relevance_avg: 'Средняя релевантность, %',
   incorrect_llm: 'Доля «не использовал», %',
   topics_top: 'Число тематик',
   sufler_used_pct: 'Использование суфлёра, %',
+  aht: 'Среднее время обработки, с',
   target_sec: 'Целевой SLA, с',
   answered: 'С ответом',
   operators: 'Операторов',
@@ -75,6 +80,7 @@ const FIELD_LABELS: Record<string, string> = {
   sufler: 'Отметок суфлёра',
   sufler_total: 'Отметок суфлёра',
   sufler_avg_relevance: 'Средняя релевантность',
+  resolution_rate: 'Доля закрытых, %',
   rows: 'Строк',
   period: 'Период',
 }
@@ -112,7 +118,6 @@ const SUMMARY_LABELS: Record<string, string> = {
   channels: 'Каналов',
   sla_ok_pct: 'Соблюдение SLA, %',
   avg_first_response_sec: 'Ср. время первого ответа, с',
-  p95_first_response_sec: 'p95 первого ответа, с',
   avg_wait_sec: 'Ср. ожидание, с',
   avg_rating: 'Средняя оценка',
   ratings: 'Оценок',
@@ -144,7 +149,33 @@ export function localizeCell(value: unknown): string {
   if (value == null || value === '') return '—'
   if (typeof value === 'boolean') return value ? 'да' : 'нет'
   const raw = String(value)
-  return STATUS_LABELS[raw] || STATUS_LABELS[raw.toLowerCase()] || raw
+  if (raw === 'telegram_inline' || raw === 'telegram_inline_keyboard') return '—'
+  if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) {
+    try {
+      return new Date(raw).toLocaleString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    } catch {
+      return raw
+    }
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    try {
+      return new Date(`${raw}T12:00:00`).toLocaleDateString('ru-RU')
+    } catch {
+      return raw
+    }
+  }
+  return (
+    STATUS_LABELS[raw]
+    || STATUS_LABELS[raw.toLowerCase()]
+    || FIELD_LABELS[raw]
+    || raw
+  )
 }
 
 export function metricLabel(

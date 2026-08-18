@@ -1,13 +1,20 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
+  baseMessagesApi,
   channelsApi,
   botsApi,
   departmentsApi,
+  getAdPendingOperators,
   getAnalytics,
+  getSlaSettings,
+  getWorkScheduleSettings,
   operatorsApi,
   placementsApi,
   routingRulesApi,
+  updateSlaSettings,
+  updateWorkScheduleSettings,
   type AnalyticsResponse,
+  type BaseMessage,
   type ChatChannel,
   type BotConfiguration,
   type ChatOperator,
@@ -16,10 +23,21 @@ import {
   type RoutingRule,
   type WidgetFormField,
   type WidgetPlacement,
+  type WorkDayOverride,
 } from '../api/managementApi'
 import '../shell/Management.css'
 
-type Tab = 'operators' | 'departments' | 'placements' | 'channels' | 'routing' | 'bots' | 'analytics'
+type Tab =
+  | 'operators'
+  | 'departments'
+  | 'placements'
+  | 'channels'
+  | 'routing'
+  | 'bots'
+  | 'messages'
+  | 'analytics'
+  | 'sla'
+  | 'schedule'
 
 type ConfirmRequest = {
   title: string
@@ -35,25 +53,59 @@ type PerformFn = (
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'operators', label: 'Операторы' },
   { id: 'departments', label: 'Отделы' },
-  { id: 'placements', label: 'Размещения виджета' },
+  { id: 'placements', label: 'Виджеты' },
   { id: 'channels', label: 'Каналы платформы' },
   { id: 'routing', label: 'Маршрутизация' },
   { id: 'bots', label: 'Боты' },
+  { id: 'messages', label: 'Базовые сообщения' },
+  { id: 'sla', label: 'SLA' },
+  { id: 'schedule', label: 'Рабочий календарь' },
   { id: 'analytics', label: 'Аналитика' },
 ]
 
 const POPULAR_FORM_FIELDS: WidgetFormField[] = [
-  { key: 'first_name', label: 'Имя', type: 'text', required: true },
+  { key: 'name', label: 'Имя', type: 'text', required: true },
   { key: 'last_name', label: 'Фамилия', type: 'text', required: false },
   { key: 'phone', label: 'Телефон', type: 'tel', required: true },
   { key: 'email', label: 'Email', type: 'email', required: false },
-  { key: 'question', label: 'Тема обращения', type: 'text', required: true },
   { key: 'account', label: 'Номер счёта или карты', type: 'text', required: false },
   { key: 'city', label: 'Город', type: 'text', required: false },
   { key: 'passport', label: 'Серия и номер паспорта', type: 'text', required: false },
   { key: 'inn', label: 'УНП / ИНН', type: 'text', required: false },
   { key: 'company', label: 'Организация', type: 'text', required: false },
 ]
+
+const FIELD_KEY_ALIASES: Record<string, string> = {
+  first_name: 'name',
+  fio: 'name',
+  tel: 'phone',
+  telephone: 'phone',
+  mobile: 'phone',
+}
+
+function canonicalFieldKey(key: string): string {
+  const normalized = key.trim().toLowerCase()
+  return FIELD_KEY_ALIASES[normalized] || normalized
+}
+
+function sanitizeFormFields(fields: WidgetFormField[] | undefined | null): WidgetFormField[] {
+  if (!Array.isArray(fields)) return []
+  const seen = new Set<string>()
+  const cleaned: WidgetFormField[] = []
+  for (const field of fields) {
+    if (!field?.key) continue
+    const key = canonicalFieldKey(field.key)
+    if (!key || key === 'question' || seen.has(key)) continue
+    seen.add(key)
+    cleaned.push({
+      ...field,
+      key,
+      required: Boolean(field.required),
+      type: key === 'phone' ? 'tel' : key === 'email' ? 'email' : (field.type || 'text'),
+    })
+  }
+  return cleaned
+}
 
 function slugHint(value: string): string {
   const ascii = value
@@ -75,6 +127,66 @@ function formatOperatorFio(fullName: string): string {
     .map((part) => `${part[0]?.toUpperCase() ?? ''}.`)
     .join('')
   return `${surname} ${initials}`.trim()
+}
+
+function adRoleLabel(role: string): string {
+  const map: Record<string, string> = {
+    operator_cc: 'Оператор КЦ',
+    supervisor_cc: 'Супервизор КЦ',
+    admin_cc: 'Администратор КЦ',
+    operator: 'Оператор',
+    supervisor: 'Супервизор',
+    admin: 'Администратор',
+  }
+  return map[role] || role
+}
+
+/** Demo-only helper: fabricate a "new AD employee" so the yellow onboarding
+ * card can be shown on demand. In production the card appears from a real AD
+ * sync — this button and generator are hidden outside the demo build. */
+const SHOW_AD_DEMO = import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'
+
+const DEMO_AD_PEOPLE: ReadonlyArray<{ display_name: string; email: string; ad_role: string }> = [
+  { display_name: 'Ковалёва Анна Сергеевна', email: 'a.kovaleva', ad_role: 'operator_cc' },
+  { display_name: 'Дроздов Игорь Петрович', email: 'i.drozdov', ad_role: 'operator_cc' },
+  { display_name: 'Савицкая Мария Олеговна', email: 'm.savitskaya', ad_role: 'operator_cc' },
+  { display_name: 'Гурский Павел Викторович', email: 'p.gursky', ad_role: 'supervisor_cc' },
+  { display_name: 'Лаврик Ольга Дмитриевна', email: 'o.lavrik', ad_role: 'operator_cc' },
+]
+
+function makeDemoAdEmployee(): {
+  external_id: string
+  display_name: string
+  email: string
+  ad_role: string
+  detected_at: string
+  needs: string[]
+} {
+  const person = DEMO_AD_PEOPLE[Math.floor(Math.random() * DEMO_AD_PEOPLE.length)]
+  return {
+    external_id: `ad-demo-${Date.now()}`,
+    display_name: person.display_name,
+    email: `${person.email}@belarusbank.by`,
+    ad_role: person.ad_role,
+    detected_at: new Date().toISOString(),
+    needs: ['limits', 'photo', 'skill_tags'],
+  }
+}
+
+function OperatorAvatarPreview({ url, name }: { url: string; name: string }) {
+  return (
+    <span className="chat-management__avatar" title={name} aria-hidden={!url}>
+      {url ? (
+        <img src={url} alt="" />
+      ) : (
+        <svg viewBox="0 0 40 40" width="40" height="40" aria-hidden>
+          <circle cx="20" cy="20" r="20" fill="#d7e3db" />
+          <circle cx="20" cy="13" r="9" fill="#7a9486" />
+          <path d="M3 40c2.2-12 9.5-17.5 17-17.5S34.8 28 37 40" fill="#7a9486" />
+        </svg>
+      )}
+    </span>
+  )
 }
 
 /** ARM presence labels; map to backend OperatorPresence on save. */
@@ -113,11 +225,15 @@ const CANONICAL_CHANNELS: Array<{ kind: string; name: string }> = [
 const emptyPlacement: Partial<WidgetPlacement> = {
   name: '',
   allowed_domains: [],
-  welcome_message: 'Здравствуйте! Чем можем помочь?',
-  offline_message: 'Сейчас операторы недоступны. Оставьте сообщение.',
-  require_phone: false,
+  welcome_message: 'Здравствуйте! Оставьте контакты — оператор подключится.',
+  offline_message: 'Сейчас вне графика. Оставьте сообщение — ответим в рабочее время.',
+  require_phone: true,
   theme_accent: '#007A43',
-  form_fields: [],
+  form_fields: [
+    { key: 'name', label: 'Имя', type: 'text', required: true },
+    { key: 'last_name', label: 'Фамилия', type: 'text', required: false },
+    { key: 'phone', label: 'Телефон', type: 'tel', required: true },
+  ],
   is_active: true,
 }
 
@@ -146,6 +262,7 @@ export function ChatAdminApp() {
   const [channels, setChannels] = useState<ChatChannel[]>([])
   const [rules, setRules] = useState<RoutingRule[]>([])
   const [bots, setBots] = useState<BotConfiguration[]>([])
+  const [baseMessages, setBaseMessages] = useState<BaseMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -160,22 +277,39 @@ export function ChatAdminApp() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [departmentItems, operatorItems, placementItems, channelItems, ruleItems, botItems] =
-        await Promise.all([
-          departmentsApi.list(),
-          operatorsApi.list(),
-          placementsApi.list(),
-          channelsApi.list(),
-          routingRulesApi.list(),
-          botsApi.list(),
-        ])
-      setDepartments(departmentItems)
-      setOperators(operatorItems)
-      setPlacements(placementItems)
-      setChannels(channelItems)
-      setRules(ruleItems)
-      setBots(botItems)
-      setError('')
+      const results = await Promise.allSettled([
+        departmentsApi.list(),
+        operatorsApi.list(),
+        placementsApi.list(),
+        channelsApi.list(),
+        routingRulesApi.list(),
+        botsApi.list(),
+        baseMessagesApi.list(),
+      ])
+      const [
+        departmentResult,
+        operatorResult,
+        placementResult,
+        channelResult,
+        ruleResult,
+        botResult,
+        messageResult,
+      ] = results
+
+      if (departmentResult.status === 'fulfilled') setDepartments(departmentResult.value)
+      if (operatorResult.status === 'fulfilled') setOperators(operatorResult.value)
+      if (placementResult.status === 'fulfilled') setPlacements(placementResult.value)
+      if (channelResult.status === 'fulfilled') setChannels(channelResult.value)
+      if (ruleResult.status === 'fulfilled') setRules(ruleResult.value)
+      if (botResult.status === 'fulfilled') setBots(botResult.value)
+      if (messageResult.status === 'fulfilled') setBaseMessages(messageResult.value)
+
+      const failed = results.find((item) => item.status === 'rejected') as PromiseRejectedResult | undefined
+      if (failed) {
+        setError(failed.reason instanceof Error ? failed.reason.message : 'Не удалось загрузить часть настроек')
+      } else {
+        setError('')
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Не удалось загрузить настройки')
     } finally {
@@ -194,7 +328,15 @@ export function ChatAdminApp() {
     try {
       await action()
       setSuccess(message)
-      await refresh()
+      try {
+        await refresh()
+      } catch (refreshError) {
+        setError(
+          refreshError instanceof Error
+            ? refreshError.message
+            : 'Сохранено, но список настроек не обновился',
+        )
+      }
       return true
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Операция не выполнена')
@@ -297,7 +439,12 @@ export function ChatAdminApp() {
           />
         )}
         {tab === 'channels' && (
-          <ChannelsTab items={channels} disabled={saving} perform={perform} />
+          <ChannelsTab
+            items={channels}
+            placements={placements}
+            disabled={saving}
+            perform={perform}
+          />
         )}
         {tab === 'routing' && (
           <RoutingTab
@@ -311,11 +458,21 @@ export function ChatAdminApp() {
         {tab === 'bots' && (
           <BotsTab
             items={bots}
-            departments={departments}
             disabled={saving}
             perform={perform}
           />
         )}
+        {tab === 'messages' && (
+          <BaseMessagesTab
+            items={baseMessages}
+            placements={placements}
+            channels={channels}
+            disabled={saving}
+            perform={perform}
+          />
+        )}
+        {tab === 'sla' && <SlaTab disabled={saving} perform={perform} />}
+        {tab === 'schedule' && <WorkScheduleTab disabled={saving} perform={perform} />}
         {tab === 'analytics' && <AnalyticsTab />}
       </div>
     </main>
@@ -323,14 +480,21 @@ export function ChatAdminApp() {
 }
 
 function AnalyticsTab() {
-  const [period, setPeriod] = useState<'day' | 'week' | 'month'>('week')
+  const [mode, setMode] = useState<'day' | 'week' | 'month' | 'custom'>('week')
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 7)
+    return d.toISOString().slice(0, 10)
+  })
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10))
   const [data, setData] = useState<AnalyticsResponse | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    void getAnalytics(period)
+    const range = mode === 'custom' ? { date_from: dateFrom, date_to: dateTo } : undefined
+    void getAnalytics(mode === 'custom' ? 'custom' : mode, range)
       .then((response) => {
         setData(response)
         setError('')
@@ -339,7 +503,7 @@ function AnalyticsTab() {
         setError(caught instanceof Error ? caught.message : 'Не удалось загрузить аналитику')
       })
       .finally(() => setLoading(false))
-  }, [period])
+  }, [mode, dateFrom, dateTo])
 
   const kpis = (data?.kpis ?? {}) as Record<string, string | number | null | undefined>
 
@@ -350,14 +514,27 @@ function AnalyticsTab() {
         <label>
           Период
           <select
-            value={period}
-            onChange={(event) => setPeriod(event.target.value as 'day' | 'week' | 'month')}
+            value={mode}
+            onChange={(event) => setMode(event.target.value as typeof mode)}
           >
             <option value="day">1 день</option>
             <option value="week">7 дней</option>
             <option value="month">30 дней</option>
+            <option value="custom">Произвольные даты</option>
           </select>
         </label>
+        {mode === 'custom' ? (
+          <>
+            <label>
+              С
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            </label>
+            <label>
+              По
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            </label>
+          </>
+        ) : null}
       </div>
       {error && <p className="chat-management__error" role="alert">{error}</p>}
       {loading && <p className="chat-management__muted">Загрузка…</p>}
@@ -366,7 +543,7 @@ function AnalyticsTab() {
           ['Диалоги', kpis.dialogs ?? 0],
           ['Закрыто', kpis.closed ?? 0],
           ['В очереди', kpis.waiting ?? 0],
-          ['Решено, %', kpis.resolution_rate ?? '—'],
+          ['Доля закрытых, %', kpis.resolution_rate ?? '—'],
           ['Среднее время первого ответа, сек', kpis.average_first_response_seconds ?? '—'],
           ['Оценка клиентов (CSAT)', kpis.average_rating == null ? '—' : Number(kpis.average_rating).toFixed(2)],
         ].map(([label, value]) => (
@@ -375,6 +552,424 @@ function AnalyticsTab() {
             <strong>{String(value)}</strong>
           </article>
         ))}
+      </div>
+    </section>
+  )
+}
+
+function SlaTab({ disabled, perform }: TabProps) {
+  const [seconds, setSeconds] = useState(120)
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    void getSlaSettings()
+      .then((settings) => {
+        setSeconds(settings.first_response_seconds)
+        setLoaded(true)
+        setError('')
+      })
+      .catch((caught) => {
+        setError(caught instanceof Error ? caught.message : 'Не удалось загрузить SLA')
+        setLoaded(true)
+      })
+  }, [])
+
+  const minutes = Math.floor(seconds / 60)
+  const rest = seconds % 60
+
+  return (
+    <section className="chat-management__card" aria-labelledby="sla-heading">
+      <h2 id="sla-heading">Целевой SLA первого ответа</h2>
+      {error && <p className="chat-management__error" role="alert">{error}</p>}
+      {!loaded ? (
+        <p className="chat-management__muted">Загрузка…</p>
+      ) : (
+        <div className="chat-management__form-grid">
+          <label>
+            Цель, секунды
+            <input
+              type="number"
+              min={15}
+              max={3600}
+              step={5}
+              value={seconds}
+              disabled={disabled}
+              onChange={(event) => setSeconds(event.target.valueAsNumber || 15)}
+            />
+          </label>
+          <div className="chat-management__muted" style={{ alignSelf: 'end', paddingBottom: 10 }}>
+            Сейчас: <strong>{seconds} с</strong>
+            {minutes > 0 ? ` (${minutes} мин${rest ? ` ${rest} с` : ''})` : ''}
+          </div>
+        </div>
+      )}
+      <div className="chat-management__actions" style={{ marginTop: 14 }}>
+        <button
+          type="button"
+          disabled={disabled || !loaded}
+          onClick={() => void perform(
+            () => updateSlaSettings(seconds),
+            `Целевой SLA обновлён: ${seconds} с.`,
+            {
+              title: 'Сохранить целевой SLA?',
+              description: `Первый ответ оператора будет считаться в норме, если уложится в ${seconds} секунд.`,
+            },
+          )}
+        >
+          Сохранить SLA
+        </button>
+        {[60, 120, 180, 300].map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            className="is-secondary"
+            disabled={disabled}
+            onClick={() => setSeconds(preset)}
+          >
+            {preset} с
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+const WEEKDAY_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const MONTH_LABELS = [
+  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
+]
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+function toIsoDate(year: number, monthIndex: number, day: number): string {
+  return `${year}-${pad2(monthIndex + 1)}-${pad2(day)}`
+}
+
+function parseIsoDate(value: string): Date {
+  const [y, m, d] = value.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+function WorkScheduleTab({ disabled, perform }: TabProps) {
+  const today = new Date()
+  const [enabled, setEnabled] = useState(false)
+  const [defaultStart, setDefaultStart] = useState('09:00')
+  const [defaultEnd, setDefaultEnd] = useState('18:00')
+  const [workdays, setWorkdays] = useState<number[]>([0, 1, 2, 3, 4])
+  const [dayOverrides, setDayOverrides] = useState<Record<string, WorkDayOverride>>({})
+  const [holidays, setHolidays] = useState<string[]>([])
+  const [isOpen, setIsOpen] = useState(true)
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState('')
+  const [viewYear, setViewYear] = useState(today.getFullYear())
+  const [viewMonth, setViewMonth] = useState(today.getMonth())
+  const [selectedDate, setSelectedDate] = useState(toIsoDate(today.getFullYear(), today.getMonth(), today.getDate()))
+
+  useEffect(() => {
+    void getWorkScheduleSettings()
+      .then((settings) => {
+        setEnabled(settings.enabled)
+        setDefaultStart(settings.start_time || '09:00')
+        setDefaultEnd(settings.end_time || '18:00')
+        setWorkdays(settings.workdays?.length ? settings.workdays : [0, 1, 2, 3, 4])
+        setDayOverrides(settings.day_overrides ?? {})
+        setHolidays(settings.holidays ?? [])
+        setIsOpen(settings.is_open)
+        setLoaded(true)
+        setError('')
+      })
+      .catch((caught) => {
+        setError(caught instanceof Error ? caught.message : 'Не удалось загрузить календарь')
+        setLoaded(true)
+      })
+  }, [])
+
+  const resolveDay = (iso: string) => {
+    const date = parseIsoDate(iso)
+    const override = dayOverrides[iso]
+    // JS getDay: Sun=0…Sat=6; backend weekday: Mon=0…Sun=6
+    const weekday = (date.getDay() + 6) % 7
+    const isDefaultWork = workdays.includes(weekday) && !holidays.includes(iso)
+    if (override) {
+      return {
+        isWorkday: !!override.is_workday,
+        start: override.start_time || defaultStart,
+        end: override.end_time || defaultEnd,
+        hasOverride: true,
+      }
+    }
+    return {
+      isWorkday: isDefaultWork,
+      start: defaultStart,
+      end: defaultEnd,
+      hasOverride: false,
+    }
+  }
+
+  const selected = resolveDay(selectedDate)
+
+  const monthCells = (() => {
+    const first = new Date(viewYear, viewMonth, 1)
+    const startPad = (first.getDay() + 6) % 7
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
+    const cells: Array<{ iso: string; day: number; inMonth: boolean } | null> = []
+    for (let i = 0; i < startPad; i += 1) cells.push(null)
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      cells.push({
+        iso: toIsoDate(viewYear, viewMonth, day),
+        day,
+        inMonth: true,
+      })
+    }
+    while (cells.length % 7 !== 0) cells.push(null)
+    return cells
+  })()
+
+  const shiftMonth = (delta: number) => {
+    const next = new Date(viewYear, viewMonth + delta, 1)
+    setViewYear(next.getFullYear())
+    setViewMonth(next.getMonth())
+  }
+
+  const applySelectedDay = (patch: Partial<WorkDayOverride> & { is_workday?: boolean }) => {
+    setDayOverrides((prev) => {
+      const next = { ...prev }
+      const current = resolveDay(selectedDate)
+      next[selectedDate] = {
+        is_workday: patch.is_workday ?? current.isWorkday,
+        start_time: patch.start_time ?? current.start,
+        end_time: patch.end_time ?? current.end,
+      }
+      return next
+    })
+  }
+
+  const clearSelectedOverride = () => {
+    setDayOverrides((prev) => {
+      const next = { ...prev }
+      delete next[selectedDate]
+      return next
+    })
+  }
+
+  return (
+    <section className="chat-management__card" aria-labelledby="schedule-heading">
+      <h2 id="schedule-heading">Рабочий календарь онлайн-чата</h2>
+      <p className="chat-management__muted">
+        По умолчанию 5/2 с 09:00 до 18:00. Выберите день в календаре, чтобы сделать его
+        выходным/рабочим или задать другое время (переносы).
+      </p>
+      {error && <p className="chat-management__error" role="alert">{error}</p>}
+      {!loaded ? (
+        <p className="chat-management__muted">Загрузка…</p>
+      ) : (
+        <>
+          <p>
+            Сейчас линия:{' '}
+            <span className={`chat-management__pill ${isOpen ? 'is-online' : 'is-offline'}`}>
+              {isOpen ? 'рабочее время' : 'нерабочее время'}
+            </span>
+          </p>
+
+          <div
+            style={{
+              border: '1px solid #d8dee6',
+              borderRadius: 12,
+              padding: 14,
+              marginBottom: 14,
+              background: '#f8fafc',
+            }}
+          >
+            <div className="chat-management__form-grid">
+              <label className="chat-management__check is-wide">
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  disabled={disabled}
+                  onChange={(event) => setEnabled(event.target.checked)}
+                />
+                Учитывать календарь (в проде должно быть включено)
+              </label>
+              <label>
+                Время по умолчанию (начало)
+                <input
+                  type="time"
+                  value={defaultStart}
+                  disabled={disabled}
+                  onChange={(event) => setDefaultStart(event.target.value)}
+                />
+              </label>
+              <label>
+                Время по умолчанию (конец)
+                <input
+                  type="time"
+                  value={defaultEnd}
+                  disabled={disabled}
+                  onChange={(event) => setDefaultEnd(event.target.value)}
+                />
+              </label>
+            </div>
+            <p className="chat-management__muted" style={{ marginTop: 8, marginBottom: 0 }}>
+              Выбранный день: <strong>{selectedDate}</strong>
+              {selected.hasOverride ? ' · есть перенос' : ' · по шаблону 5/2'}
+            </p>
+            <div className="chat-management__actions" style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                disabled={disabled}
+                className={selected.isWorkday ? undefined : 'is-secondary'}
+                onClick={() => applySelectedDay({ is_workday: true })}
+              >
+                Рабочий
+              </button>
+              <button
+                type="button"
+                disabled={disabled}
+                className={!selected.isWorkday ? undefined : 'is-secondary'}
+                onClick={() => applySelectedDay({ is_workday: false })}
+              >
+                Выходной
+              </button>
+              {selected.hasOverride ? (
+                <button type="button" className="is-secondary" disabled={disabled} onClick={clearSelectedOverride}>
+                  Сбросить на шаблон
+                </button>
+              ) : null}
+            </div>
+            {selected.isWorkday ? (
+              <div className="chat-management__form-grid" style={{ marginTop: 10 }}>
+                <label>
+                  Начало
+                  <input
+                    type="time"
+                    value={selected.start}
+                    disabled={disabled}
+                    onChange={(event) => applySelectedDay({ start_time: event.target.value, is_workday: true })}
+                  />
+                </label>
+                <label>
+                  Конец
+                  <input
+                    type="time"
+                    value={selected.end}
+                    disabled={disabled}
+                    onChange={(event) => applySelectedDay({ end_time: event.target.value, is_workday: true })}
+                  />
+                </label>
+              </div>
+            ) : (
+              <p className="chat-management__muted" style={{ marginTop: 10 }}>
+                В этот день линия закрыта — диалоги копятся в офлайн-очереди.
+              </p>
+            )}
+          </div>
+
+          <div
+            style={{
+              border: '1px solid #d8dee6',
+              borderRadius: 12,
+              padding: 14,
+            }}
+          >
+            <div className="chat-management__actions" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
+              <button type="button" className="is-secondary" disabled={disabled} onClick={() => shiftMonth(-1)}>
+                ←
+              </button>
+              <strong>
+                {MONTH_LABELS[viewMonth]} {viewYear}
+              </strong>
+              <button type="button" className="is-secondary" disabled={disabled} onClick={() => shiftMonth(1)}>
+                →
+              </button>
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(7, 1fr)',
+                gap: 6,
+                marginBottom: 6,
+              }}
+            >
+              {WEEKDAY_LABELS.map((label) => (
+                <div key={label} className="chat-management__muted" style={{ textAlign: 'center', fontSize: 12 }}>
+                  {label}
+                </div>
+              ))}
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(7, 1fr)',
+                gap: 6,
+              }}
+            >
+              {monthCells.map((cell, index) => {
+                if (!cell) {
+                  return <div key={`empty-${index}`} />
+                }
+                const plan = resolveDay(cell.iso)
+                const isSelected = cell.iso === selectedDate
+                return (
+                  <button
+                    key={cell.iso}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setSelectedDate(cell.iso)}
+                    style={{
+                      minHeight: 54,
+                      borderRadius: 10,
+                      border: isSelected ? '2px solid #1d4ed8' : '1px solid #e2e8f0',
+                      background: plan.isWorkday ? '#ecfdf5' : '#f8fafc',
+                      color: plan.isWorkday ? '#065f46' : '#64748b',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      padding: '6px 4px',
+                    }}
+                  >
+                    <div style={{ fontWeight: 700 }}>{cell.day}</div>
+                    <div style={{ fontSize: 10, marginTop: 2 }}>
+                      {plan.isWorkday ? `${plan.start}–${plan.end}` : 'вых.'}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </>
+      )}
+      <div className="chat-management__actions" style={{ marginTop: 14 }}>
+        <button
+          type="button"
+          disabled={disabled || !loaded}
+          onClick={() => void perform(
+            async () => {
+              const saved = await updateWorkScheduleSettings({
+                enabled,
+                start_time: defaultStart,
+                end_time: defaultEnd,
+                workdays,
+                holidays,
+                day_overrides: dayOverrides,
+                manual_override: 'auto',
+              })
+              setDayOverrides(saved.day_overrides ?? {})
+              setIsOpen(saved.is_open)
+            },
+            'Рабочий календарь сохранён.',
+            {
+              title: 'Сохранить календарь?',
+              description: enabled
+                ? `Шаблон ${defaultStart}–${defaultEnd}, переносов: ${Object.keys(dayOverrides).length}.`
+                : 'Календарь будет выключен — линия считается всегда открытой.',
+            },
+          )}
+        >
+          Сохранить календарь
+        </button>
       </div>
     </section>
   )
@@ -395,6 +990,15 @@ function OperatorsTab({
   const [username, setUsername] = useState('')
   const [departmentId, setDepartmentId] = useState('')
   const [capacity, setCapacity] = useState(5)
+  const [skillTags, setSkillTags] = useState('')
+  const [photoUrl, setPhotoUrl] = useState('')
+  const [adPending, setAdPending] = useState<Awaited<ReturnType<typeof getAdPendingOperators>>['items']>([])
+
+  useEffect(() => {
+    void getAdPendingOperators()
+      .then((response) => setAdPending(response.items ?? []))
+      .catch(() => setAdPending([]))
+  }, [items])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -409,9 +1013,16 @@ function OperatorsTab({
           capacity,
           presence: 'offline',
           is_active: true,
+          photo_url: photoUrl.trim() || undefined,
+          skill_tags: skillTags
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter(Boolean),
         })
         setFullName('')
         setUsername('')
+        setSkillTags('')
+        setPhotoUrl('')
       },
       'Оператор создан.',
       {
@@ -443,8 +1054,34 @@ function OperatorsTab({
             </select>
           </label>
           <label>
-            Вместимость
+            Лимит диалогов
             <input type="number" min="1" max="50" value={capacity} onChange={(event) => setCapacity(event.target.valueAsNumber)} />
+          </label>
+          <label className="is-wide">
+            Навыки / каналы (через запятую)
+            <input
+              value={skillTags}
+              placeholder="мессенджеры, сайт, соцсети"
+              onChange={(event) => setSkillTags(event.target.value)}
+            />
+          </label>
+          <label className="is-wide">
+            Фото аватара
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
+              <OperatorAvatarPreview url={photoUrl} name={fullName || 'Новый'} />
+              <input
+                type="file"
+                accept="image/*"
+                disabled={disabled}
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  if (!file) return
+                  const reader = new FileReader()
+                  reader.onload = () => setPhotoUrl(String(reader.result || ''))
+                  reader.readAsDataURL(file)
+                }}
+              />
+            </div>
           </label>
         </div>
         <div className="chat-management__actions">
@@ -452,15 +1089,114 @@ function OperatorsTab({
         </div>
       </form>
       <section className="chat-management__card" aria-labelledby="operators-admin-heading">
-        <h2 id="operators-admin-heading">Операторы</h2>
+        <div className="chat-management__toolbar">
+          <h2 id="operators-admin-heading">Операторы</h2>
+          {SHOW_AD_DEMO ? (
+            <button
+              type="button"
+              className="is-secondary"
+              onClick={() => setAdPending((prev) => [makeDemoAdEmployee(), ...prev])}
+              title="Демо: имитировать появление нового сотрудника в Active Directory"
+            >
+              Симулировать сотрудника из AD
+            </button>
+          ) : null}
+        </div>
+        {adPending.length ? (
+          <div className="chat-management__ad-pending" aria-label="Новые операторы из Active Directory">
+            <header>
+              <strong>Новые из Active Directory</strong>
+              <span className="chat-management__pill is-warn">{adPending.length}</span>
+            </header>
+            <p className="chat-management__muted">
+              Пользователи с ролью КЦ появились в AD. Назначьте лимит диалогов, фото и навыки, затем создайте оператора.
+            </p>
+            <ul className="chat-management__ad-list">
+              {adPending.map((item) => (
+                <li key={item.external_id} className="chat-management__ad-card">
+                  <OperatorAvatarPreview url="" name={item.display_name} />
+                  <div>
+                    <strong>{item.display_name}</strong>
+                    <div className="chat-management__muted">{item.email}</div>
+                    <div>
+                      <span className="chat-management__pill">{adRoleLabel(item.ad_role)}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="is-secondary"
+                    disabled={disabled}
+                    onClick={() => {
+                      setFullName(item.display_name)
+                      setUsername(item.email.split('@')[0] || item.external_id)
+                    }}
+                  >
+                    Заполнить форму
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <div className="chat-management__table-wrap">
           <table>
-            <thead><tr><th>ФИО</th><th>Отдел</th><th>Статус</th><th>Лимит</th><th>Активен</th></tr></thead>
+            <thead><tr><th>Фото</th><th>ФИО</th><th>Отдел</th><th>Навыки</th><th>Статус</th><th>Лимит</th><th>Активен</th></tr></thead>
             <tbody>
               {items.map((item) => (
                 <tr key={item.id}>
-                  <td><strong>{item.name}</strong></td>
+                  <td>
+                    <label className="chat-management__avatar-upload" title="Загрузить фото">
+                      <OperatorAvatarPreview url={item.photo_url || ''} name={item.name} />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        disabled={disabled}
+                        aria-label={`Загрузить фото ${item.name}`}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0]
+                          if (!file) return
+                          const reader = new FileReader()
+                          reader.onload = () => {
+                            const next = String(reader.result || '')
+                            void perform(
+                              () => operatorsApi.update(item.id, { photo_url: next }),
+                              `Фото ${item.name} обновлено.`,
+                            )
+                          }
+                          reader.readAsDataURL(file)
+                        }}
+                      />
+                    </label>
+                  </td>
+                  <td>
+                    <strong>{item.name}</strong>
+                  </td>
                   <td>{item.department_name ?? departmentName(item.department_id ?? item.department, departments)}</td>
+                  <td>
+                    <input
+                      aria-label={`Навыки ${item.name}`}
+                      defaultValue={(item.skill_tags ?? []).join(', ')}
+                      key={`${item.id}-skills-${(item.skill_tags ?? []).join(',')}`}
+                      placeholder="мессенджеры, сайт"
+                      onBlur={(event) => {
+                        const next = event.target.value
+                          .split(',')
+                          .map((tag) => tag.trim())
+                          .filter(Boolean)
+                        const prev = item.skill_tags ?? []
+                        if (next.join('|') === prev.join('|')) return
+                        void perform(
+                          () => operatorsApi.update(item.id, { skill_tags: next }),
+                          `Навыки ${item.name} обновлены.`,
+                          {
+                            title: 'Изменить навыки / каналы?',
+                            description: `Для «${item.name}»: ${next.join(', ') || 'без тегов'}.`,
+                          },
+                        )
+                        event.target.value = prev.join(', ')
+                      }}
+                    />
+                  </td>
                   <td>
                     <select
                       aria-label={`Присутствие ${item.name}`}
@@ -477,7 +1213,6 @@ function OperatorsTab({
                             description: `Установить для «${item.name}» статус «${label}»?`,
                           },
                         )
-                        // Keep select visually stable until refresh applies.
                         event.target.value = presenceToUi(item.presence)
                       }}
                     >
@@ -641,10 +1376,15 @@ function DepartmentsTab({ items, disabled, perform }: TabProps & { items: Depart
 function FormFieldsPicker({
   value,
   onChange,
+  allowReorder = false,
 }: {
   value: WidgetFormField[]
   onChange: (fields: WidgetFormField[]) => void
+  /** Messenger channels: drag to set ask order. Widget: selection only. */
+  allowReorder?: boolean
 }) {
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const selectedKeys = new Set(value.map((field) => field.key))
   const togglePopular = (field: WidgetFormField) => {
     if (selectedKeys.has(field.key)) {
@@ -656,13 +1396,21 @@ function FormFieldsPicker({
   const setRequired = (key: string, required: boolean) => {
     onChange(value.map((item) => (item.key === key ? { ...item, required } : item)))
   }
-  const removeField = (key: string) => onChange(value.filter((item) => item.key !== key))
+  const removeField = (key: string) => {
+    onChange(value.filter((item) => item.key !== key))
+  }
+  const reorderTo = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= value.length || to >= value.length) return
+    const next = [...value]
+    const [item] = next.splice(from, 1)
+    next.splice(to, 0, item)
+    onChange(next)
+  }
 
   return (
     <div className="chat-management__field-picker is-wide">
       <div className="chat-management__field-picker-head">
         <strong>Поля формы</strong>
-        <span>Выберите поля для формы входа в виджет</span>
       </div>
 
       <div className="chat-management__field-grid" role="group" aria-label="Доступные поля">
@@ -691,13 +1439,61 @@ function FormFieldsPicker({
         </div>
         {value.length ? (
           <ul className="chat-management__selected-fields">
-            {value.map((field) => (
-              <li key={field.key}>
-                <span className="chat-management__selected-fields-label">{field.label}</span>
+            {value.map((field, index) => (
+              <li
+                key={field.key}
+                className={[
+                  allowReorder ? 'is-sortable' : '',
+                  dragIndex === index ? 'is-dragging' : '',
+                  dragOverIndex === index && dragIndex !== index ? 'is-drag-over' : '',
+                ].filter(Boolean).join(' ')}
+                draggable={allowReorder}
+                onDragStart={(event) => {
+                  if (!allowReorder) return
+                  setDragIndex(index)
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData('text/plain', String(index))
+                }}
+                onDragOver={(event) => {
+                  if (!allowReorder || dragIndex === null) return
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                  if (dragOverIndex !== index) setDragOverIndex(index)
+                }}
+                onDragLeave={() => {
+                  if (dragOverIndex === index) setDragOverIndex(null)
+                }}
+                onDrop={(event) => {
+                  if (!allowReorder) return
+                  event.preventDefault()
+                  const from = dragIndex ?? Number(event.dataTransfer.getData('text/plain'))
+                  reorderTo(from, index)
+                  setDragIndex(null)
+                  setDragOverIndex(null)
+                }}
+                onDragEnd={() => {
+                  setDragIndex(null)
+                  setDragOverIndex(null)
+                }}
+              >
+                {allowReorder ? (
+                  <span className="chat-management__selected-fields-index" aria-hidden>
+                    {index + 1}
+                  </span>
+                ) : null}
+                <span
+                  className="chat-management__selected-fields-label"
+                  title={allowReorder ? 'Перетащите, чтобы изменить порядок' : undefined}
+                >
+                  {allowReorder ? (
+                    <span className="chat-management__selected-fields-grip" aria-hidden>⠿</span>
+                  ) : null}
+                  {field.label}
+                </span>
                 <label className="chat-management__required-toggle">
                   <input
                     type="checkbox"
-                    checked={field.required}
+                    checked={Boolean(field.required)}
                     onChange={(event) => setRequired(field.key, event.target.checked)}
                   />
                   <span>Обязательное</span>
@@ -730,22 +1526,16 @@ function PlacementsTab({
   const [editingId, setEditingId] = useState<EntityId | null>(null)
   const [form, setForm] = useState<Partial<WidgetPlacement>>(emptyPlacement)
   const [domains, setDomains] = useState('')
-  const [fields, setFields] = useState<WidgetFormField[]>([
-    POPULAR_FORM_FIELDS[0],
-    POPULAR_FORM_FIELDS[2],
-  ])
 
   const edit = (item: WidgetPlacement) => {
     setEditingId(item.id)
     setForm(item)
     setDomains((item.allowed_domains ?? []).join(', '))
-    setFields(item.form_fields?.length ? item.form_fields : [])
   }
   const reset = () => {
     setEditingId(null)
     setForm(emptyPlacement)
     setDomains('')
-    setFields([POPULAR_FORM_FIELDS[0], POPULAR_FORM_FIELDS[2]])
   }
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -753,7 +1543,6 @@ function PlacementsTab({
       ...form,
       code: (form.code || '').trim() || slugHint(form.name || 'widget'),
       allowed_domains: domains.split(',').map((value) => value.trim()).filter(Boolean),
-      form_fields: fields,
     }
     await perform(
       async () => {
@@ -761,12 +1550,12 @@ function PlacementsTab({
         else await placementsApi.update(editingId, payload)
         reset()
       },
-      editingId == null ? 'Размещение создано.' : 'Размещение обновлено.',
+      editingId == null ? 'Виджет создан.' : 'Виджет обновлён.',
       {
-        title: editingId == null ? 'Создать размещение?' : 'Сохранить размещение?',
+        title: editingId == null ? 'Создать виджет?' : 'Сохранить виджет?',
         description: editingId == null
-          ? `Будет создано размещение «${form.name || ''}» с ${fields.length} полями формы.`
-          : `Изменения размещения «${form.name || ''}» будут сохранены.`,
+          ? `Будет создан виджет «${form.name || ''}». Поля формы настраиваются в «Каналы платформы».`
+          : `Изменения виджета «${form.name || ''}» будут сохранены.`,
       },
     )
   }
@@ -776,7 +1565,7 @@ function PlacementsTab({
   return (
     <div className="chat-management__split">
       <form className="chat-management__card" onSubmit={(event) => void submit(event)}>
-        <h2>{editingId == null ? 'Новое размещение' : 'Редактирование размещения'}</h2>
+        <h2>{editingId == null ? 'Новый виджет' : 'Редактирование виджета'}</h2>
         <div className="chat-management__form-grid">
           <label>Название<input required value={form.name ?? ''} onChange={(event) => set('name', event.target.value)} /></label>
           <label>
@@ -791,8 +1580,6 @@ function PlacementsTab({
             Разрешённые домены (через запятую)
             <input placeholder="example.by, bank.example.by" value={domains} onChange={(event) => setDomains(event.target.value)} />
           </label>
-          <label className="is-wide">Приветствие<textarea value={form.welcome_message ?? ''} onChange={(event) => set('welcome_message', event.target.value)} /></label>
-          <label className="is-wide">Сообщение вне графика<textarea value={form.offline_message ?? ''} onChange={(event) => set('offline_message', event.target.value)} /></label>
           <label>
             Отдел
             <select value={entityDepartmentId(form)} onChange={(event) => set('department_id', event.target.value || null)}>
@@ -804,19 +1591,59 @@ function PlacementsTab({
             Акцент темы
             <input type="color" value={form.theme_accent ?? '#007A43'} onChange={(event) => set('theme_accent', event.target.value)} />
           </label>
-          <FormFieldsPicker value={fields} onChange={setFields} />
           <label className="chat-management__check">
             <input type="checkbox" checked={form.is_active !== false} onChange={(event) => set('is_active', event.target.checked)} />
-            Размещение активно
+            Виджет активен
           </label>
+          <label className="is-wide">
+            Приветствие
+            <textarea
+              value={form.welcome_message ?? ''}
+              onChange={(event) => set('welcome_message', event.target.value)}
+              rows={2}
+            />
+          </label>
+          <p className="chat-management__muted is-wide" style={{ margin: '4px 0 0' }}>
+            Сообщение вне графика настраивается в разделе «Базовые сообщения».
+          </p>
         </div>
         <div className="chat-management__actions">
           <button disabled={disabled}>{editingId == null ? 'Создать' : 'Сохранить'}</button>
           {editingId != null && <button type="button" className="is-secondary" onClick={reset}>Отмена</button>}
         </div>
+        {(form.name || editingId != null) ? (
+          <div
+            className="chat-management__widget-preview"
+            style={{
+              marginTop: 16,
+              border: '1px solid #d7e0d9',
+              borderRadius: 12,
+              overflow: 'hidden',
+              background: '#f4f7f5',
+            }}
+          >
+            <div style={{ padding: '10px 12px', background: form.theme_accent || '#007A43', color: '#fff', fontWeight: 600 }}>
+              Чат банка · превью
+            </div>
+            <div style={{ padding: 12, display: 'grid', gap: 8 }}>
+              <p style={{ margin: 0, fontSize: 13, color: '#334' }}>
+                {(form.welcome_message || 'Здравствуйте! Оставьте контакты — оператор подключится.').slice(0, 160)}
+              </p>
+              {(form.form_fields?.length ? form.form_fields : POPULAR_FORM_FIELDS.slice(0, 3)).map((field) => (
+                <label key={field.key} style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+                  {field.label}{field.required ? ' *' : ''}
+                  <input disabled placeholder={field.type === 'tel' ? '+375 …' : ''} style={{ padding: 8, borderRadius: 6, border: '1px solid #c9d4cc' }} />
+                </label>
+              ))}
+              <button type="button" disabled style={{ padding: '8px 12px', borderRadius: 8, background: form.theme_accent || '#007A43', color: '#fff', border: 0 }}>
+                Начать диалог
+              </button>
+            </div>
+          </div>
+        ) : null}
       </form>
       <section className="chat-management__card">
-        <h2>Размещения</h2>
+        <h2>Виджеты</h2>
         <ul className="chat-management__list">
           {items.map((item) => (
             <li className="chat-management__list-item" key={item.id}>
@@ -845,10 +1672,10 @@ function PlacementsTab({
                   disabled={disabled}
                   onClick={() => void perform(
                     () => placementsApi.remove(item.id),
-                    'Размещение удалено.',
+                    'Виджет удалён.',
                     {
-                      title: 'Удалить размещение?',
-                      description: `Размещение «${item.name}» будет удалено.`,
+                      title: 'Удалить виджет?',
+                      description: `Виджет «${item.name}» будет удалён.`,
                     },
                   )}
                 >
@@ -858,7 +1685,7 @@ function PlacementsTab({
             </li>
           ))}
         </ul>
-        {!items.length && <div className="chat-management__empty">Размещений пока нет.</div>}
+        {!items.length && <div className="chat-management__empty">Виджетов пока нет.</div>}
       </section>
     </div>
   )
@@ -877,97 +1704,255 @@ function healthLabel(status?: string): { text: string; tone: string } {
   }
 }
 
-function ChannelsTab({ items, disabled, perform }: TabProps & { items: ChatChannel[] }) {
-  const rows = CANONICAL_CHANNELS.map((canonical) => {
+function ChannelsTab({
+  items,
+  placements,
+  disabled,
+  perform,
+}: TabProps & { items: ChatChannel[]; placements: WidgetPlacement[] }) {
+  const [formTarget, setFormTarget] = useState<{
+    kind: 'channel' | 'placement'
+    id: EntityId
+    name: string
+    fields: WidgetFormField[]
+    allowReorder: boolean
+  } | null>(null)
+
+  const messengerRows = CANONICAL_CHANNELS.filter((item) => item.kind !== 'widget').map((canonical) => {
     const existing = items.find((item) => (item.kind ?? item.channel ?? '') === canonical.kind)
     return { ...canonical, existing }
   })
+  const widgetChannel = items.find((item) => (item.kind ?? item.channel ?? '') === 'widget')
+
+  const openChannelForm = (channel: ChatChannel) => {
+    const channelKind = String(channel.kind ?? channel.channel ?? '')
+    const cleaned = sanitizeFormFields(channel.form_fields)
+    setFormTarget({
+      kind: 'channel',
+      id: channel.id,
+      name: channel.name.replace(/\s*\(demo\)/gi, ''),
+      fields: cleaned,
+      allowReorder: channelKind !== 'widget',
+    })
+  }
+  const openPlacementForm = (placement: WidgetPlacement) => {
+    const cleaned = sanitizeFormFields(placement.form_fields)
+    setFormTarget({
+      kind: 'placement',
+      id: placement.id,
+      name: `Виджет · ${placement.name.replace(/\s*\(demo\)/gi, '')}`,
+      fields: cleaned,
+      allowReorder: false,
+    })
+  }
+  const saveFormFields = async () => {
+    if (!formTarget) return
+    const target = formTarget
+    const mapped = sanitizeFormFields(target.fields)
+    // Close first so a slow/partial refresh cannot leave the modal stuck open.
+    setFormTarget(null)
+    const ok = await perform(async () => {
+      if (target.kind === 'channel') {
+        // Only form_fields — never rewrite config from the masked list payload.
+        await channelsApi.update(target.id, { form_fields: mapped } as Partial<ChatChannel>)
+      } else {
+        await placementsApi.update(target.id, {
+          form_fields: mapped,
+          require_phone: mapped.some((field) => field.key === 'phone' && field.required),
+        })
+      }
+    }, `Поля формы для «${target.name}» сохранены.`)
+    if (!ok) setFormTarget(target)
+  }
 
   return (
-    <section className="chat-management__card" aria-labelledby="channels-heading">
-      <h2 id="channels-heading">Каналы платформы</h2>
-      <ul className="chat-management__list chat-management__channel-list">
-        {rows.map((row) => {
-          const active = row.existing?.is_active === true
-          const health = healthLabel(row.existing?.health_status)
-          const counters = row.existing?.counters
-          return (
-            <li className="chat-management__list-item" key={row.kind}>
-              <header>
-                <div>
-                  <strong>{row.name}</strong>
+    <>
+      <section className="chat-management__card" aria-labelledby="channels-heading">
+        <h2 id="channels-heading">Каналы платформы</h2>
+        <ul className="chat-management__list chat-management__channel-list">
+          {placements.map((placement) => {
+            const active = placement.is_active !== false
+            const health = healthLabel(widgetChannel?.health_status)
+            const counters = placement.counters
+            return (
+              <li className="chat-management__list-item" key={`placement-${placement.id}`}>
+                <header>
+                  <div>
+                    <strong>Виджет · {placement.name}</strong>
+                    <div className="chat-management__muted">{placement.code}</div>
+                  </div>
+                  <span className={`chat-management__pill chat-management__pill--lg ${active ? 'is-success' : 'is-error'}`}>
+                    {active ? 'активен' : 'выключен'}
+                  </span>
+                </header>
+                <div className="chat-management__channel-meta">
+                  <span className={`chat-management__pill ${health.tone}`}>{health.text}</span>
+                  {widgetChannel?.last_health_check_at ? (
+                    <span className="chat-management__muted">
+                      проверка: {new Date(widgetChannel.last_health_check_at).toLocaleString('ru-RU')}
+                    </span>
+                  ) : null}
                 </div>
-                <span className={`chat-management__pill chat-management__pill--lg ${active ? 'is-success' : 'is-error'}`}>
-                  {active ? 'активен' : 'выключен'}
+                <dl className="chat-management__channel-counters">
+                  <div><dt>В очереди</dt><dd>{counters?.waiting ?? 0}</dd></div>
+                  <div><dt>Активные</dt><dd>{counters?.active ?? 0}</dd></div>
+                  <div><dt>Сегодня</dt><dd>{counters?.today ?? 0}</dd></div>
+                  <div><dt>Закрыто сегодня</dt><dd>{counters?.closed_today ?? 0}</dd></div>
+                </dl>
+                <div className="chat-management__actions">
+                  <button className="is-secondary" disabled={disabled} onClick={() => openPlacementForm(placement)}>
+                    Настроить
+                  </button>
+                  <button
+                    className="is-secondary"
+                    disabled={disabled}
+                    onClick={() => void perform(async () => {
+                      const channel = widgetChannel ?? await channelsApi.create({
+                        name: 'Виджет сайта',
+                        kind: 'widget',
+                        is_active: true,
+                        account: 'channel-widget',
+                      })
+                      await channelsApi.checkHealth(channel.id)
+                    }, `Проверка виджета «${placement.name}» выполнена.`)}
+                  >
+                    Проверить соединение
+                  </button>
+                  <button
+                    className={active ? 'is-danger' : 'is-secondary'}
+                    disabled={disabled}
+                    onClick={() => void perform(
+                      () => placementsApi.update(placement.id, { is_active: !active }),
+                      active ? `Виджет «${placement.name}» выключен.` : `Виджет «${placement.name}» включён.`,
+                    )}
+                  >
+                    {active ? 'Выключить' : 'Включить'}
+                  </button>
+                </div>
+              </li>
+            )
+          })}
+          {!placements.length && widgetChannel ? (
+            <li className="chat-management__list-item">
+              <header>
+                <div><strong>Виджет сайта</strong></div>
+                <span className={`chat-management__pill chat-management__pill--lg ${widgetChannel.is_active ? 'is-success' : 'is-error'}`}>
+                  {widgetChannel.is_active ? 'активен' : 'выключен'}
                 </span>
               </header>
-              <div className="chat-management__channel-meta">
-                <span className={`chat-management__pill ${health.tone}`}>{health.text}</span>
-                {row.existing?.last_health_check_at ? (
-                  <span className="chat-management__muted">
-                    проверка: {new Date(row.existing.last_health_check_at).toLocaleString('ru-RU')}
-                  </span>
-                ) : null}
-              </div>
-              <dl className="chat-management__channel-counters">
-                <div>
-                  <dt>В очереди</dt>
-                  <dd>{counters?.waiting ?? 0}</dd>
-                </div>
-                <div>
-                  <dt>Активные</dt>
-                  <dd>{counters?.active ?? 0}</dd>
-                </div>
-                <div>
-                  <dt>Сегодня</dt>
-                  <dd>{counters?.today ?? 0}</dd>
-                </div>
-                <div>
-                  <dt>Закрыто сегодня</dt>
-                  <dd>{counters?.closed_today ?? 0}</dd>
-                </div>
-              </dl>
               <div className="chat-management__actions">
-                <button
-                  className="is-secondary"
-                  disabled={disabled || !row.existing}
-                  onClick={() => void perform(async () => {
-                    if (!row.existing) return
-                    await channelsApi.checkHealth(row.existing.id)
-                  }, `Проверка канала «${row.name}» выполнена.`, {
-                    title: 'Проверить соединение?',
-                    description: `Запустить проверку канала «${row.name}»?`,
-                  })}
-                >
-                  Проверить соединение
-                </button>
-                <button
-                  className={active ? 'is-danger' : 'is-secondary'}
-                  disabled={disabled}
-                  onClick={() => void perform(async () => {
-                    if (row.existing) {
-                      await channelsApi.update(row.existing.id, { is_active: !active })
-                      return
-                    }
-                    await channelsApi.create({
-                      name: row.name,
-                      kind: row.kind,
-                      is_active: true,
-                      account: `channel-${row.kind}`,
-                    })
-                  }, active ? `Канал «${row.name}» выключен.` : `Канал «${row.name}» включён.`, {
-                    title: active ? 'Выключить канал?' : 'Включить канал?',
-                    description: `Канал «${row.name}» будет ${active ? 'выключен' : 'включён'}.`,
-                  })}
-                >
-                  {active ? 'Выключить' : 'Включить'}
+                <button className="is-secondary" disabled={disabled} onClick={() => openChannelForm(widgetChannel)}>
+                  Настроить
                 </button>
               </div>
             </li>
-          )
-        })}
-      </ul>
-    </section>
+          ) : null}
+          {messengerRows.map((row) => {
+            const active = row.existing?.is_active === true
+            const health = healthLabel(row.existing?.health_status)
+            const counters = row.existing?.counters
+            return (
+              <li className="chat-management__list-item" key={row.kind}>
+                <header>
+                  <div>
+                    <strong>{row.name}</strong>
+                  </div>
+                  <span className={`chat-management__pill chat-management__pill--lg ${active ? 'is-success' : 'is-error'}`}>
+                    {active ? 'активен' : 'выключен'}
+                  </span>
+                </header>
+                <div className="chat-management__channel-meta">
+                  <span className={`chat-management__pill ${health.tone}`}>{health.text}</span>
+                  {row.existing?.last_health_check_at ? (
+                    <span className="chat-management__muted">
+                      проверка: {new Date(row.existing.last_health_check_at).toLocaleString('ru-RU')}
+                    </span>
+                  ) : null}
+                </div>
+                <dl className="chat-management__channel-counters">
+                  <div>
+                    <dt>В очереди</dt>
+                    <dd>{counters?.waiting ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt>Активные</dt>
+                    <dd>{counters?.active ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt>Сегодня</dt>
+                    <dd>{counters?.today ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt>Закрыто сегодня</dt>
+                    <dd>{counters?.closed_today ?? 0}</dd>
+                  </div>
+                </dl>
+                <div className="chat-management__actions">
+                  <button
+                    className="is-secondary"
+                    disabled={disabled || !row.existing}
+                    onClick={() => row.existing && openChannelForm(row.existing)}
+                  >
+                    Настроить
+                  </button>
+                  <button
+                    className="is-secondary"
+                    disabled={disabled || !row.existing}
+                    onClick={() => void perform(async () => {
+                      if (!row.existing) return
+                      await channelsApi.checkHealth(row.existing.id)
+                    }, `Проверка канала «${row.name}» выполнена.`, {
+                      title: 'Проверить соединение?',
+                      description: `Запустить проверку канала «${row.name}»?`,
+                    })}
+                  >
+                    Проверить соединение
+                  </button>
+                  <button
+                    className={active ? 'is-danger' : 'is-secondary'}
+                    disabled={disabled}
+                    onClick={() => void perform(async () => {
+                      if (row.existing) {
+                        await channelsApi.update(row.existing.id, { is_active: !active })
+                        return
+                      }
+                      await channelsApi.create({
+                        name: row.name,
+                        kind: row.kind,
+                        is_active: true,
+                        account: `channel-${row.kind}`,
+                      })
+                    }, active ? `Канал «${row.name}» выключен.` : `Канал «${row.name}» включён.`, {
+                      title: active ? 'Выключить канал?' : 'Включить канал?',
+                      description: `Канал «${row.name}» будет ${active ? 'выключен' : 'включён'}.`,
+                    })}
+                  >
+                    {active ? 'Выключить' : 'Включить'}
+                  </button>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      </section>
+
+      {formTarget ? (
+        <div className="chat-management__modal-backdrop" role="dialog" aria-modal="true">
+          <div className="chat-management__card chat-management__modal">
+            <h2>Поля формы · {formTarget.name.replace(/\s*\(demo\)/gi, '')}</h2>
+            <FormFieldsPicker
+              value={formTarget.fields}
+              allowReorder={formTarget.allowReorder}
+              onChange={(fields) => setFormTarget((current) => (current ? { ...current, fields } : current))}
+            />
+            <div className="chat-management__actions">
+              <button type="button" className="is-secondary" onClick={() => setFormTarget(null)}>Отмена</button>
+              <button type="button" disabled={disabled} onClick={() => void saveFormFields()}>Сохранить</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   )
 }
 
@@ -1099,14 +2084,12 @@ type BotTriggerRow = { id: string; trigger: string; response: string }
 
 function BotsTab({
   items,
-  departments,
   disabled,
   perform,
-}: TabProps & { items: BotConfiguration[]; departments: Department[] }) {
+}: TabProps & { items: BotConfiguration[] }) {
   const [name, setName] = useState('')
-  const [departmentId, setDepartmentId] = useState('')
-  const [welcome, setWelcome] = useState('Здравствуйте! Я виртуальный помощник банка.')
   const [handoff, setHandoff] = useState('Подключаю оператора. Пожалуйста, ожидайте.')
+  const [maxTurns, setMaxTurns] = useState(3)
   const [triggerRows, setTriggerRows] = useState<BotTriggerRow[]>([
     { id: '1', trigger: 'карт', response: 'Уточните, пожалуйста, вопрос по карте.' },
     { id: '2', trigger: 'вклад', response: 'Какой вклад вас интересует?' },
@@ -1123,13 +2106,11 @@ function BotsTab({
       async () => {
         await botsApi.create({
           name,
-          department_id: departmentId,
           is_active: false,
-          welcome_message: welcome,
           fallback_message: handoff,
           handoff_message: handoff,
           trigger_responses: triggerResponses,
-          max_bot_turns: 3,
+          max_bot_turns: maxTurns,
         })
         setName('')
       },
@@ -1148,13 +2129,9 @@ function BotsTab({
         <div className="chat-management__form-grid">
           <label>Название<input required value={name} onChange={(event) => setName(event.target.value)} /></label>
           <label>
-            Отдел
-            <select required value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
-              <option value="">Выберите отдел</option>
-              {departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
+            Максимум ходов
+            <input type="number" min="1" value={maxTurns} onChange={(event) => setMaxTurns(event.target.valueAsNumber || 1)} />
           </label>
-          <label className="is-wide">Приветствие<textarea value={welcome} onChange={(event) => setWelcome(event.target.value)} /></label>
           <label className="is-wide">Передача оператору<textarea value={handoff} onChange={(event) => setHandoff(event.target.value)} /></label>
           <div className="chat-management__field-picker is-wide">
             <div className="chat-management__field-picker-head">
@@ -1218,7 +2195,7 @@ function BotsTab({
           {items.map((item) => (
             <li className="chat-management__list-item" key={item.id}>
               <header>
-                <div><strong>{item.name}</strong><br /><small>{departmentName(item.department_id, departments)}</small></div>
+                <div><strong>{item.name}</strong></div>
                 <span className={`chat-management__pill ${item.is_active ? 'is-success' : 'is-error'}`}>
                   {item.is_active ? 'включён' : 'выключен'}
                 </span>
@@ -1260,6 +2237,252 @@ function BotsTab({
           ))}
         </ul>
         {!items.length && <div className="chat-management__empty">Ботов пока нет.</div>}
+      </section>
+    </div>
+  )
+}
+
+const SEND_PHASE_OPTIONS = [
+  { value: 'before_bot', label: 'До бота' },
+  { value: 'after_bot', label: 'После бота / при эскалации' },
+  { value: 'mid_dialog', label: 'В середине диалога' },
+  { value: 'hold', label: 'Ожидание ответа оператора (hold)' },
+  { value: 'offline', label: 'Вне графика' },
+] as const
+
+function BaseMessagesTab({
+  items,
+  placements,
+  channels,
+  disabled,
+  perform,
+}: TabProps & {
+  items: BaseMessage[]
+  placements: WidgetPlacement[]
+  channels: ChatChannel[]
+}) {
+  const [sendPhase, setSendPhase] = useState<BaseMessage['send_phase']>('before_bot')
+  const [title, setTitle] = useState('')
+  const [text, setText] = useState('')
+  const [delaySeconds, setDelaySeconds] = useState(0)
+  const [selectedChannels, setSelectedChannels] = useState<string[] | null>(null)
+
+  const channelOptions = [
+    ...placements.map((placement) => ({
+      value: `widget:${placement.id}`,
+      label: `Виджет · ${placement.name}`,
+    })),
+    ...CANONICAL_CHANNELS
+      .filter((canonical) => canonical.kind !== 'widget')
+      .map((canonical) => ({
+        value: canonical.kind,
+        label: channels.find(
+          (channel) => (channel.kind ?? channel.channel) === canonical.kind,
+        )?.name ?? canonical.name,
+      })),
+  ]
+  if (!placements.length && channels.some((channel) => (channel.kind ?? channel.channel) === 'widget')) {
+    channelOptions.unshift({ value: 'widget', label: 'Виджет сайта' })
+  }
+  const selected = selectedChannels ?? channelOptions.map((option) => option.value)
+  const allSelected = channelOptions.length > 0 && selected.length === channelOptions.length
+  const orderedItems = [...items].sort(
+    (left, right) => (left.sort_order ?? 100) - (right.sort_order ?? 100),
+  )
+
+  const toggleChannel = (value: string) => {
+    setSelectedChannels((current) => {
+      const active = current ?? channelOptions.map((option) => option.value)
+      return active.includes(value)
+        ? active.filter((item) => item !== value)
+        : [...active, value]
+    })
+  }
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!selected.length) {
+      window.alert('Выберите хотя бы один канал.')
+      return
+    }
+    await perform(
+      async () => {
+        await baseMessagesApi.create({
+          title: title.trim() || SEND_PHASE_OPTIONS.find((item) => item.value === sendPhase)?.label || '',
+          text,
+          channels: selected,
+          send_phase: sendPhase,
+          delay_seconds: delaySeconds,
+          sort_order: Math.max(0, ...items.map((item) => item.sort_order ?? 0)) + 10,
+          is_active: true,
+        })
+        setTitle('')
+        setText('')
+        setDelaySeconds(0)
+      },
+      'Базовое сообщение создано.',
+      {
+        title: 'Создать сообщение?',
+        description: 'Клиенты выбранного канала получат этот текст без участия оператора (если сообщение активно).',
+      },
+    )
+  }
+
+  const moveMessage = (index: number, delta: -1 | 1) => {
+    const targetIndex = index + delta
+    if (targetIndex < 0 || targetIndex >= orderedItems.length) return
+    const reordered = [...orderedItems]
+    ;[reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]]
+    void perform(
+      () => Promise.all(reordered.map((message, position) => (
+        baseMessagesApi.update(message.id, { sort_order: (position + 1) * 10 })
+      ))),
+      'Приоритет сообщений обновлён.',
+    )
+  }
+
+  return (
+    <div className="chat-management__split">
+      <form className="chat-management__card" onSubmit={(event) => void submit(event)}>
+        <h2>Новое базовое сообщение</h2>
+        <p className="chat-management__muted">
+          Приветствия, сообщения вне графика и срочные оповещения
+        </p>
+        <div className="chat-management__form-grid">
+          <label>
+            Этап отправки
+            <select
+              value={sendPhase}
+              onChange={(event) => setSendPhase(event.target.value as BaseMessage['send_phase'])}
+            >
+              {SEND_PHASE_OPTIONS.map((item) => (
+                <option key={item.value} value={item.value}>{item.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>Название<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Например: Сбой оплаты" /></label>
+          <label>
+            Задержка, сек
+            <input
+              type="number"
+              min="0"
+              max="3600"
+              value={delaySeconds}
+              onChange={(event) => setDelaySeconds(event.target.valueAsNumber || 0)}
+              title="Для mid_dialog / hold / автозакрытия по словам"
+            />
+          </label>
+          <div className="chat-management__field-picker is-wide">
+            <div className="chat-management__field-picker-head">
+              <strong>Каналы</strong>
+            </div>
+            <label className="chat-management__check">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={() => setSelectedChannels(allSelected
+                  ? []
+                  : channelOptions.map((option) => option.value))}
+              />
+              Все каналы
+            </label>
+            {channelOptions.map((option) => (
+              <label className="chat-management__check" key={option.value}>
+                <input
+                  type="checkbox"
+                  checked={selected.includes(option.value)}
+                  onChange={() => toggleChannel(option.value)}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+          <label className="is-wide">
+            Текст
+            <textarea required value={text} onChange={(event) => setText(event.target.value)} rows={4} />
+          </label>
+        </div>
+        <div className="chat-management__actions">
+          <button disabled={disabled}>Создать сообщение</button>
+        </div>
+      </form>
+      <section className="chat-management__card">
+        <h2>Базовые сообщения</h2>
+        <ul className="chat-management__list">
+          {orderedItems.map((item, index) => (
+            <li className="chat-management__list-item" key={item.id}>
+              <header>
+                <div>
+                  <strong>{item.title || SEND_PHASE_OPTIONS.find((option) => option.value === item.send_phase)?.label}</strong>
+                  <br />
+                  <small>
+                    {SEND_PHASE_OPTIONS.find((option) => option.value === item.send_phase)?.label ?? item.send_phase}
+                    {item.delay_seconds ? ` · задержка ${item.delay_seconds}с` : ''}
+                    {' · '}
+                    {(item.channels?.length
+                      ? item.channels.map((value) => (
+                        channelOptions.find((option) => option.value === value)?.label ?? value
+                      )).join(', ')
+                      : 'Все каналы')}
+                  </small>
+                </div>
+                <span className={`chat-management__pill ${item.is_active ? 'is-success' : 'is-error'}`}>
+                  {item.is_active ? 'активно' : 'выключено'}
+                </span>
+              </header>
+              <p>{item.text}</p>
+              <div className="chat-management__actions">
+                <button
+                  type="button"
+                  className="is-secondary"
+                  disabled={disabled || index === 0}
+                  aria-label={`Повысить приоритет ${item.title}`}
+                  onClick={() => moveMessage(index, -1)}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="is-secondary"
+                  disabled={disabled || index === orderedItems.length - 1}
+                  aria-label={`Понизить приоритет ${item.title}`}
+                  onClick={() => moveMessage(index, 1)}
+                >
+                  ↓
+                </button>
+                <button
+                  className="is-secondary"
+                  disabled={disabled}
+                  onClick={() => void perform(
+                    () => baseMessagesApi.update(item.id, { is_active: !item.is_active }),
+                    'Статус сообщения обновлён.',
+                    {
+                      title: item.is_active ? 'Выключить сообщение?' : 'Включить сообщение?',
+                      description: `Сообщение «${item.title || item.send_phase}» будет ${item.is_active ? 'выключено' : 'включено'}.`,
+                    },
+                  )}
+                >
+                  {item.is_active ? 'Выключить' : 'Включить'}
+                </button>
+                <button
+                  className="is-danger"
+                  disabled={disabled}
+                  onClick={() => void perform(
+                    () => baseMessagesApi.remove(item.id),
+                    'Сообщение удалено.',
+                    {
+                      title: 'Удалить сообщение?',
+                      description: 'Сообщение будет удалено без восстановления.',
+                    },
+                  )}
+                >
+                  Удалить
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+        {!items.length && <div className="chat-management__empty">Базовых сообщений пока нет.</div>}
       </section>
     </div>
   )

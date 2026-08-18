@@ -23,6 +23,11 @@
   var QUERY_PARAMS = new URLSearchParams(global.location.search || '');
   var SIM_CLIENT = QUERY_PARAMS.get('sim_client') || '';
   var RESUME_DIALOG_ID = QUERY_PARAMS.get('dialog_id') || '';
+  // Demo: an offline widget URL (?offline=1) always behaves as non-working hours.
+  var OFFLINE_DEMO =
+    QUERY_PARAMS.get('offline') === '1' ||
+    (SCRIPT && SCRIPT.getAttribute('data-offline') === '1') ||
+    false;
   var LOGO_SRC =
     (SCRIPT && SCRIPT.getAttribute('data-logo-src')) ||
     '/assets/belarusbank-logo.png';
@@ -57,7 +62,7 @@
     surface: '#ffffff',
     font: '"Segoe UI",system-ui,-apple-system,sans-serif',
     radius: 12,
-    width: 380,
+    width: 420,
   };
 
   var STR = {
@@ -128,7 +133,7 @@
       '.fab[aria-expanded="true"]{display:none;}',
       '.panel{width:' +
         WP.width +
-        'px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 40px);',
+        'px;max-width:calc(100vw - 24px);min-height:560px;height:min(680px, calc(100vh - 32px));max-height:calc(100vh - 24px);',
       'display:flex;flex-direction:column;overflow:hidden;border-radius:' +
         WP.radius +
         'px;',
@@ -168,7 +173,10 @@
         ';background:' +
         WP.primaryWeak +
         ';padding:4px 10px;border-radius:10px;}',
-      '.fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;}',
+      '[data-form-fields]{display:flex;flex-direction:column;gap:12px;min-width:0;}',
+      '.fields{display:grid;grid-template-columns:1fr;gap:12px;}',
+      '.fields.is-pair{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}',
+      '.field{min-width:0;}',
       '.field label{display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:' +
         WP.text +
         ';}',
@@ -204,7 +212,9 @@
         ';display:flex;align-items:center;gap:8px;}',
       '.op-strip[hidden]{display:none!important;}',
       '.avatar{width:28px;height:28px;border-radius:14px;display:flex;align-items:center;justify-content:center;',
-      'font-size:10px;font-weight:600;color:#fff;flex-shrink:0;}',
+      'font-size:10px;font-weight:600;color:#fff;flex-shrink:0;overflow:hidden;}',
+      '.avatar--photo{background:' + WP.avatarOperator + ';}',
+      '.avatar--photo img{width:100%;height:100%;object-fit:cover;display:block;}',
       '.op-meta{flex:1;min-width:0;}',
       '.op-name{font-size:12px;font-weight:600;color:' + WP.text + ';}',
       '.op-role{font-size:11px;color:' + WP.textSecondary + ';}',
@@ -394,26 +404,7 @@
       '<span class="pill-online">' +
       STR.operatorsOnline +
       '</span>' +
-      '<div class="fields">' +
-      '<div class="field"><label for="bb-widget-name">' +
-      STR.nameLabel +
-      ' *</label>' +
-      '<input id="bb-widget-name" type="text" data-testid="widget-name" placeholder="' +
-      STR.namePlaceholder +
-      '" autocomplete="given-name" required /></div>' +
-      '<div class="field"><label for="bb-widget-last-name">' +
-      STR.lastNameLabel +
-      ' *</label>' +
-      '<input id="bb-widget-last-name" type="text" data-testid="widget-last-name" placeholder="' +
-      STR.lastNamePlaceholder +
-      '" autocomplete="family-name" required /></div>' +
-      '</div>' +
-      '<div class="field"><label for="bb-widget-phone">' +
-      STR.phoneLabel +
-      ' *</label>' +
-      '<input id="bb-widget-phone" type="tel" data-testid="widget-phone" placeholder="' +
-      STR.phonePlaceholder +
-      '" autocomplete="tel" required /></div>' +
+      '<div data-form-fields></div>' +
       '<div class="field">' +
       '<label for="bb-widget-question">' +
       STR.questionLabel +
@@ -535,9 +526,7 @@
     var pendingFileEl = root.querySelector('[data-pending-file]');
     var pendingFileNameEl = root.querySelector('[data-pending-file-name]');
     var fabBadgeEl = root.querySelector('.fab-badge');
-    var nameEl = root.querySelector('[data-testid="widget-name"]');
-    var lastNameEl = root.querySelector('[data-testid="widget-last-name"]');
-    var phoneEl = root.querySelector('[data-testid="widget-phone"]');
+    var formFieldsEl = root.querySelector('[data-form-fields]');
     var questionEl = root.querySelector('[data-testid="widget-question"]');
     var formErrorEl = root.querySelector('[data-form-error]');
     var opStrip = root.querySelector('[data-op-strip]');
@@ -547,10 +536,8 @@
     var emailEl = root.querySelector('[data-testid="widget-email"]');
     var postchatStatusEl = root.querySelector('[data-postchat-status]');
     var starsEl = root.querySelector('[data-stars]');
-    nameEl.required = true;
-    lastNameEl.required = true;
-    phoneEl.required = true;
-    questionEl.required = true;
+    if (questionEl) questionEl.required = true;
+    var formInputs = {};
     var STORAGE_KEY =
       'bb-chat-dialog-id:' + WIDGET_ID + (SIM_CLIENT ? ':' + SIM_CLIENT : '');
     var state = {
@@ -570,6 +557,7 @@
       operatorName: STR.operatorName,
       operatorShort: STR.operatorShort,
       operatorInitials: STR.operatorInitials,
+      operatorAvatar: '',
       unreadCount: 0,
       typingDebounceTimer: null,
       typingActive: false,
@@ -577,55 +565,172 @@
       pendingFile: null,
     };
 
-    if (
-      WIDGET_CONFIG &&
-      Array.isArray(WIDGET_CONFIG.form_fields) &&
-      WIDGET_CONFIG.form_fields.length
-    ) {
-      var configuredFields = {};
-      WIDGET_CONFIG.form_fields.forEach(function (field) {
-        configuredFields[field.key] = field;
-      });
-      [
-        ['name', nameEl],
-        ['last_name', lastNameEl],
-        ['phone', phoneEl],
-        ['question', questionEl],
-      ].forEach(function (pair) {
-        var config = configuredFields[pair[0]];
-        var input = pair[1];
-        if (!config && input && input.parentElement) {
-          input.parentElement.setAttribute('hidden', '');
-        } else if (config && input) {
-          input.required = Boolean(config.required);
-          if (config.label && input.parentElement) {
-            input.parentElement.childNodes[0].textContent = config.label;
-          }
-        }
-      });
+    function normalizeFieldKey(key) {
+      key = String(key || '').trim().toLowerCase();
+      if (key === 'first_name' || key === 'fio') return 'name';
+      if (key === 'tel' || key === 'telephone' || key === 'mobile') return 'phone';
+      return key;
     }
+
+    function defaultFormFields() {
+      return [
+        { key: 'name', label: STR.nameLabel, type: 'text', required: true },
+        { key: 'phone', label: STR.phoneLabel, type: 'tel', required: true },
+      ];
+    }
+
+    function resolveFormFields() {
+      var raw =
+        WIDGET_CONFIG && Array.isArray(WIDGET_CONFIG.form_fields)
+          ? WIDGET_CONFIG.form_fields
+          : null;
+      if (!raw) return defaultFormFields();
+      var fields = [];
+      var seen = {};
+      raw.forEach(function (field) {
+        if (!field || !field.key) return;
+        var key = normalizeFieldKey(field.key);
+        if (!key || key === 'question' || seen[key]) return;
+        seen[key] = true;
+        fields.push({
+          key: key,
+          label: String(field.label || key),
+          type: String(
+            field.type ||
+              (key === 'phone' ? 'tel' : key === 'email' ? 'email' : 'text'),
+          ),
+          required: Boolean(field.required),
+        });
+      });
+      return fields;
+    }
+
+    function inputTypeFor(field) {
+      if (field.type === 'tel' || field.key === 'phone') return 'tel';
+      if (field.type === 'email' || field.key === 'email') return 'email';
+      return 'text';
+    }
+
+    function autocompleteFor(key) {
+      if (key === 'name') return 'given-name';
+      if (key === 'last_name') return 'family-name';
+      if (key === 'phone') return 'tel';
+      if (key === 'email') return 'email';
+      return 'on';
+    }
+
+    function rebuildFormFields() {
+      if (!formFieldsEl) return;
+      formInputs = {};
+      formFieldsEl.innerHTML = '';
+      var fields = resolveFormFields();
+
+      function mountField(field, parent) {
+        var wrap = document.createElement('div');
+        wrap.className = 'field';
+        var id = 'bb-widget-field-' + field.key;
+        var label = document.createElement('label');
+        label.setAttribute('for', id);
+        label.textContent = field.label + (field.required ? ' *' : '');
+        var input = document.createElement('input');
+        input.id = id;
+        input.type = inputTypeFor(field);
+        input.setAttribute('data-testid', 'widget-' + field.key.replace(/_/g, '-'));
+        input.setAttribute('data-form-key', field.key);
+        input.autocomplete = autocompleteFor(field.key);
+        input.required = Boolean(field.required);
+        if (field.key === 'phone') input.placeholder = STR.phonePlaceholder;
+        wrap.appendChild(label);
+        wrap.appendChild(input);
+        parent.appendChild(wrap);
+        formInputs[field.key] = input;
+        input.addEventListener('input', function () {
+          input.classList.remove('invalid');
+          if (formErrorEl) formErrorEl.setAttribute('hidden', '');
+        });
+        return input;
+      }
+
+      var i = 0;
+      while (i < fields.length) {
+        var current = fields[i];
+        var next = fields[i + 1];
+        var pairWithName =
+          current &&
+          next &&
+          ((current.key === 'name' && next.key === 'last_name') ||
+            (current.key === 'last_name' && next.key === 'name'));
+        if (pairWithName) {
+          var row = document.createElement('div');
+          row.className = 'fields is-pair';
+          mountField(current, row);
+          mountField(next, row);
+          formFieldsEl.appendChild(row);
+          i += 2;
+          continue;
+        }
+        mountField(current, formFieldsEl);
+        i += 1;
+      }
+    }
+
+    rebuildFormFields();
 
     if (SIM_CLIENT) {
       var simNumber = Number(String(SIM_CLIENT).replace(/\D/g, '')) || 1;
-      nameEl.value = 'Клиент';
-      lastNameEl.value = String(simNumber);
-      phoneEl.value = '+375 29 ' + String(1000000 + simNumber).slice(-7);
+      if (formInputs.name) formInputs.name.value = 'Клиент';
+      if (formInputs.last_name) formInputs.last_name.value = String(simNumber);
+      if (formInputs.phone) {
+        formInputs.phone.value =
+          '+375 29 ' + String(1000000 + simNumber).slice(-7);
+      }
       questionEl.value =
         'Тестовое обращение клиента ' + simNumber + ': нужна консультация.';
     }
 
-    if (WIDGET_CONFIG) {
-      if (WIDGET_CONFIG.require_phone && phoneEl) {
-        phoneEl.required = true;
-      }
-      if (WIDGET_CONFIG.offline_message) {
-        STR.offline = WIDGET_CONFIG.offline_message;
-      }
+    if (WIDGET_CONFIG && WIDGET_CONFIG.offline_message) {
+      STR.offline = WIDGET_CONFIG.offline_message;
     }
 
     function apiUrl(path) {
       var base = (API_BASE || '').replace(/\/$/, '');
       return base + path;
+    }
+
+    /** Stable HTTP URL for operator photo (works with data URLs stored server-side). */
+    function operatorPhotoApiUrl(operatorId) {
+      if (!operatorId) return '';
+      return apiUrl(
+        '/api/v1/online-chat/operators/' + encodeURIComponent(operatorId) + '/photo/',
+      );
+    }
+
+    function resolveOperatorAvatarUrl(message, dialog) {
+      var messageId = message && message.operator_id;
+      if (messageId) return operatorPhotoApiUrl(messageId);
+      var dialogId = dialog && dialog.operator_id;
+      if (dialogId) return operatorPhotoApiUrl(dialogId);
+      var inline =
+        (message && message.operator_avatar) ||
+        (dialog && dialog.operator_avatar) ||
+        '';
+      return inline || '';
+    }
+
+    function createOperatorAvatarNode(url) {
+      if (!url) return null;
+      var wrap = document.createElement('div');
+      wrap.className = 'avatar avatar--photo';
+      var img = document.createElement('img');
+      img.src = url;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.onerror = function () {
+        if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      };
+      wrap.appendChild(img);
+      return wrap;
     }
 
     function wsUrl(path) {
@@ -918,14 +1023,15 @@
       row.className = 'row row--' + (isClient ? 'client' : 'operator');
       if (messageId) row.setAttribute('data-message-id', messageId);
 
-      var avatarHtml =
-        '<div class="avatar" style="background:' +
-        (isClient ? WP.avatarClient : WP.avatarOperator) +
-        ';color:' +
-        (isClient ? WP.clientBubbleText : '#fff') +
-        '">' +
-        escapeHtml(initials || (isClient ? state.clientInitials : state.operatorInitials)) +
-        '</div>';
+      var avatarHtml = isClient
+        ? '<div class="avatar" style="background:' +
+          WP.avatarClient +
+          ';color:' +
+          WP.clientBubbleText +
+          '">' +
+          escapeHtml(initials || state.clientInitials) +
+          '</div>'
+        : '';
 
       var timeBlock = time
         ? '<div class="bubble-time">' +
@@ -967,7 +1073,11 @@
         (isClient ? 'client' : 'operator') +
         '">' +
         '<div class="bubble-label">' +
-        escapeHtml(label || (isClient ? STR.you : state.operatorShort)) +
+        escapeHtml(
+          options.operatorLabel ||
+            label ||
+            (isClient ? STR.you : state.operatorShort),
+        ) +
         '</div>' +
         quoteBlock +
         textBlock +
@@ -975,7 +1085,13 @@
         timeBlock +
         '</div>';
 
-      row.innerHTML = isClient ? bubble + avatarHtml : avatarHtml + bubble;
+      if (isClient) {
+        row.innerHTML = bubble + avatarHtml;
+      } else {
+        row.innerHTML = bubble;
+        var operatorAvatarNode = createOperatorAvatarNode(options.avatarUrl || '');
+        if (operatorAvatarNode) row.insertBefore(operatorAvatarNode, row.firstChild);
+      }
       var downloadBtn = row.querySelector('[data-attachment-download]');
       if (downloadBtn) {
         downloadBtn.addEventListener('click', function () {
@@ -1107,21 +1223,39 @@
       return cleaned.split(/\s+/)[0] || STR.operatorShort;
     }
 
-    function applyOperatorIdentity(name) {
+    function applyOperatorIdentity(name, avatar, operatorId) {
       var full = String(name || '').trim() || STR.operatorName;
       state.operatorName = full;
       state.operatorShort = shortNameFromFull(full);
       state.operatorInitials = initialsFromName(full);
+      var avatarUrl = resolveOperatorAvatarUrl(
+        {
+          operator_id: operatorId || '',
+          operator_avatar: typeof avatar === 'string' ? avatar : '',
+        },
+        null,
+      );
+      state.operatorAvatar = avatarUrl;
       var nameNode = opStrip.querySelector('.op-name');
       if (nameNode) nameNode.textContent = full;
-      var avatarNode = opStrip.querySelector('.avatar');
-      if (avatarNode) avatarNode.textContent = state.operatorInitials;
+      var existingAvatar = opStrip.querySelector('.avatar');
+      if (existingAvatar) existingAvatar.remove();
+      var avatarNode = createOperatorAvatarNode(avatarUrl);
+      if (avatarNode) {
+        var meta = opStrip.querySelector('.op-meta');
+        if (meta) opStrip.insertBefore(avatarNode, meta);
+        else opStrip.insertBefore(avatarNode, opStrip.firstChild);
+      }
     }
 
     /** Call when operator joins the dialog (API/WS or demo hook). */
     function connectOperator(operatorName, options) {
       options = options || {};
-      applyOperatorIdentity(operatorName || state.operatorName);
+      applyOperatorIdentity(
+        operatorName || state.operatorName,
+        options.avatar,
+        options.operatorId || options.operator_id || '',
+      );
       if (state.operatorConnected) return;
       state.operatorConnected = true;
       setWaitingHint(false);
@@ -1161,23 +1295,40 @@
       }
       if (message.speaker === 'operator' || message.speaker === 'bot') {
         setWaitingHint(false);
+        var avatarUrl =
+          message.speaker === 'bot' ? '' : resolveOperatorAvatarUrl(message, null);
         if (
           message.speaker === 'operator' &&
           !state.operatorConnected
         ) {
-          connectOperator(state.operatorName, { announce: false });
+          connectOperator(message.operator_name || state.operatorName, {
+            announce: false,
+            avatar: message.operator_avatar || '',
+            operatorId: message.operator_id || '',
+          });
         }
+        var remoteOperatorName =
+          message.speaker === 'operator'
+            ? message.operator_name || state.operatorName
+            : state.operatorName;
         addBubble(
           'operator',
           message.text,
-          message.speaker === 'bot' ? 'Виртуальный помощник' : state.operatorShort,
-          message.speaker === 'bot' ? 'Б' : state.operatorInitials,
+          message.speaker === 'bot'
+            ? 'Виртуальный помощник'
+            : shortNameFromFull(remoteOperatorName),
+          message.speaker === 'bot' ? 'Б' : initialsFromName(remoteOperatorName),
           formatTime(new Date(message.created_at || Date.now())),
           Object.assign(
             {
               id: message.id,
               receiptStatus: message.receipt_status,
               quotedText: message.quoted_text,
+              avatarUrl: avatarUrl,
+              operatorLabel:
+                message.speaker === 'bot'
+                  ? 'Виртуальный помощник'
+                  : shortNameFromFull(remoteOperatorName),
             },
             attachmentOptionsFromMessage(message),
           ),
@@ -1237,6 +1388,8 @@
         if (type === 'operator.joined') {
           connectOperator(payload.operator_name, {
             announce: !payload.system_message,
+            avatar: payload.operator_avatar || '',
+            operatorId: payload.operator_id || '',
           });
           if (payload.system_message) handleRemoteMessage(payload.system_message);
           return;
@@ -1245,7 +1398,11 @@
           if (payload.system_message) handleRemoteMessage(payload.system_message);
           connectOperator(
             payload.to_operator_name || payload.operator_name,
-            { announce: false },
+            {
+              announce: false,
+              avatar: payload.operator_avatar || '',
+              operatorId: payload.operator_id || '',
+            },
           );
           return;
         }
@@ -1322,9 +1479,9 @@
     }
 
     function resetPrechatForm() {
-      if (nameEl) nameEl.value = '';
-      if (lastNameEl) lastNameEl.value = '';
-      if (phoneEl) phoneEl.value = '';
+      Object.keys(formInputs).forEach(function (key) {
+        formInputs[key].value = '';
+      });
       if (questionEl) questionEl.value = '';
       if (commentEl) commentEl.value = '';
       if (emailEl) emailEl.value = '';
@@ -1407,7 +1564,8 @@
       });
     }
 
-    function createDialog(text) {
+    function createDialog(text, profile) {
+      profile = profile || {};
       return fetch(apiUrl('/api/v1/online-chat/dialogs/'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1416,9 +1574,11 @@
           widget_id: WIDGET_ID,
           placement: PLACEMENT,
           channel: 'widget',
-          first_name: (nameEl.value || '').trim(),
-          last_name: (lastNameEl.value || '').trim(),
-          phone: (phoneEl.value || '').trim(),
+          first_name: profile.firstName || '',
+          last_name: profile.lastName || '',
+          phone: profile.phone || '',
+          fields: profile.fields || [],
+          offline_demo: OFFLINE_DEMO,
           locale: LOCALE,
           page_url: global.location.href,
           client_external_id: SIM_CLIENT,
@@ -1586,52 +1746,64 @@
     }
 
     function clearFieldErrors() {
-      ;[nameEl, lastNameEl, phoneEl, questionEl].forEach(function (el) {
-        el.classList.remove('invalid');
+      Object.keys(formInputs).forEach(function (key) {
+        formInputs[key].classList.remove('invalid');
       });
+      if (questionEl) questionEl.classList.remove('invalid');
       if (formErrorEl) formErrorEl.setAttribute('hidden', '');
     }
 
     function validatePrechat() {
       clearFieldErrors();
-      var firstName = (nameEl.value || '').trim();
-      var lastName = (lastNameEl.value || '').trim();
-      var phone = (phoneEl.value || '').trim();
-      var question = (questionEl.value || '').trim();
+      var values = {};
       var missing = [];
-      if (nameEl.required && !firstName) missing.push(nameEl);
-      if (lastNameEl.required && !lastName) missing.push(lastNameEl);
-      if (phoneEl.required && !phone) missing.push(phoneEl);
-      if (questionEl.required && !question) missing.push(questionEl);
-      if (!missing.length) {
-        return { firstName: firstName, lastName: lastName, phone: phone, question: question };
-      }
-      missing.forEach(function (el) {
-        el.classList.add('invalid');
+      Object.keys(formInputs).forEach(function (key) {
+        var input = formInputs[key];
+        var value = (input.value || '').trim();
+        values[key] = value;
+        if (input.required && !value) missing.push(input);
       });
-      if (formErrorEl) formErrorEl.removeAttribute('hidden');
-      missing[0].focus();
-      return null;
+      var question = (questionEl.value || '').trim();
+      if (questionEl.required && !question) missing.push(questionEl);
+      if (missing.length) {
+        missing.forEach(function (el) {
+          el.classList.add('invalid');
+        });
+        if (formErrorEl) formErrorEl.removeAttribute('hidden');
+        missing[0].focus();
+        return null;
+      }
+      var labeledFields = [];
+      var coreKeys = { name: 1, first_name: 1, last_name: 1, phone: 1, question: 1 };
+      resolveFormFields().forEach(function (field) {
+        var value = (values[field.key] || '').trim();
+        if (!value || coreKeys[field.key]) return;
+        labeledFields.push({ label: field.label || field.key, value: value });
+      });
+      return {
+        firstName: values.name || '',
+        lastName: values.last_name || '',
+        phone: values.phone || '',
+        question: question,
+        displayQuestion: question,
+        values: values,
+        fields: labeledFields,
+      };
     }
 
-    ;[nameEl, lastNameEl, phoneEl, questionEl].forEach(function (el) {
-      el.addEventListener('input', function () {
-        el.classList.remove('invalid');
-        if (
-          (nameEl.value || '').trim() &&
-          (lastNameEl.value || '').trim() &&
-          (phoneEl.value || '').trim() &&
-          (questionEl.value || '').trim()
-        ) {
-          if (formErrorEl) formErrorEl.setAttribute('hidden', '');
-        }
+    if (questionEl) {
+      questionEl.addEventListener('input', function () {
+        questionEl.classList.remove('invalid');
+        if (formErrorEl) formErrorEl.setAttribute('hidden', '');
       });
-    });
+    }
 
     function startChat() {
       var form = validatePrechat();
       if (!form) return;
-      state.clientInitials = initialsFromName(form.firstName + ' ' + form.lastName);
+      state.clientInitials = initialsFromName(
+        (form.firstName + ' ' + form.lastName).trim() || form.phone || 'КЛ',
+      );
       state.operatorConnected = false;
       state.closed = false;
       state.feedbackSaved = false;
@@ -1645,14 +1817,14 @@
       showView('chat');
       var firstRow = addBubble(
         'client',
-        form.question,
+        form.displayQuestion || form.question,
         STR.you,
         state.clientInitials,
         formatTime(new Date()),
         { receiptStatus: 'delivered' },
       );
       setWaitingHint(true);
-      createDialog(form.question).then(function (body) {
+      createDialog(form.displayQuestion || form.question, form).then(function (body) {
         if (!body || !body.message || !body.message.id) return;
         firstRow.setAttribute('data-message-id', body.message.id);
         setMessageReceipt(body.message.id, body.message.receipt_status || 'delivered');
@@ -1767,11 +1939,13 @@
             state.clientInitials = initialsFromName(
               (dialog.client_first_name || '') + ' ' + (dialog.client_last_name || ''),
             );
+            state.operatorAvatar = resolveOperatorAvatarUrl(null, dialog);
             showView('chat');
             setOpen(true);
             messagesEl.innerHTML = '';
             state.messages = [];
             (dialog.messages || []).forEach(function (message) {
+              if (message && message.is_history) return;
               rememberMessageId(message.id);
               if (message.speaker === 'system') {
                 addSystem(message.text);
@@ -1795,22 +1969,33 @@
                 return;
               }
               if (message.speaker === 'operator' || message.speaker === 'bot') {
-                if (message.speaker === 'operator') {
-                  connectOperator(dialog.operator_name, { announce: false });
-                }
+                var historyOperatorName =
+                  message.speaker === 'operator'
+                    ? message.operator_name || dialog.operator_name || state.operatorName
+                    : state.operatorName;
                 addBubble(
                   'operator',
                   message.text,
                   message.speaker === 'bot'
                     ? 'Виртуальный помощник'
-                    : state.operatorShort,
-                  message.speaker === 'bot' ? 'Б' : state.operatorInitials,
+                    : shortNameFromFull(historyOperatorName),
+                  message.speaker === 'bot'
+                    ? 'Б'
+                    : initialsFromName(historyOperatorName),
                   formatTime(new Date(message.created_at || Date.now())),
                   Object.assign(
                     {
                       id: message.id,
                       receiptStatus: message.receipt_status,
                       quotedText: message.quoted_text,
+                      avatarUrl:
+                        message.speaker === 'bot'
+                          ? ''
+                          : resolveOperatorAvatarUrl(message, dialog),
+                      operatorLabel:
+                        message.speaker === 'bot'
+                          ? 'Виртуальный помощник'
+                          : shortNameFromFull(historyOperatorName),
                     },
                     attachmentOptionsFromMessage(message),
                   ),
@@ -1818,7 +2003,11 @@
               }
             });
             if (dialog.status === 'active' && dialog.operator_name) {
-              connectOperator(dialog.operator_name, { announce: false });
+              connectOperator(dialog.operator_name, {
+                announce: false,
+                avatar: dialog.operator_avatar || '',
+                operatorId: dialog.operator_id || '',
+              });
             } else if (dialog.status === 'waiting') {
               setWaitingHint(true);
             }

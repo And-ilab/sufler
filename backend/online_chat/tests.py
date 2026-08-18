@@ -10,8 +10,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from online_chat.models import (
-    Department,
+    BaseMessage,
     BotConfiguration,
+    Department,
     Dialog,
     DialogMessage,
     OperatorProfile,
@@ -105,7 +106,44 @@ class ApiTests(TestCase):
             config={"language": "en"},
         )
 
-    def test_public_placement_config(self) -> None:
+    def test_operator_photo_endpoint_and_message_avatar(self) -> None:
+        from online_chat.services import accept_dialog, create_dialog_with_message, serialize_message
+
+        operator = OperatorProfile.objects.create(
+            external_id="avatar-op",
+            display_name="Иванов И.И.",
+            is_active=True,
+            photo_url="data:image/png;base64,iVBORw0KGgo=",
+        )
+        dialog, _ = create_dialog_with_message(
+            text="Вопрос",
+            widget_id=self.placement.widget_id,
+            client_first_name="А",
+            client_last_name="Б",
+            client_phone="+375291111111",
+        )
+        accept_dialog(dialog, operator.display_name)
+        dialog.refresh_from_db()
+        message = append_message(
+            dialog,
+            speaker=DialogMessage.Speaker.OPERATOR,
+            text="Ответ",
+        )
+        payload = serialize_message(
+            message,
+            operator_name=dialog.operator_name,
+            operator_id=str(operator.id),
+            operator_avatar=operator.photo_url,
+        )
+        self.assertEqual(payload.get("operator_id"), str(operator.id))
+        self.assertIn("operator_avatar", payload)
+
+        photo = self.client.get(
+            reverse("online_chat_operator_photo", args=[operator.id]),
+        )
+        self.assertEqual(photo.status_code, 200)
+        self.assertEqual(photo["Content-Type"], "image/png")
+
         response = self.client.get(
             reverse("online_chat_widget_config", args=[self.placement.widget_id])
         )
@@ -198,7 +236,7 @@ class ApiTests(TestCase):
         self.assertFalse(body["is_first"])
         self.assertNotIn("Первое обращение клиента", body["summary"])
 
-    def test_client_history_links_phone_with_one_digit_typo(self) -> None:
+    def test_client_history_does_not_link_different_phones(self) -> None:
         create_dialog_with_message(
             text="Лимит по карте",
             widget_id="public-widget",
@@ -209,9 +247,9 @@ class ApiTests(TestCase):
         current, _ = create_dialog_with_message(
             text="Повторно про лимит",
             widget_id="public-widget",
-            client_phone="+375291234967",  # one digit differs
+            client_phone="+375291234967",
             client_first_name="краснов",
-            client_last_name="никита",  # swapped FIO fields
+            client_last_name="никита",
         )
         response = self.client.get(
             reverse("online_chat_client_history"),
@@ -219,8 +257,8 @@ class ApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["previous_count"], 1)
-        self.assertFalse(body["is_first"])
+        self.assertEqual(body["previous_count"], 0)
+        self.assertTrue(body["is_first"])
 
     def test_offline_dialog_becomes_lost_after_timeout(self) -> None:
         dialog, _ = create_dialog_with_message(
@@ -313,3 +351,259 @@ class ApiTests(TestCase):
                 text="Передаю оператору.",
             ).exists()
         )
+
+    def test_base_message_before_bot_matches_widget_placement(self) -> None:
+        BaseMessage.objects.create(
+            title="Welcome",
+            text="Базовое приветствие",
+            channels=[f"widget:{self.placement.id}"],
+            send_phase=BaseMessage.SendPhase.BEFORE_BOT,
+            sort_order=10,
+        )
+        BaseMessage.objects.create(
+            title="Other",
+            text="Чужое приветствие",
+            channels=["widget:00000000-0000-0000-0000-000000000000"],
+            send_phase=BaseMessage.SendPhase.BEFORE_BOT,
+            sort_order=20,
+        )
+
+        dialog, _ = create_dialog_with_message(text="Help", widget_id="public-widget")
+
+        self.assertTrue(dialog.messages.filter(text="Базовое приветствие").exists())
+        self.assertFalse(dialog.messages.filter(text="Чужое приветствие").exists())
+
+    def test_global_bot_sends_after_bot_message_before_handoff(self) -> None:
+        BotConfiguration.objects.create(
+            name="Global FAQ",
+            is_active=True,
+            handoff_message="Передаю оператору.",
+        )
+        BaseMessage.objects.create(
+            title="Escalation",
+            text="Срочное уведомление",
+            channels=["widget"],
+            send_phase=BaseMessage.SendPhase.AFTER_BOT,
+            sort_order=10,
+        )
+        dialog, _ = create_dialog_with_message(text="Help", widget_id="public-widget")
+
+        append_message(dialog, speaker=DialogMessage.Speaker.CLIENT, text="Не знаю")
+
+        bot_texts = list(
+            dialog.messages.filter(speaker=DialogMessage.Speaker.BOT)
+            .order_by("created_at")
+            .values_list("text", flat=True)
+        )
+        self.assertEqual(bot_texts[-2:], ["Срочное уведомление", "Передаю оператору."])
+
+
+class FormFieldsAndHistoryTests(TestCase):
+    def setUp(self) -> None:
+        self.department = Department.objects.create(code="support", name="Support")
+        self.placement = WidgetPlacement.objects.create(
+            widget_id="public-widget",
+            name="Public",
+            department=self.department,
+            form_fields=[
+                {"key": "name", "label": "Имя", "required": True, "type": "text"},
+                {"key": "phone", "label": "Телефон", "required": False, "type": "tel"},
+            ],
+        )
+
+    def test_normalize_form_fields_keeps_admin_order_and_required(self) -> None:
+        from online_chat.models import normalize_form_fields
+
+        fields = normalize_form_fields(
+            [
+                {"key": "email", "label": "Email", "required": False, "type": "email"},
+                {"key": "name", "label": "Имя", "required": False, "type": "text"},
+                {"key": "phone", "label": "Телефон", "required": True, "type": "tel"},
+            ]
+        )
+        self.assertEqual([item["key"] for item in fields], ["email", "name", "phone"])
+        self.assertFalse(fields[0]["required"])
+        self.assertFalse(fields[1]["required"])
+        self.assertTrue(fields[2]["required"])
+        self.assertNotIn("last_name", [item["key"] for item in fields])
+
+    def test_widget_config_returns_only_configured_fields(self) -> None:
+        response = self.client.get(
+            reverse("online_chat_widget_config", args=[self.placement.widget_id])
+        )
+        self.assertEqual(response.status_code, 200)
+        fields = response.json()["config"]["form_fields"]
+        self.assertEqual([item["key"] for item in fields], ["name", "phone"])
+        self.assertTrue(fields[0]["required"])
+        self.assertFalse(fields[1]["required"])
+
+    def test_operator_sees_cross_channel_history_client_does_not(self) -> None:
+        first, first_msg = create_dialog_with_message(
+            text="Старый вопрос из виджета",
+            widget_id="public-widget",
+            channel="widget",
+            client_phone="+375291112233",
+            client_first_name="Никита",
+            client_last_name="Иванов",
+        )
+        first.status = Dialog.Status.CLOSED
+        first.closed_at = timezone.now()
+        first.save(update_fields=["status", "closed_at", "updated_at"])
+        current, current_msg = create_dialog_with_message(
+            text="Новый вопрос из Telegram",
+            channel="telegram",
+            widget_id="",
+            placement="telegram",
+            client_phone="+375291112233",
+            client_first_name="Никита",
+            client_last_name="Иванов",
+            client_external_id="4242",
+        )
+
+        client_view = self.client.get(
+            reverse("online_chat_dialog", args=[str(current.id)])
+        )
+        self.assertEqual(client_view.status_code, 200)
+        client_messages = client_view.json()["dialog"]["messages"]
+        client_texts = [item["text"] for item in client_messages]
+        self.assertIn("Новый вопрос из Telegram", client_texts)
+        self.assertNotIn("Старый вопрос из виджета", client_texts)
+        self.assertFalse(any(item.get("is_history") for item in client_messages))
+
+        operator_view = self.client.get(
+            reverse("online_chat_dialog", args=[str(current.id)]),
+            {"include_history": "1"},
+        )
+        self.assertEqual(operator_view.status_code, 200)
+        operator_messages = operator_view.json()["dialog"]["messages"]
+        operator_texts = [item["text"] for item in operator_messages]
+        self.assertIn("Старый вопрос из виджета", operator_texts)
+        self.assertIn("Новый вопрос из Telegram", operator_texts)
+        self.assertGreater(operator_view.json()["dialog"]["history_message_count"], 0)
+        history_ids = {
+            item["id"] for item in operator_messages if item.get("is_history")
+        }
+        self.assertIn(str(first_msg.id), history_ids)
+        self.assertNotIn(str(current_msg.id), history_ids)
+
+    def test_history_does_not_merge_different_phones(self) -> None:
+        first, first_msg = create_dialog_with_message(
+            text="Вопрос клиента А",
+            widget_id="public-widget",
+            channel="widget",
+            client_phone="+375291112233",
+            client_first_name="Никита",
+            client_last_name="Иванов",
+        )
+        first.status = Dialog.Status.CLOSED
+        first.closed_at = timezone.now()
+        first.save(update_fields=["status", "closed_at", "updated_at"])
+        current, _current_msg = create_dialog_with_message(
+            text="Вопрос клиента Б",
+            widget_id="public-widget",
+            channel="widget",
+            client_phone="+375299998877",
+            client_first_name="Никита",
+            client_last_name="Иванов",
+        )
+        operator_view = self.client.get(
+            reverse("online_chat_dialog", args=[str(current.id)]),
+            {"include_history": "1"},
+        )
+        texts = [item["text"] for item in operator_view.json()["dialog"]["messages"]]
+        self.assertIn("Вопрос клиента Б", texts)
+        self.assertNotIn("Вопрос клиента А", texts)
+        self.assertNotIn(str(first_msg.id), {
+            item["id"] for item in operator_view.json()["dialog"]["messages"]
+        })
+
+    def test_same_phone_links_history_even_if_name_differs(self) -> None:
+        first, first_msg = create_dialog_with_message(
+            text="Старый вопрос",
+            widget_id="public-widget",
+            channel="widget",
+            client_phone="+375291112233",
+            client_first_name="Анна",
+            client_last_name="Петрова",
+        )
+        first.status = Dialog.Status.CLOSED
+        first.closed_at = timezone.now()
+        first.save(update_fields=["status", "closed_at", "updated_at"])
+        current, _current_msg = create_dialog_with_message(
+            text="Новый вопрос",
+            widget_id="public-widget",
+            channel="widget",
+            client_phone="+375 29 111-22-33",
+            client_first_name="Иван",
+            client_last_name="Сидоров",
+        )
+        operator_view = self.client.get(
+            reverse("online_chat_dialog", args=[str(current.id)]),
+            {"include_history": "1"},
+        )
+        texts = [item["text"] for item in operator_view.json()["dialog"]["messages"]]
+        self.assertIn("Старый вопрос", texts)
+        self.assertIn("Новый вопрос", texts)
+        self.assertIn(str(first_msg.id), {
+            item["id"] for item in operator_view.json()["dialog"]["messages"] if item.get("is_history")
+        })
+
+
+class WorkScheduleTests(TestCase):
+    def test_force_offline_parks_dialog(self) -> None:
+        dialog, _ = create_dialog_with_message(
+            text="Вопрос ночью",
+            force_offline=True,
+        )
+        self.assertEqual(dialog.status, Dialog.Status.WAITING)
+        self.assertEqual(dialog.outcome, Dialog.Outcome.OFFLINE)
+        self.assertIn("offline_demo", dialog.routing_reason)
+        self.assertIsNone(auto_assign_dialog(dialog))
+
+    def test_calendar_closed_on_weekend(self) -> None:
+        from datetime import datetime, time as dt_time
+        from django.utils import timezone as dj_tz
+
+        from online_chat.models import WorkScheduleSettings
+
+        schedule = WorkScheduleSettings.get_solo()
+        schedule.enabled = True
+        schedule.start_time = dt_time(9, 0)
+        schedule.end_time = dt_time(18, 0)
+        schedule.workdays = [0, 1, 2, 3, 4]
+        schedule.manual_override = WorkScheduleSettings.Override.AUTO
+        schedule.save()
+        sunday = dj_tz.make_aware(datetime(2026, 8, 16, 12, 0))
+        self.assertFalse(schedule.is_open(sunday))
+        monday_morning = dj_tz.make_aware(datetime(2026, 8, 17, 10, 0))
+        self.assertTrue(schedule.is_open(monday_morning))
+        monday_evening = dj_tz.make_aware(datetime(2026, 8, 17, 19, 0))
+        self.assertFalse(schedule.is_open(monday_evening))
+
+    def test_day_override_makes_weekday_off(self) -> None:
+        from datetime import datetime, time as dt_time
+        from django.utils import timezone as dj_tz
+
+        from online_chat.models import WorkScheduleSettings
+
+        schedule = WorkScheduleSettings.get_solo()
+        schedule.enabled = True
+        schedule.start_time = dt_time(9, 0)
+        schedule.end_time = dt_time(18, 0)
+        schedule.workdays = [0, 1, 2, 3, 4]
+        schedule.day_overrides = {
+            "2026-08-17": {"is_workday": False},
+            "2026-08-16": {
+                "is_workday": True,
+                "start_time": "10:00",
+                "end_time": "14:00",
+            },
+        }
+        schedule.manual_override = WorkScheduleSettings.Override.AUTO
+        schedule.save()
+        monday = dj_tz.make_aware(datetime(2026, 8, 17, 12, 0))
+        self.assertFalse(schedule.is_open(monday))
+        sunday_noon = dj_tz.make_aware(datetime(2026, 8, 16, 12, 0))
+        self.assertTrue(schedule.is_open(sunday_noon))
+        sunday_evening = dj_tz.make_aware(datetime(2026, 8, 16, 15, 0))
+        self.assertFalse(schedule.is_open(sunday_evening))
