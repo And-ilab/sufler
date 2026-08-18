@@ -673,37 +673,6 @@ function initialsFromDisplayName(name: string): string {
     .toUpperCase();
 }
 
-const QUEUE: QueueItem[] = [
-  {
-    id: "1",
-    name: "Анна Козлова",
-    channel: "Сайт",
-    dept: "Розничные продукты",
-    preview: "Подскажите лимит снятия наличных в банкомате?",
-    wait: "02:14",
-    urgent: true,
-    active: true,
-  },
-  {
-    id: "2",
-    name: "Пётр Мельников",
-    channel: "Telegram",
-    dept: "Розничные продукты",
-    preview: "Не приходит SMS для подтверждения операции",
-    wait: "00:45",
-    urgent: false,
-  },
-  {
-    id: "3",
-    name: "ООО «Вектор»",
-    channel: "Сайт",
-    dept: "Юрлица",
-    preview: "Тарифы на РКО для ИП",
-    wait: "00:12",
-    urgent: false,
-  },
-];
-
 const MY_DIALOGUES: QueueItem[] = [
   {
     id: "m1",
@@ -4013,7 +3982,7 @@ export function ArmOperatorView({
     setComposerNoticeTone(tone);
     setComposerNotice(message);
   };
-  const [graceNoticeDismissed, setGraceNoticeDismissed] = useState(false);
+  const [, setGraceNoticeDismissed] = useState(false);
   const [aiImproveModal, setAiImproveModal] = useState<AiImproveModalState | null>(null);
   const [closeDialogConfirmOpen, setCloseDialogConfirmOpen] = useState(false);
   const [blockClientConfirmOpen, setBlockClientConfirmOpen] = useState(false);
