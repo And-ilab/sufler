@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import {
   ArmOperatorView,
-  CLOSE_TOPICS,
   getSchemePalette,
   type OperatorPresence,
 } from './arm/ArmOperatorView'
