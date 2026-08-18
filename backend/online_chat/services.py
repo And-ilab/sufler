@@ -36,6 +36,7 @@ from online_chat.routing_services import (
     accept_waiting_dialog,
     auto_assign_dialog,
     department_queue_is_full,
+    line_is_open,
     record_event,
     select_department,
     start_post_close_grace,
@@ -135,6 +136,28 @@ def _send_base_messages(
     return sent
 
 
+def _send_offline_notice(
+    dialog: Dialog,
+    placement_config: WidgetPlacement | None = None,
+) -> int:
+    """Send the admin-configured "вне графика" message(s) from Базовые сообщения.
+
+    If no offline base message is configured, nothing is sent (per product spec).
+    """
+    sent = 0
+    messages = BaseMessage.objects.filter(
+        is_active=True,
+    ).filter(
+        Q(message_type=BaseMessage.MessageType.OFFLINE)
+        | Q(send_phase=BaseMessage.SendPhase.OFFLINE)
+    ).order_by("sort_order", "created_at")
+    for message in messages:
+        if _base_message_matches(message, dialog, placement_config):
+            _create_bot_message(dialog, message.text)
+            sent += 1
+    return sent
+
+
 def _handle_bot_turn(dialog: Dialog, client_text: str) -> None:
     bot = _active_bot(dialog)
     if not bot or not dialog.bot_active:
@@ -181,8 +204,87 @@ def dialog_group(dialog_id: str) -> str:
     return f"online_chat_dialog_{dialog_id}"
 
 
-def serialize_message(message: DialogMessage) -> dict[str, Any]:
+def _operator_photo_url(
+    *,
+    operator: OperatorProfile | None = None,
+    display_name: str = "",
+) -> str:
+    if operator is not None:
+        return getattr(operator, "photo_url", "") or ""
+    name = display_name.strip()
+    if not name:
+        return ""
+    profile = OperatorProfile.objects.filter(display_name=name, is_active=True).first()
+    if profile is None:
+        return ""
+    return getattr(profile, "photo_url", "") or ""
+
+
+def _operator_avatar(dialog: Dialog) -> str:
+    """Photo of the bank employee handling the dialog, for the client widget."""
+    if dialog.operator_id:
+        try:
+            url = _operator_photo_url(operator=dialog.operator)
+            if url:
+                return url
+        except Exception:  # pragma: no cover - defensive for missing relation
+            pass
+    if dialog.operator_name:
+        return _operator_photo_url(display_name=dialog.operator_name)
+    return ""
+
+
+def _operator_assignment_timeline(dialog: Dialog) -> list[tuple[object, str]]:
+    """Chronological operator handoffs for per-message avatar attribution."""
+    rows: list[tuple[object, str]] = []
+    for event in dialog.events.filter(type__in=("accepted", "transferred")).order_by(
+        "created_at"
+    ):
+        if event.type == "accepted":
+            name = (event.actor_name or "").strip()
+        else:
+            name = str((event.payload or {}).get("to") or "").strip()
+        if name:
+            rows.append((event.created_at, name))
+    return rows
+
+
+def _operator_name_at(
+    timeline: list[tuple[object, str]],
+    at,
+    *,
+    fallback: str = "",
+) -> str:
+    name = ""
+    for ts, operator_name in timeline:
+        if ts <= at:
+            name = operator_name
+        else:
+            break
+    return name or fallback
+
+
+def _operator_profile_cache(names: set[str]) -> dict[str, OperatorProfile]:
+    cleaned = {item.strip() for item in names if item and item.strip()}
+    if not cleaned:
+        return {}
     return {
+        profile.display_name: profile
+        for profile in OperatorProfile.objects.filter(
+            display_name__in=cleaned,
+            is_active=True,
+        )
+    }
+
+
+def serialize_message(
+    message: DialogMessage,
+    *,
+    operator_name: str = "",
+    operator_avatar: str = "",
+    operator_id: str = "",
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "id": str(message.id),
         "dialog_id": str(message.dialog_id),
         "speaker": message.speaker,
@@ -204,6 +306,68 @@ def serialize_message(message: DialogMessage) -> dict[str, Any]:
         "response_origin": message.response_origin,
         "created_at": message.created_at.isoformat(),
     }
+    if message.speaker == DialogMessage.Speaker.OPERATOR:
+        name = operator_name.strip()
+        if name:
+            payload["operator_name"] = name
+        profile_id = str(operator_id).strip()
+        avatar = operator_avatar.strip()
+        profile = None
+        if not profile_id and name:
+            profile = OperatorProfile.objects.filter(
+                display_name=name,
+                is_active=True,
+            ).first()
+            if profile:
+                profile_id = str(profile.id)
+        if not avatar and profile is not None:
+            avatar = profile.photo_url or ""
+        if not avatar and name and profile is None:
+            avatar = _operator_photo_url(display_name=name)
+        if profile_id:
+            payload["operator_id"] = profile_id
+        if avatar:
+            payload["operator_avatar"] = avatar
+    return payload
+
+
+def serialize_messages_for_dialog(
+    dialog: Dialog,
+    messages,
+    *,
+    timeline: list[tuple[object, str]] | None = None,
+    photo_cache: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    rows = list(messages)
+    if not rows:
+        return []
+    del photo_cache  # legacy arg — profiles resolved internally
+    assignment_timeline = timeline if timeline is not None else _operator_assignment_timeline(
+        dialog
+    )
+    names = {dialog.operator_name} if dialog.operator_name else set()
+    names.update(name for _, name in assignment_timeline)
+    profile_cache = _operator_profile_cache(names)
+    serialized: list[dict[str, Any]] = []
+    for message in rows:
+        if message.speaker == DialogMessage.Speaker.OPERATOR:
+            name = _operator_name_at(
+                assignment_timeline,
+                message.created_at,
+                fallback=dialog.operator_name,
+            )
+            profile = profile_cache.get(name)
+            serialized.append(
+                serialize_message(
+                    message,
+                    operator_name=name,
+                    operator_avatar=(profile.photo_url or "") if profile else "",
+                    operator_id=str(profile.id) if profile else "",
+                )
+            )
+        else:
+            serialized.append(serialize_message(message))
+    return serialized
 
 
 def serialize_feedback(feedback: DialogFeedback) -> dict[str, Any]:
@@ -332,20 +496,19 @@ def channel_label(channel: str) -> str:
 
 
 def phones_linked(left: str, right: str) -> bool:
-    """Same client phone: exact normalized, national BY mobile, or 1-digit typo."""
+    """Strict client identity: same phone number only.
+
+    Two phones are the same subscriber when their normalized forms are equal, or
+    when one is the national form of the other (same last 9 digits — с/без кода
+    страны). No fuzzy typo/last-7 matching: different numbers = different clients.
+    """
     a = normalize_phone(left)
     b = normalize_phone(right)
     if not a or not b:
         return False
     if a == b:
         return True
-    if len(a) >= 9 and len(b) >= 9 and a[-9:] == b[-9:]:
-        return True
-    if len(a) == len(b) and len(a) >= 10:
-        diffs = sum(1 for x, y in zip(a, b) if x != y)
-        if diffs == 1:
-            return True
-    return len(a) >= 7 and len(b) >= 7 and a[-7:] == b[-7:]
+    return len(a) >= 9 and len(b) >= 9 and a[-9:] == b[-9:]
 
 
 def _name_token_set(first_name: str, last_name: str) -> frozenset[str]:
@@ -376,75 +539,53 @@ def history_identity_query(
     first_name: str = "",
     last_name: str = "",
 ) -> Q:
-    """Match dialogs by phone (primary), external id, and FIO tokens."""
+    """Match dialogs by phone number (strict) or exact same-channel external id.
+
+    Client identity is the phone number: same phone → same client, different
+    phone → different clients, regardless of matching name/company. FIO is never
+    used for matching (it caused messages to leak between different clients).
+    The external id (e.g. Telegram chat_id) still links the same user on the
+    same channel when a phone is not available.
+    """
+    # first_name / last_name intentionally ignored — kept for call-site compat.
+    _ = (first_name, last_name)
     normalized = normalize_phone(phone)
-    phones: set[str] = {normalized} if normalized else set()
-    external_ids: set[str] = {external_id.strip()} if external_id.strip() else set()
-    name_key = _name_token_set(first_name, last_name)
-    matched_ids: set[Any] = set()
+    ext = (external_id or "").strip()
 
-    # Expand TG chat_id ↔ phone ↔ widget phone ↔ FIO (order-independent).
-    for _ in range(3):
-        before = (frozenset(phones), frozenset(external_ids), frozenset(matched_ids))
-        for item in Dialog.objects.only(
-            "id",
-            "client_phone",
-            "client_external_id",
-            "client_first_name",
-            "client_last_name",
-        ).iterator(chunk_size=500):
-            phone_hit = bool(phones) and any(
-                phones_linked(item.client_phone, p) for p in phones
+    matched_ids: list[Any] = []
+    if normalized:
+        matched_ids = [
+            item.id
+            for item in Dialog.objects.only("id", "client_phone").iterator(
+                chunk_size=500
             )
-            external_hit = bool(
-                item.client_external_id and item.client_external_id in external_ids
-            )
-            same_fio = bool(name_key) and names_linked(
-                first_name,
-                last_name,
-                item.client_first_name,
-                item.client_last_name,
-            )
-            candidate_phone = normalize_phone(item.client_phone)
-            if same_fio and not phone_hit and not external_hit:
-                if phones or external_ids:
-                    if candidate_phone and not any(
-                        phones_linked(candidate_phone, p) for p in phones
-                    ):
-                        same_fio = False
-                else:
-                    same_fio = not candidate_phone and not (
-                        item.client_external_id or ""
-                    ).strip()
-            if not (phone_hit or external_hit or same_fio):
-                continue
-            matched_ids.add(item.id)
-            phone_norm = normalize_phone(item.client_phone)
-            if phone_norm:
-                phones.add(phone_norm)
-            if item.client_external_id:
-                external_ids.add(item.client_external_id)
-        after = (frozenset(phones), frozenset(external_ids), frozenset(matched_ids))
-        if after == before:
-            break
+            if phones_linked(item.client_phone, normalized)
+        ]
 
-    if not matched_ids and not phones and not external_ids:
+    if not matched_ids and not ext:
         return Q()
 
     query = Q()
     if matched_ids:
-        query |= Q(id__in=list(matched_ids))
-    if phones:
-        query |= Q(
-            id__in=[
-                item.id
-                for item in Dialog.objects.only("id", "client_phone")
-                if any(phones_linked(item.client_phone, p) for p in phones)
-            ]
-        )
-    if external_ids:
-        query |= Q(client_external_id__in=list(external_ids))
+        query |= Q(id__in=matched_ids)
+    if ext:
+        query |= Q(client_external_id=ext)
     return query if query else Q(pk__in=[])
+
+
+def _clean_client_fields(raw: object) -> list[dict[str, str]]:
+    """Normalize pre-chat form data to a display list of {label, value}."""
+    if not isinstance(raw, list):
+        return []
+    cleaned: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or "").strip()
+        value = str(item.get("value") or "").strip()
+        if label and value:
+            cleaned.append({"label": label[:120], "value": value[:500]})
+    return cleaned
 
 
 def serialize_dialog(
@@ -467,12 +608,14 @@ def serialize_dialog(
         "client_last_name": dialog.client_last_name,
         "client_phone": dialog.client_phone,
         "client_external_id": dialog.client_external_id,
+        "client_fields": _clean_client_fields(dialog.client_fields),
         "entry_url": dialog.entry_url,
         "locale": dialog.locale,
         "client_name": dialog.client_display_name(),
         "client_online": dialog.client_online,
         "operator_name": dialog.operator_name,
         "operator_id": str(dialog.operator_id) if dialog.operator_id else None,
+        "operator_avatar": _operator_avatar(dialog),
         "department_id": str(dialog.department_id) if dialog.department_id else None,
         "department_name": dialog.department.name if dialog.department_id else None,
         "routing_reason": dialog.routing_reason,
@@ -504,7 +647,10 @@ def serialize_dialog(
         "has_feedback": DialogFeedback.objects.filter(dialog_id=dialog.id).exists(),
     }
     if include_messages:
-        current_messages = [serialize_message(item) for item in dialog.messages.all()]
+        current_messages = serialize_messages_for_dialog(
+            dialog,
+            dialog.messages.all(),
+        )
         history_messages = (
             _prior_dialog_messages_for_operator(dialog) if include_history else []
         )
@@ -549,7 +695,8 @@ def _prior_dialog_messages_for_operator(dialog: Dialog) -> list[dict[str, Any]]:
     """Prepend prior appeals of the same client for ARM scrollback.
 
     Client channels never receive these — only operator getDialog with
-    include_history=1. Identity is cross-channel (phone / external id / FIO).
+    include_history=1. Identity is strict: the phone number (cross-channel) or
+    the exact same-channel external id. FIO is never used.
     """
     query = history_identity_query(
         phone=dialog.client_phone,
@@ -648,6 +795,9 @@ def create_dialog_with_message(
     channel: str = "widget",
     initiated_by: str = Dialog.InitiatedBy.CLIENT,
     operator_name: str = "",
+    client_fields: list[dict[str, str]] | None = None,
+    force_offline: bool = False,
+    skip_auto_assign: bool = False,
 ) -> tuple[Dialog, DialogMessage]:
     if is_phone_blocked(client_phone):
         raise PermissionError("client is blocked")
@@ -656,6 +806,14 @@ def create_dialog_with_message(
     status = Dialog.Status.WAITING
     if initiated_by == Dialog.InitiatedBy.OPERATOR and operator_name.strip():
         status = Dialog.Status.ACTIVE
+    # Client arriving outside working hours is parked until the line opens.
+    # Offline-widget demo clients (force_offline) always park with offline_demo
+    # and are released only when Sheipa starts the working day.
+    # Sheipa leftover stubs (skip_auto_assign) stay as regular waiting holds.
+    line_open = line_is_open()
+    is_offline_intake = initiated_by == Dialog.InitiatedBy.CLIENT and (
+        force_offline or (not skip_auto_assign and not line_open)
+    )
     normalized_phone = format_phone_e164(client_phone) if client_phone else ""
 
     department, placement_config, routing_reason = select_department(
@@ -666,6 +824,18 @@ def create_dialog_with_message(
     queue_full = department_queue_is_full(department)
     if queue_full:
         routing_reason = f"{routing_reason};queue_full"
+    if force_offline:
+        routing_reason = (
+            f"{routing_reason};offline_demo" if routing_reason else "offline_demo"
+        )
+    elif is_offline_intake:
+        routing_reason = (
+            f"{routing_reason};offline_hours" if routing_reason else "offline_hours"
+        )
+    if skip_auto_assign and not is_offline_intake:
+        routing_reason = (
+            f"{routing_reason};sheipa_demo" if routing_reason else "sheipa_demo"
+        )
     bot = _active_bot_for_department(department.id if department else None)
     now = timezone.now()
     dialog = Dialog.objects.create(
@@ -678,17 +848,19 @@ def create_dialog_with_message(
         client_last_name=client_last_name.strip(),
         client_phone=normalized_phone or client_phone.strip(),
         client_external_id=client_external_id.strip(),
+        client_fields=_clean_client_fields(client_fields),
         entry_url=entry_url.strip(),
         locale=locale.strip() or "ru",
         operator_name=operator_name.strip(),
         preview=preview,
         department=department,
         routing_reason=routing_reason,
-        bot_active=bool(bot) and not queue_full,
+        bot_active=bool(bot) and not queue_full and not is_offline_intake,
         client_online=initiated_by == Dialog.InitiatedBy.CLIENT,
         client_last_seen_at=now if initiated_by == Dialog.InitiatedBy.CLIENT else None,
         last_client_message_at=now if initiated_by == Dialog.InitiatedBy.CLIENT else None,
         accepted_at=now if status == Dialog.Status.ACTIVE else None,
+        outcome=Dialog.Outcome.OFFLINE if is_offline_intake else "",
     )
     speaker = (
         DialogMessage.Speaker.OPERATOR
@@ -704,13 +876,18 @@ def create_dialog_with_message(
         text=text.strip(),
         channel_delivery_status=delivery_status,
     )
-    base_messages_sent = _send_base_messages(
-        dialog,
-        BaseMessage.SendPhase.BEFORE_BOT,
-        placement_config,
-    )
-    if not base_messages_sent and bot and bot.welcome_message:
-        _create_bot_message(dialog, bot.welcome_message)
+    if is_offline_intake:
+        # Operators are offline — send the configured "вне графика" notice (if any)
+        # and skip the bot so the client isn't promised an immediate answer.
+        _send_offline_notice(dialog, placement_config)
+    else:
+        base_messages_sent = _send_base_messages(
+            dialog,
+            BaseMessage.SendPhase.BEFORE_BOT,
+            placement_config,
+        )
+        if not base_messages_sent and bot and bot.welcome_message:
+            _create_bot_message(dialog, bot.welcome_message)
     record_event(
         dialog,
         "created",
@@ -721,7 +898,13 @@ def create_dialog_with_message(
             "routing_reason": routing_reason,
         },
     )
-    if status == Dialog.Status.WAITING and not dialog.bot_active and not queue_full:
+    if (
+        status == Dialog.Status.WAITING
+        and not dialog.bot_active
+        and not queue_full
+        and not is_offline_intake
+        and not skip_auto_assign
+    ):
         assigned = auto_assign_dialog(dialog)
         if assigned:
             dialog = assigned
@@ -790,7 +973,20 @@ def append_message(
         dialog.first_response_at = timezone.now()
         update_fields.append("first_response_at")
     dialog.save(update_fields=update_fields)
-    payload = serialize_message(message)
+    operator_name = ""
+    operator_avatar = ""
+    operator_id = ""
+    if speaker == DialogMessage.Speaker.OPERATOR:
+        dialog = Dialog.objects.select_related("operator").get(pk=dialog.pk)
+        operator_name = dialog.operator_name
+        operator_id = str(dialog.operator_id) if dialog.operator_id else ""
+        operator_avatar = _operator_avatar(dialog)
+    payload = serialize_message(
+        message,
+        operator_name=operator_name,
+        operator_avatar=operator_avatar,
+        operator_id=operator_id,
+    )
     broadcast(dialog_group(str(dialog.id)), "message.created", payload)
     broadcast(ARM_GROUP, "message.created", payload)
     # Backup path: client widget also POSTs /read/; if it was online but flag lagged,
@@ -875,6 +1071,12 @@ def accept_dialog(dialog: Dialog, operator_name: str) -> Dialog:
         display_name=operator_name,
         is_active=True,
     ).first()
+    reason = dialog.routing_reason or ""
+    if "offline_demo" in reason:
+        if not operator or operator.external_id != "dev-operator-sheipa":
+            raise ValueError("offline demo dialog is reserved for Sheipa")
+    if "sheipa_demo" in reason:
+        raise ValueError("dialog is held until working day starts")
     dialog = accept_waiting_dialog(
         dialog.pk,
         operator=operator,

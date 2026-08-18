@@ -390,6 +390,67 @@ export async function updateSlaSettings(
   return body.settings
 }
 
+export type WorkDayOverride = {
+  is_workday: boolean
+  start_time?: string
+  end_time?: string
+}
+
+export type WorkScheduleSettings = {
+  enabled: boolean
+  start_time: string
+  end_time: string
+  workdays: number[]
+  holidays: string[]
+  day_overrides: Record<string, WorkDayOverride>
+  manual_override: 'auto' | 'open' | 'closed'
+  is_open: boolean
+  updated_at?: string
+}
+
+export async function getWorkScheduleSettings(): Promise<WorkScheduleSettings> {
+  const body = await request<{ ok: boolean; settings: WorkScheduleSettings }>('work-schedule/')
+  return body.settings
+}
+
+export async function updateWorkScheduleSettings(
+  payload: Partial<WorkScheduleSettings>,
+): Promise<WorkScheduleSettings> {
+  const body = await request<{ ok: boolean; settings: WorkScheduleSettings }>(
+    'work-schedule/',
+    { method: 'PATCH', ...json(payload) },
+  )
+  return body.settings
+}
+
+export async function getWorkScheduleStatus(): Promise<{
+  is_open: boolean
+  enabled: boolean
+  manual_override: string
+  start_time: string
+  end_time: string
+}> {
+  const body = await request<{
+    ok: boolean
+    is_open: boolean
+    enabled: boolean
+    manual_override: string
+    start_time: string
+    end_time: string
+  }>('work-schedule/status/')
+  return body
+}
+
+export async function controlWorkDay(
+  action: 'start' | 'stop' | 'auto',
+): Promise<{ is_open: boolean; assigned: number }> {
+  const body = await request<{ ok: boolean; is_open: boolean; assigned: number }>(
+    'work-schedule/control/',
+    { method: 'POST', ...json({ action }) },
+  )
+  return { is_open: body.is_open, assigned: body.assigned ?? 0 }
+}
+
 export async function runRouting(): Promise<JsonObject> {
   return request<JsonObject>('routing/run/', { method: 'POST' })
 }

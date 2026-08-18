@@ -270,7 +270,7 @@ export function ChatSimulatorApp() {
                   <h2>АРМ операторов</h2>
                 </div>
                 <ul className="chat-management__list">
-                  {operatorNames.map((name) => (
+                  {operatorNames.filter((name) => !name.startsWith('Шейпа')).map((name) => (
                     <li key={name}>
                       <a
                         className="chat-button is-secondary"
@@ -282,6 +282,26 @@ export function ChatSimulatorApp() {
                       </a>
                     </li>
                   ))}
+                </ul>
+                <div className="chat-management__toolbar" style={{ marginTop: 16 }}>
+                  <h2>Демо: нерабочее время</h2>
+                </div>
+                <p className="chat-management__muted">
+                  В очереди Шейпы — 2 вчерашних обычных заглушки и 2 офлайн. Офлайн-клиенты
+                  не попадают к обычным операторам. После «Начать рабочий день» запускается
+                  автораспределение; до старта можно писать через офлайн-виджет.
+                </p>
+                <ul className="chat-management__list">
+                  <li>
+                    <a
+                      className="chat-button"
+                      href={`/online-chat?mode=operate&operator=${encodeURIComponent('Шейпа Дмитриевна Волкова')}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Шейпа Д. В. · офлайн-смена
+                    </a>
+                  </li>
                 </ul>
               </div>
               <div className="chat-management__card">
@@ -303,6 +323,24 @@ export function ChatSimulatorApp() {
                       </a>
                     </li>
                   ))}
+                </ul>
+                <div className="chat-management__toolbar" style={{ marginTop: 16 }}>
+                  <h2>Виджет вне графика</h2>
+                </div>
+                <p className="chat-management__muted">
+                  Тот же виджет, но всегда в режиме нерабочего времени. Сообщения уходят в офлайн-очередь.
+                </p>
+                <ul className="chat-management__list">
+                  <li>
+                    <a
+                      className="chat-button"
+                      href="/widget/sample.html?offline=1"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Открыть офлайн-виджет
+                    </a>
+                  </li>
                 </ul>
               </div>
             </section>

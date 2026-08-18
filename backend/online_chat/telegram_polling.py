@@ -11,6 +11,7 @@ import urllib.request
 from typing import Any
 
 from django.conf import settings
+from django.db import close_old_connections
 
 from integrations.channels.webhooks import ChannelWebhookError, handle_telegram_update
 
@@ -106,14 +107,19 @@ def run_polling_loop(
 
     offset: int | None = None
     while True:
+        # Drop any stale/broken DB connection so a Postgres hiccup does not
+        # permanently wedge the poller ("the connection is closed").
+        close_old_connections()
         try:
             updates = get_updates(offset=offset, timeout_seconds=timeout_seconds)
         except urllib.error.HTTPError as exc:
             logger.warning("telegram_poll HTTP %s; backoff %.1fs", exc.code, idle_backoff_seconds)
+            close_old_connections()
             time.sleep(idle_backoff_seconds)
             continue
         except Exception:  # noqa: BLE001
             logger.exception("telegram_poll getUpdates error; backoff %.1fs", idle_backoff_seconds)
+            close_old_connections()
             time.sleep(idle_backoff_seconds)
             continue
 
@@ -121,4 +127,5 @@ def run_polling_loop(
             update_id = update.get("update_id")
             if isinstance(update_id, int):
                 offset = update_id + 1
+            close_old_connections()
             process_update(update)

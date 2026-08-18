@@ -107,7 +107,11 @@ export function ChatPlatformShell({
             </button>
           )}
           <a className="chat-platform-shell__brand" href={armHref} aria-label="Онлайн-чат — главная">
-            <span className="chat-platform-shell__mark" aria-hidden="true">ББ</span>
+            <img
+              className="chat-platform-shell__mark"
+              src="/assets/belarusbank-logo.png"
+              alt="Беларусбанк"
+            />
             <span>
               <strong>Онлайн-чат</strong>
               <small>Беларусбанк</small>

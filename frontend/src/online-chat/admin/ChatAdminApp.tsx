@@ -7,10 +7,12 @@ import {
   getAdPendingOperators,
   getAnalytics,
   getSlaSettings,
+  getWorkScheduleSettings,
   operatorsApi,
   placementsApi,
   routingRulesApi,
   updateSlaSettings,
+  updateWorkScheduleSettings,
   type AnalyticsResponse,
   type BaseMessage,
   type ChatChannel,
@@ -21,6 +23,7 @@ import {
   type RoutingRule,
   type WidgetFormField,
   type WidgetPlacement,
+  type WorkDayOverride,
 } from '../api/managementApi'
 import '../shell/Management.css'
 
@@ -34,6 +37,7 @@ type Tab =
   | 'messages'
   | 'analytics'
   | 'sla'
+  | 'schedule'
 
 type ConfirmRequest = {
   title: string
@@ -55,6 +59,7 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'bots', label: 'Боты' },
   { id: 'messages', label: 'Базовые сообщения' },
   { id: 'sla', label: 'SLA' },
+  { id: 'schedule', label: 'Рабочий календарь' },
   { id: 'analytics', label: 'Аналитика' },
 ]
 
@@ -134,6 +139,38 @@ function adRoleLabel(role: string): string {
     admin: 'Администратор',
   }
   return map[role] || role
+}
+
+/** Demo-only helper: fabricate a "new AD employee" so the yellow onboarding
+ * card can be shown on demand. In production the card appears from a real AD
+ * sync — this button and generator are hidden outside the demo build. */
+const SHOW_AD_DEMO = import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1'
+
+const DEMO_AD_PEOPLE: ReadonlyArray<{ display_name: string; email: string; ad_role: string }> = [
+  { display_name: 'Ковалёва Анна Сергеевна', email: 'a.kovaleva', ad_role: 'operator_cc' },
+  { display_name: 'Дроздов Игорь Петрович', email: 'i.drozdov', ad_role: 'operator_cc' },
+  { display_name: 'Савицкая Мария Олеговна', email: 'm.savitskaya', ad_role: 'operator_cc' },
+  { display_name: 'Гурский Павел Викторович', email: 'p.gursky', ad_role: 'supervisor_cc' },
+  { display_name: 'Лаврик Ольга Дмитриевна', email: 'o.lavrik', ad_role: 'operator_cc' },
+]
+
+function makeDemoAdEmployee(): {
+  external_id: string
+  display_name: string
+  email: string
+  ad_role: string
+  detected_at: string
+  needs: string[]
+} {
+  const person = DEMO_AD_PEOPLE[Math.floor(Math.random() * DEMO_AD_PEOPLE.length)]
+  return {
+    external_id: `ad-demo-${Date.now()}`,
+    display_name: person.display_name,
+    email: `${person.email}@belarusbank.by`,
+    ad_role: person.ad_role,
+    detected_at: new Date().toISOString(),
+    needs: ['limits', 'photo', 'skill_tags'],
+  }
 }
 
 function OperatorAvatarPreview({ url, name }: { url: string; name: string }) {
@@ -435,6 +472,7 @@ export function ChatAdminApp() {
           />
         )}
         {tab === 'sla' && <SlaTab disabled={saving} perform={perform} />}
+        {tab === 'schedule' && <WorkScheduleTab disabled={saving} perform={perform} />}
         {tab === 'analytics' && <AnalyticsTab />}
       </div>
     </main>
@@ -597,6 +635,346 @@ function SlaTab({ disabled, perform }: TabProps) {
   )
 }
 
+const WEEKDAY_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const MONTH_LABELS = [
+  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
+]
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+function toIsoDate(year: number, monthIndex: number, day: number): string {
+  return `${year}-${pad2(monthIndex + 1)}-${pad2(day)}`
+}
+
+function parseIsoDate(value: string): Date {
+  const [y, m, d] = value.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+function WorkScheduleTab({ disabled, perform }: TabProps) {
+  const today = new Date()
+  const [enabled, setEnabled] = useState(false)
+  const [defaultStart, setDefaultStart] = useState('09:00')
+  const [defaultEnd, setDefaultEnd] = useState('18:00')
+  const [workdays, setWorkdays] = useState<number[]>([0, 1, 2, 3, 4])
+  const [dayOverrides, setDayOverrides] = useState<Record<string, WorkDayOverride>>({})
+  const [holidays, setHolidays] = useState<string[]>([])
+  const [isOpen, setIsOpen] = useState(true)
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState('')
+  const [viewYear, setViewYear] = useState(today.getFullYear())
+  const [viewMonth, setViewMonth] = useState(today.getMonth())
+  const [selectedDate, setSelectedDate] = useState(toIsoDate(today.getFullYear(), today.getMonth(), today.getDate()))
+
+  useEffect(() => {
+    void getWorkScheduleSettings()
+      .then((settings) => {
+        setEnabled(settings.enabled)
+        setDefaultStart(settings.start_time || '09:00')
+        setDefaultEnd(settings.end_time || '18:00')
+        setWorkdays(settings.workdays?.length ? settings.workdays : [0, 1, 2, 3, 4])
+        setDayOverrides(settings.day_overrides ?? {})
+        setHolidays(settings.holidays ?? [])
+        setIsOpen(settings.is_open)
+        setLoaded(true)
+        setError('')
+      })
+      .catch((caught) => {
+        setError(caught instanceof Error ? caught.message : 'Не удалось загрузить календарь')
+        setLoaded(true)
+      })
+  }, [])
+
+  const resolveDay = (iso: string) => {
+    const date = parseIsoDate(iso)
+    const override = dayOverrides[iso]
+    // JS getDay: Sun=0…Sat=6; backend weekday: Mon=0…Sun=6
+    const weekday = (date.getDay() + 6) % 7
+    const isDefaultWork = workdays.includes(weekday) && !holidays.includes(iso)
+    if (override) {
+      return {
+        isWorkday: !!override.is_workday,
+        start: override.start_time || defaultStart,
+        end: override.end_time || defaultEnd,
+        hasOverride: true,
+      }
+    }
+    return {
+      isWorkday: isDefaultWork,
+      start: defaultStart,
+      end: defaultEnd,
+      hasOverride: false,
+    }
+  }
+
+  const selected = resolveDay(selectedDate)
+
+  const monthCells = (() => {
+    const first = new Date(viewYear, viewMonth, 1)
+    const startPad = (first.getDay() + 6) % 7
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
+    const cells: Array<{ iso: string; day: number; inMonth: boolean } | null> = []
+    for (let i = 0; i < startPad; i += 1) cells.push(null)
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      cells.push({
+        iso: toIsoDate(viewYear, viewMonth, day),
+        day,
+        inMonth: true,
+      })
+    }
+    while (cells.length % 7 !== 0) cells.push(null)
+    return cells
+  })()
+
+  const shiftMonth = (delta: number) => {
+    const next = new Date(viewYear, viewMonth + delta, 1)
+    setViewYear(next.getFullYear())
+    setViewMonth(next.getMonth())
+  }
+
+  const applySelectedDay = (patch: Partial<WorkDayOverride> & { is_workday?: boolean }) => {
+    setDayOverrides((prev) => {
+      const next = { ...prev }
+      const current = resolveDay(selectedDate)
+      next[selectedDate] = {
+        is_workday: patch.is_workday ?? current.isWorkday,
+        start_time: patch.start_time ?? current.start,
+        end_time: patch.end_time ?? current.end,
+      }
+      return next
+    })
+  }
+
+  const clearSelectedOverride = () => {
+    setDayOverrides((prev) => {
+      const next = { ...prev }
+      delete next[selectedDate]
+      return next
+    })
+  }
+
+  return (
+    <section className="chat-management__card" aria-labelledby="schedule-heading">
+      <h2 id="schedule-heading">Рабочий календарь онлайн-чата</h2>
+      <p className="chat-management__muted">
+        По умолчанию 5/2 с 09:00 до 18:00. Выберите день в календаре, чтобы сделать его
+        выходным/рабочим или задать другое время (переносы).
+      </p>
+      {error && <p className="chat-management__error" role="alert">{error}</p>}
+      {!loaded ? (
+        <p className="chat-management__muted">Загрузка…</p>
+      ) : (
+        <>
+          <p>
+            Сейчас линия:{' '}
+            <span className={`chat-management__pill ${isOpen ? 'is-online' : 'is-offline'}`}>
+              {isOpen ? 'рабочее время' : 'нерабочее время'}
+            </span>
+          </p>
+
+          <div
+            style={{
+              border: '1px solid #d8dee6',
+              borderRadius: 12,
+              padding: 14,
+              marginBottom: 14,
+              background: '#f8fafc',
+            }}
+          >
+            <div className="chat-management__form-grid">
+              <label className="chat-management__check is-wide">
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  disabled={disabled}
+                  onChange={(event) => setEnabled(event.target.checked)}
+                />
+                Учитывать календарь (в проде должно быть включено)
+              </label>
+              <label>
+                Время по умолчанию (начало)
+                <input
+                  type="time"
+                  value={defaultStart}
+                  disabled={disabled}
+                  onChange={(event) => setDefaultStart(event.target.value)}
+                />
+              </label>
+              <label>
+                Время по умолчанию (конец)
+                <input
+                  type="time"
+                  value={defaultEnd}
+                  disabled={disabled}
+                  onChange={(event) => setDefaultEnd(event.target.value)}
+                />
+              </label>
+            </div>
+            <p className="chat-management__muted" style={{ marginTop: 8, marginBottom: 0 }}>
+              Выбранный день: <strong>{selectedDate}</strong>
+              {selected.hasOverride ? ' · есть перенос' : ' · по шаблону 5/2'}
+            </p>
+            <div className="chat-management__actions" style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                disabled={disabled}
+                className={selected.isWorkday ? undefined : 'is-secondary'}
+                onClick={() => applySelectedDay({ is_workday: true })}
+              >
+                Рабочий
+              </button>
+              <button
+                type="button"
+                disabled={disabled}
+                className={!selected.isWorkday ? undefined : 'is-secondary'}
+                onClick={() => applySelectedDay({ is_workday: false })}
+              >
+                Выходной
+              </button>
+              {selected.hasOverride ? (
+                <button type="button" className="is-secondary" disabled={disabled} onClick={clearSelectedOverride}>
+                  Сбросить на шаблон
+                </button>
+              ) : null}
+            </div>
+            {selected.isWorkday ? (
+              <div className="chat-management__form-grid" style={{ marginTop: 10 }}>
+                <label>
+                  Начало
+                  <input
+                    type="time"
+                    value={selected.start}
+                    disabled={disabled}
+                    onChange={(event) => applySelectedDay({ start_time: event.target.value, is_workday: true })}
+                  />
+                </label>
+                <label>
+                  Конец
+                  <input
+                    type="time"
+                    value={selected.end}
+                    disabled={disabled}
+                    onChange={(event) => applySelectedDay({ end_time: event.target.value, is_workday: true })}
+                  />
+                </label>
+              </div>
+            ) : (
+              <p className="chat-management__muted" style={{ marginTop: 10 }}>
+                В этот день линия закрыта — диалоги копятся в офлайн-очереди.
+              </p>
+            )}
+          </div>
+
+          <div
+            style={{
+              border: '1px solid #d8dee6',
+              borderRadius: 12,
+              padding: 14,
+            }}
+          >
+            <div className="chat-management__actions" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
+              <button type="button" className="is-secondary" disabled={disabled} onClick={() => shiftMonth(-1)}>
+                ←
+              </button>
+              <strong>
+                {MONTH_LABELS[viewMonth]} {viewYear}
+              </strong>
+              <button type="button" className="is-secondary" disabled={disabled} onClick={() => shiftMonth(1)}>
+                →
+              </button>
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(7, 1fr)',
+                gap: 6,
+                marginBottom: 6,
+              }}
+            >
+              {WEEKDAY_LABELS.map((label) => (
+                <div key={label} className="chat-management__muted" style={{ textAlign: 'center', fontSize: 12 }}>
+                  {label}
+                </div>
+              ))}
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(7, 1fr)',
+                gap: 6,
+              }}
+            >
+              {monthCells.map((cell, index) => {
+                if (!cell) {
+                  return <div key={`empty-${index}`} />
+                }
+                const plan = resolveDay(cell.iso)
+                const isSelected = cell.iso === selectedDate
+                return (
+                  <button
+                    key={cell.iso}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setSelectedDate(cell.iso)}
+                    style={{
+                      minHeight: 54,
+                      borderRadius: 10,
+                      border: isSelected ? '2px solid #1d4ed8' : '1px solid #e2e8f0',
+                      background: plan.isWorkday ? '#ecfdf5' : '#f8fafc',
+                      color: plan.isWorkday ? '#065f46' : '#64748b',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      padding: '6px 4px',
+                    }}
+                  >
+                    <div style={{ fontWeight: 700 }}>{cell.day}</div>
+                    <div style={{ fontSize: 10, marginTop: 2 }}>
+                      {plan.isWorkday ? `${plan.start}–${plan.end}` : 'вых.'}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </>
+      )}
+      <div className="chat-management__actions" style={{ marginTop: 14 }}>
+        <button
+          type="button"
+          disabled={disabled || !loaded}
+          onClick={() => void perform(
+            async () => {
+              const saved = await updateWorkScheduleSettings({
+                enabled,
+                start_time: defaultStart,
+                end_time: defaultEnd,
+                workdays,
+                holidays,
+                day_overrides: dayOverrides,
+                manual_override: 'auto',
+              })
+              setDayOverrides(saved.day_overrides ?? {})
+              setIsOpen(saved.is_open)
+            },
+            'Рабочий календарь сохранён.',
+            {
+              title: 'Сохранить календарь?',
+              description: enabled
+                ? `Шаблон ${defaultStart}–${defaultEnd}, переносов: ${Object.keys(dayOverrides).length}.`
+                : 'Календарь будет выключен — линия считается всегда открытой.',
+            },
+          )}
+        >
+          Сохранить календарь
+        </button>
+      </div>
+    </section>
+  )
+}
+
 interface TabProps {
   disabled: boolean
   perform: PerformFn
@@ -711,7 +1089,19 @@ function OperatorsTab({
         </div>
       </form>
       <section className="chat-management__card" aria-labelledby="operators-admin-heading">
-        <h2 id="operators-admin-heading">Операторы</h2>
+        <div className="chat-management__toolbar">
+          <h2 id="operators-admin-heading">Операторы</h2>
+          {SHOW_AD_DEMO ? (
+            <button
+              type="button"
+              className="is-secondary"
+              onClick={() => setAdPending((prev) => [makeDemoAdEmployee(), ...prev])}
+              title="Демо: имитировать появление нового сотрудника в Active Directory"
+            >
+              Симулировать сотрудника из AD
+            </button>
+          ) : null}
+        </div>
         {adPending.length ? (
           <div className="chat-management__ad-pending" aria-label="Новые операторы из Active Directory">
             <header>
@@ -1213,14 +1603,9 @@ function PlacementsTab({
               rows={2}
             />
           </label>
-          <label className="is-wide">
-            Вне графика
-            <textarea
-              value={form.offline_message ?? ''}
-              onChange={(event) => set('offline_message', event.target.value)}
-              rows={2}
-            />
-          </label>
+          <p className="chat-management__muted is-wide" style={{ margin: '4px 0 0' }}>
+            Сообщение вне графика настраивается в разделе «Базовые сообщения».
+          </p>
         </div>
         <div className="chat-management__actions">
           <button disabled={disabled}>{editingId == null ? 'Создать' : 'Сохранить'}</button>

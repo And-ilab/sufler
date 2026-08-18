@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
+import logging
 import re
 import uuid
 from collections.abc import Mapping
+from datetime import timedelta
 from functools import wraps
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -13,7 +17,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
 from django.db.models import Avg, Count, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, redirect
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -40,11 +44,16 @@ from online_chat.models import (
     ServiceLevelSettings,
     SuflerHintFeedback,
     WidgetPlacement,
+    WorkScheduleSettings,
     normalize_form_fields,
 )
 from online_chat.storage import get_chat_object_store
 from online_chat.routing_services import (
     accept_waiting_dialog,
+    line_is_open,
+    record_event,
+    release_offline_queue,
+    release_sheipa_demo_holds,
     run_assignments,
     transfer_to_operator,
     update_operator_presence,
@@ -75,6 +84,8 @@ from online_chat.services import (
 )
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+logger = logging.getLogger(__name__)
 
 
 class OnlineChatApiError(ValueError):
@@ -296,6 +307,10 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
                 channel=_str_field(payload, "channel", "widget") or "widget",
                 initiated_by=initiated_by,
                 operator_name=_str_field(payload, "operator_name"),
+                client_fields=payload.get("fields")
+                if isinstance(payload.get("fields"), list)
+                else None,
+                force_offline=_bool_field(payload, "offline_demo", False),
             )
         except PermissionError as exc:
             return JsonResponse(
@@ -516,6 +531,14 @@ def dialog_accept(request: HttpRequest, dialog_id: str) -> HttpResponse:
         operator_name = _str_field(payload, "operator_name", "Иванов И.И.") or "Иванов И.И."
         if dialog.status == Dialog.Status.CLOSED:
             raise OnlineChatApiError("dialog is closed")
+        if not line_is_open():
+            raise OnlineChatApiError(
+                "Сейчас нерабочее время. Диалоги можно брать после начала рабочего дня."
+            )
+        if dialog.outcome == Dialog.Outcome.OFFLINE:
+            raise OnlineChatApiError(
+                "Диалог из офлайн-очереди станет доступен после начала рабочего дня."
+            )
         operator_id = _str_field(payload, "operator_id")
         if operator_id:
             operator = get_object_or_404(OperatorProfile, pk=operator_id)
@@ -657,6 +680,160 @@ def sla_settings(request: HttpRequest) -> HttpResponse:
         return _error(exc)
 
 
+def _work_schedule_dict(obj: WorkScheduleSettings) -> dict[str, Any]:
+    return {
+        "enabled": obj.enabled,
+        "start_time": obj.start_time.strftime("%H:%M"),
+        "end_time": obj.end_time.strftime("%H:%M"),
+        "workdays": list(obj.workdays or []),
+        "holidays": list(obj.holidays or []),
+        "day_overrides": dict(obj.day_overrides or {}),
+        "manual_override": obj.manual_override,
+        "is_open": obj.is_open(),
+        "updated_at": obj.updated_at.isoformat(),
+    }
+
+
+def _parse_hhmm(value: str, field: str):
+    from datetime import datetime as _dt
+
+    try:
+        return _dt.strptime(str(value).strip(), "%H:%M").time()
+    except (ValueError, TypeError) as exc:
+        raise OnlineChatApiError(f"{field} must be HH:MM") from exc
+
+
+def _normalize_day_overrides(raw) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise OnlineChatApiError("day_overrides must be an object")
+    cleaned: dict[str, Any] = {}
+    for key, value in raw.items():
+        date_key = str(key).strip()
+        if len(date_key) != 10 or date_key[4] != "-" or date_key[7] != "-":
+            raise OnlineChatApiError(f"invalid day_overrides date: {date_key}")
+        if not isinstance(value, dict):
+            raise OnlineChatApiError(f"day_overrides[{date_key}] must be an object")
+        entry: dict[str, Any] = {
+            "is_workday": bool(value.get("is_workday")),
+        }
+        if "start_time" in value and value.get("start_time"):
+            start = _parse_hhmm(str(value.get("start_time")), "start_time")
+            entry["start_time"] = start.strftime("%H:%M")
+        if "end_time" in value and value.get("end_time"):
+            end = _parse_hhmm(str(value.get("end_time")), "end_time")
+            entry["end_time"] = end.strftime("%H:%M")
+        cleaned[date_key] = entry
+    return cleaned
+
+
+@csrf_exempt
+@require_http_methods(["GET", "PUT", "PATCH"])
+@_chat_permissions(PERM_CC_ADMIN)
+def work_schedule_settings(request: HttpRequest) -> HttpResponse:
+    obj = WorkScheduleSettings.get_solo()
+    if request.method == "GET":
+        return JsonResponse({"ok": True, "settings": _work_schedule_dict(obj)})
+    try:
+        payload = _json_body(request)
+        if "enabled" in payload:
+            obj.enabled = _bool_field(payload, "enabled", obj.enabled)
+        if "start_time" in payload:
+            obj.start_time = _parse_hhmm(payload.get("start_time"), "start_time")
+        if "end_time" in payload:
+            obj.end_time = _parse_hhmm(payload.get("end_time"), "end_time")
+        if "workdays" in payload:
+            raw = payload.get("workdays")
+            if not isinstance(raw, list):
+                raise OnlineChatApiError("workdays must be a list of 0..6")
+            days = sorted({int(x) for x in raw if isinstance(x, (int, float)) and 0 <= int(x) <= 6})
+            obj.workdays = days
+        if "holidays" in payload:
+            raw = payload.get("holidays")
+            if not isinstance(raw, list):
+                raise OnlineChatApiError("holidays must be a list of YYYY-MM-DD")
+            obj.holidays = [str(x).strip() for x in raw if str(x).strip()]
+        if "day_overrides" in payload:
+            obj.day_overrides = _normalize_day_overrides(payload.get("day_overrides"))
+        if "manual_override" in payload:
+            override = str(payload.get("manual_override") or "").strip()
+            if override not in WorkScheduleSettings.Override.values:
+                raise OnlineChatApiError("invalid manual_override")
+            obj.manual_override = override
+        obj.save()
+        # Applying settings may re-open the line — flush the offline backlog.
+        if obj.is_open():
+            run_assignments()
+        return JsonResponse({"ok": True, "settings": _work_schedule_dict(obj)})
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@require_http_methods(["GET"])
+def work_schedule_status(request: HttpRequest) -> HttpResponse:
+    """Public status the ARM polls to show the line state / start-day button."""
+    obj = WorkScheduleSettings.get_solo()
+    is_open = obj.is_open()
+    # When the clock crosses opening time, release overnight leftovers.
+    if is_open and Dialog.objects.filter(
+        status=Dialog.Status.WAITING,
+        outcome=Dialog.Outcome.OFFLINE,
+    ).exists():
+        run_assignments()
+        is_open = obj.is_open()
+    return JsonResponse(
+        {
+            "ok": True,
+            "is_open": is_open,
+            "enabled": obj.enabled,
+            "manual_override": obj.manual_override,
+            "start_time": obj.start_time.strftime("%H:%M"),
+            "end_time": obj.end_time.strftime("%H:%M"),
+        }
+    )
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def work_day_control(request: HttpRequest) -> HttpResponse:
+    """Start / stop the working day (demo button + prod manual override)."""
+    try:
+        payload = _json_body(request)
+        action = str(payload.get("action") or "").strip()
+        obj = WorkScheduleSettings.get_solo()
+        if action == "start":
+            obj.manual_override = WorkScheduleSettings.Override.OPEN
+        elif action == "stop":
+            obj.manual_override = WorkScheduleSettings.Override.CLOSED
+        elif action == "auto":
+            obj.manual_override = WorkScheduleSettings.Override.AUTO
+        else:
+            raise OnlineChatApiError("action must be start, stop or auto")
+        obj.save(update_fields=["manual_override", "updated_at"])
+        assigned = 0
+        if action == "start":
+            # Sheipa demo: enable auto-distribution and flush overnight + offline stubs.
+            OperatorProfile.objects.filter(
+                external_id="dev-operator-sheipa",
+            ).update(auto_assign=True, presence=OperatorProfile.Presence.ONLINE)
+            release_sheipa_demo_holds()
+            release_offline_queue(include_demo=True)
+            assigned = len(run_assignments())
+        elif obj.is_open():
+            release_offline_queue(include_demo=False)
+            assigned = len(run_assignments())
+        broadcast(ARM_GROUP, "work_schedule.updated", {
+            "is_open": obj.is_open(),
+            "manual_override": obj.manual_override,
+        })
+        return JsonResponse(
+            {"ok": True, "is_open": obj.is_open(), "assigned": assigned}
+        )
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
 @csrf_exempt
 @require_http_methods(["GET", "PUT", "PATCH"])
 def assignment_settings(request: HttpRequest) -> HttpResponse:
@@ -744,6 +921,47 @@ def sufler_hint_feedback(request: HttpRequest) -> HttpResponse:
                 },
             }
         )
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def sufler_outage_report(request: HttpRequest) -> HttpResponse:
+    """Operator reports a sufler outage — notify supervisors/admins (FR-CC error path)."""
+    try:
+        payload = _json_body(request)
+        operator_name = _str_field(payload, "operator_name")
+        query = _str_field(payload, "query")
+        detail = _str_field(payload, "detail")
+        dialog_id = _str_field(payload, "dialog_id")
+        dialog = Dialog.objects.filter(pk=dialog_id).first() if dialog_id else None
+        reported_at = timezone.now().isoformat()
+        logger.error(
+            "sufler_outage_reported operator=%s dialog=%s detail=%s query=%s",
+            operator_name,
+            dialog_id or "-",
+            detail or "-",
+            (query or "")[:200],
+        )
+        if dialog is not None:
+            record_event(
+                dialog,
+                "sufler_outage_reported",
+                actor_name=operator_name,
+                payload={"query": query, "detail": detail},
+            )
+        notice = {
+            "kind": "sufler_outage",
+            "dialog_id": str(dialog.id) if dialog is not None else dialog_id,
+            "operator_name": operator_name,
+            "query": query,
+            "detail": detail or "Суфлёр недоступен",
+            "reported_at": reported_at,
+        }
+        # Supervisors and admins share the ARM socket group.
+        broadcast(ARM_GROUP, "sufler.outage", notice)
+        return JsonResponse({"ok": True, "notice": notice})
     except OnlineChatApiError as exc:
         return _error(exc)
 
@@ -1382,6 +1600,30 @@ def operators_collection(request: HttpRequest) -> HttpResponse:
         return JsonResponse({"ok": True, "operator": _operator_dict(item)}, status=201)
     except (OnlineChatApiError, ValueError) as exc:
         return _error(OnlineChatApiError(str(exc)))
+
+
+@require_http_methods(["GET"])
+def operator_photo(request: HttpRequest, item_id: str) -> HttpResponse:
+    """Public operator photo for the client widget (avoids huge data URLs in WS payloads)."""
+    operator = get_object_or_404(OperatorProfile, pk=item_id, is_active=True)
+    raw = (operator.photo_url or "").strip()
+    if not raw:
+        return HttpResponse(status=404)
+    if raw.startswith("data:"):
+        match = re.match(r"data:([^;,]+)?(?:;[^,]*)?;base64,(.+)", raw, re.DOTALL)
+        if not match:
+            return HttpResponse(status=404)
+        content_type = match.group(1) or "application/octet-stream"
+        try:
+            body = base64.b64decode(match.group(2))
+        except (ValueError, binascii.Error):
+            return HttpResponse(status=404)
+        response = HttpResponse(body, content_type=content_type)
+        response["Cache-Control"] = "private, max-age=300"
+        return response
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return redirect(raw)
+    return HttpResponse(status=404)
 
 
 @csrf_exempt
@@ -2381,10 +2623,135 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
             },
         )
         supervisor.departments.set([department])
+        sheipa, _ = OperatorProfile.objects.update_or_create(
+            external_id="dev-operator-sheipa",
+            defaults={
+                "display_name": "Шейпа Дмитриевна Волкова",
+                "email": "sheipa@dev.local",
+                "presence": OperatorProfile.Presence.ONLINE,
+                "auto_assign": False,
+                "max_active_dialogs": 5,
+                "is_active": True,
+                "role": OperatorProfile.Role.OPERATOR,
+            },
+        )
+        sheipa.departments.set([department])
+        BaseMessage.objects.get_or_create(
+            title="Вне графика",
+            defaults={
+                "message_type": BaseMessage.MessageType.OFFLINE,
+                "send_phase": BaseMessage.SendPhase.OFFLINE,
+                "text": (
+                    "Сейчас нерабочее время, операторов на линии нет. "
+                    "Оставьте сообщение — ответим в начале следующего рабочего дня."
+                ),
+                "is_active": True,
+                "sort_order": 50,
+            },
+        )
+        leftover_regular = (
+            "Не успели подтвердить лимит по карте до закрытия смены.",
+            "Клиент ждал перевод на карту — диалог остался в очереди.",
+        )
+        leftover_offline = (
+            "Вопрос по вкладу поступил после 18:00 — офлайн-заглушка.",
+            "Клиент написал ночью про блокировку карты — офлайн-заглушка.",
+        )
+        leftover_payload = []
+        yesterday = timezone.now() - timedelta(hours=14)
+        Dialog.objects.filter(
+            client_external_id__startswith="offline-stub-"
+        ).delete()
+        Dialog.objects.filter(
+            client_external_id__startswith="sheipa-stub-"
+        ).delete()
+        for index, preview in enumerate(leftover_regular, start=1):
+            leftover, leftover_msg = create_dialog_with_message(
+                text=preview,
+                widget_id=placement.widget_id,
+                placement="website",
+                client_first_name="Клиент",
+                client_last_name=f"очередь {index}",
+                client_phone=_seed_client_phone(700 + index),
+                client_external_id=f"sheipa-stub-{index}",
+                skip_auto_assign=True,
+            )
+            leftover.created_at = yesterday
+            leftover.last_client_message_at = yesterday
+            leftover.client_online = False
+            leftover.client_last_seen_at = yesterday
+            leftover.save(
+                update_fields=[
+                    "created_at",
+                    "last_client_message_at",
+                    "client_online",
+                    "client_last_seen_at",
+                    "updated_at",
+                ]
+            )
+            leftover_msg.created_at = yesterday
+            leftover_msg.save(update_fields=["created_at"])
+            leftover_payload.append(
+                {
+                    "id": f"sheipa-stub-{index}",
+                    "dialog_id": str(leftover.id),
+                    "name": leftover.client_display_name(),
+                    "widget_url": (
+                        f"/widget/sample.html"
+                        f"?sim_client={quote(f'sheipa-stub-{index}')}"
+                    ),
+                    "status": leftover.status,
+                    "offline": False,
+                }
+            )
+        for index, preview in enumerate(leftover_offline, start=1):
+            leftover, leftover_msg = create_dialog_with_message(
+                text=preview,
+                widget_id=placement.widget_id,
+                placement="website",
+                client_first_name="Клиент",
+                client_last_name=f"офлайн {index}",
+                client_phone=_seed_client_phone(800 + index),
+                client_external_id=f"offline-stub-{index}",
+                force_offline=True,
+            )
+            leftover.created_at = yesterday
+            leftover.last_client_message_at = yesterday
+            leftover.client_online = False
+            leftover.client_last_seen_at = yesterday
+            leftover.save(
+                update_fields=[
+                    "created_at",
+                    "last_client_message_at",
+                    "client_online",
+                    "client_last_seen_at",
+                    "updated_at",
+                ]
+            )
+            leftover_msg.created_at = yesterday
+            leftover_msg.save(update_fields=["created_at"])
+            leftover_payload.append(
+                {
+                    "id": f"offline-stub-{index}",
+                    "dialog_id": str(leftover.id),
+                    "name": leftover.client_display_name(),
+                    "widget_url": (
+                        f"/widget/sample.html?offline=1"
+                        f"&sim_client={quote(f'offline-stub-{index}')}"
+                    ),
+                    "status": leftover.status,
+                    "offline": True,
+                }
+            )
         assignment = AssignmentSettings.get_solo()
         if assignment.mode != AssignmentSettings.Mode.MANUAL_PLUS_AUTO:
             assignment.mode = AssignmentSettings.Mode.MANUAL_PLUS_AUTO
             assignment.save(update_fields=["mode", "updated_at"])
+        schedule = WorkScheduleSettings.get_solo()
+        schedule.enabled = True
+        if schedule.manual_override != WorkScheduleSettings.Override.AUTO:
+            schedule.manual_override = WorkScheduleSettings.Override.AUTO
+        schedule.save(update_fields=["enabled", "manual_override", "updated_at"])
         dialogs = []
         clients_payload = []
         for index in range(client_count):
@@ -2442,11 +2809,14 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
                     "reset": should_reset,
                     "widget_id": placement.widget_id,
                 },
-                "operator_names": [item.display_name for item in operators],
-                "operators": [_operator_dict(item) for item in operators],
+                "operator_names": [item.display_name for item in operators] + [sheipa.display_name],
+                "operators": [_operator_dict(item) for item in operators] + [_operator_dict(sheipa)],
                 "client_ids": [item["id"] for item in clients_payload],
                 "clients": clients_payload,
                 "widget_id": placement.widget_id,
+                "sheipa_name": sheipa.display_name,
+                "offline_widget_url": "/widget/sample.html?offline=1",
+                "offline_stubs": leftover_payload,
             },
             status=201,
         )

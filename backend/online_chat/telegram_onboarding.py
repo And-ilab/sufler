@@ -102,13 +102,23 @@ def _clean_text(raw: str) -> str:
     return _INVISIBLE_RE.sub("", raw or "").strip()
 
 
+def _utf16_slice(text: str, offset: int, length: int) -> str:
+    """Telegram entity offset/length are UTF-16 code units, not Python characters."""
+    encoded = (text or "").encode("utf-16-le")
+    start = max(int(offset), 0) * 2
+    end = start + max(int(length), 0) * 2
+    if start >= len(encoded) or end <= start:
+        return ""
+    return encoded[start : min(end, len(encoded))].decode("utf-16-le", errors="ignore")
+
+
 def _bot_command(text: str, raw: Mapping[str, Any] | None = None) -> str:
     """Canonical command token ('/start') or empty if this is not a bot command."""
-    cleaned = _clean_text(text)
     payload = raw if isinstance(raw, Mapping) else {}
     message = payload.get("message") or payload.get("edited_message") or {}
     if not isinstance(message, Mapping):
         message = {}
+    original = str(message.get("text") or message.get("caption") or text or "")
     entities = message.get("entities") or message.get("caption_entities") or []
     if isinstance(entities, list):
         for ent in entities:
@@ -118,23 +128,33 @@ def _bot_command(text: str, raw: Mapping[str, Any] | None = None) -> str:
                 continue
             if int(ent.get("offset") or 0) != 0:
                 continue
-            length = int(ent.get("length") or 0)
-            token = cleaned[:length] if length > 0 else cleaned.split(None, 1)[0]
+            token = _utf16_slice(original, 0, int(ent.get("length") or 0))
+            token = _clean_text(token) or _clean_text(original).split(None, 1)[0]
             name = token.split("@", 1)[0].casefold()
             if name and not name.startswith("/"):
                 name = f"/{name}"
             return name
-    head = cleaned.split(None, 1)[0].casefold() if cleaned else ""
+    head = _clean_text(original or text).split(None, 1)[0].casefold() if (original or text) else ""
+    head = head.replace("／", "/").replace("∕", "/")
     if head.startswith("/"):
         return head.split("@", 1)[0]
     return ""
 
 
+def _start_token(raw: str) -> str:
+    token = _clean_text(raw).split(None, 1)[0].casefold() if raw else ""
+    token = token.replace("／", "/").replace("∕", "/")
+    if token.startswith("/"):
+        token = token[1:]
+    return token.split("@", 1)[0]
+
+
 def _is_start_command(command: str, text: str) -> bool:
-    if command == "/start":
-        return True
-    head = _clean_text(text).split(None, 1)[0].casefold() if text else ""
-    return head in {"start", "начать"}
+    """Match /start, /start@bot, /start payload, start, начать."""
+    return _start_token(command) in {"start", "начать"} or _start_token(text) in {
+        "start",
+        "начать",
+    }
 
 
 def _parse_fio(raw: str) -> tuple[str, str] | None:
@@ -211,9 +231,45 @@ def _save_payload(session: TelegramOnboardingSession, payload: dict[str, Any]) -
     session.save(update_fields=["meta", "updated_at"])
 
 
+def _collect_client_fields(
+    session: TelegramOnboardingSession,
+    payload: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    """Build an ordered {label, value} list from what the client entered."""
+    values: dict[str, str] = {
+        "name": f"{session.first_name} {session.last_name}".strip(),
+        "first_name": session.first_name,
+        "last_name": session.last_name,
+        "phone": format_phone_e164(session.phone) or session.phone,
+        "email": str(payload.get("email") or ""),
+    }
+    collected: list[dict[str, str]] = []
+    seen_labels: set[str] = set()
+    # Name and phone have dedicated rows in the ARM card — show only extras here.
+    core_keys = {"question", "message", "name", "first_name", "last_name", "phone"}
+    for field in _telegram_form_fields():
+        key = field.get("key") or ""
+        if key in core_keys:
+            continue
+        value = values.get(key)
+        if value is None:
+            value = str(payload.get(key) or "")
+        value = str(value).strip()
+        if not value:
+            continue
+        label = str(field.get("label") or key).strip() or key
+        if label in seen_labels:
+            continue
+        seen_labels.add(label)
+        collected.append({"label": label, "value": value})
+    return collected
+
+
 def _finish_dialog(session: TelegramOnboardingSession, chat_id: str) -> dict[str, Any]:
     phone = format_phone_e164(session.phone)
     question = session.question.strip() or "Обращение из Telegram"
+    payload_now = _session_payload(session)
+    client_fields = _collect_client_fields(session, payload_now)
     try:
         dialog, message = create_dialog_with_message(
             text=question,
@@ -224,6 +280,7 @@ def _finish_dialog(session: TelegramOnboardingSession, chat_id: str) -> dict[str
             client_last_name=session.last_name,
             client_phone=phone,
             client_external_id=chat_id,
+            client_fields=client_fields,
         )
     except PermissionError:
         return _reply(
@@ -358,17 +415,15 @@ def handle_telegram_client_text(
         return _reply(chat_id, GREETING, routed_to="ignored")
 
     command = _bot_command(cleaned, raw)
+    if _is_start_command(command, cleaned):
+        return _begin_onboarding(chat_id)
     if command:
-        if _is_start_command(command, cleaned):
-            return _begin_onboarding(chat_id)
         return {
             "ok": True,
             "channel": "telegram",
             "routed_to": "command_ignored",
             "command": command,
         }
-    if _is_start_command("", cleaned):
-        return _begin_onboarding(chat_id)
 
     session = (
         TelegramOnboardingSession.objects.filter(chat_id=chat_id)

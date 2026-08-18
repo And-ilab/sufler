@@ -89,14 +89,12 @@
 }
 
 .chat-platform-shell__mark {
-  display: grid;
-  place-items: center;
   width: 34px;
   height: 34px;
-  border: 1px solid #ffffff80;
   border-radius: 9px;
-  font-weight: 800;
-  font-size: 12px;
+  object-fit: cover;
+  background: #fff;
+  display: block;
 }
 
 .chat-platform-shell__theme {

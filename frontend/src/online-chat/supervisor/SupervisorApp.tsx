@@ -48,9 +48,33 @@ function operatorRoleLabel(role?: string) {
   return null
 }
 
+const CHANNEL_LABELS: Record<string, string> = {
+  widget: 'Виджет сайта',
+  web: 'Виджет сайта',
+  telegram: 'Telegram',
+  viber: 'Viber',
+  vk: 'ВКонтакте',
+  ok: 'Одноклассники',
+  whatsapp: 'WhatsApp',
+  api: 'API',
+  email: 'Эл. почта',
+  phone: 'Телефон',
+}
+
+function channelLabel(channel: string) {
+  return CHANNEL_LABELS[channel] ?? channel
+}
+
 function openOperatorArm(operatorName: string) {
-  const href = `/online-chat/operators?mode=view&operator=${encodeURIComponent(operatorName)}&transfer=1`
-  window.open(href, '_blank', 'noopener,noreferrer')
+  const params = new URLSearchParams()
+  params.set('mode', 'view')
+  params.set('operator', operatorName)
+  params.set('transfer', '1')
+  // Carry the active demo role so the view-only ARM keeps supervisor rights in
+  // the new tab (otherwise it falls back to base roles and returns 403).
+  const demoRole = new URLSearchParams(window.location.search).get('demo_role')
+  if (demoRole) params.set('demo_role', demoRole)
+  window.open(`/online-chat/operators?${params.toString()}`, '_blank', 'noopener,noreferrer')
 }
 
 export function SupervisorApp({ demoMode: _demoMode = false }: SupervisorAppProps) {
@@ -198,9 +222,6 @@ export function SupervisorApp({ demoMode: _demoMode = false }: SupervisorAppProp
               </label>
             </div>
           </div>
-          <p className="chat-management__muted" style={{ marginTop: 0 }}>
-            Нажмите на строку оператора, чтобы открыть его АРМ в режиме просмотра.
-          </p>
           <div className="chat-management__table-wrap">
             <table>
               <thead>
@@ -214,7 +235,6 @@ export function SupervisorApp({ demoMode: _demoMode = false }: SupervisorAppProp
                   <th>Ср. на диалог</th>
                   <th>Каналы сейчас</th>
                   <th>Отдел</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -258,27 +278,11 @@ export function SupervisorApp({ demoMode: _demoMode = false }: SupervisorAppProp
                       <td>
                         {operator.channels_breakdown && Object.keys(operator.channels_breakdown).length
                           ? Object.entries(operator.channels_breakdown)
-                              .map(([channel, count]) => `${channel}: ${count}`)
+                              .map(([channel, count]) => `${channelLabel(channel)}: ${count}`)
                               .join(', ')
                           : '—'}
                       </td>
                       <td>{operatorDepartment(operator)}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="is-secondary"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            window.open(
-                              `/online-chat?historyOperator=${encodeURIComponent(operator.name)}`,
-                              '_blank',
-                              'noopener,noreferrer',
-                            )
-                          }}
-                        >
-                          Диалоги
-                        </button>
-                      </td>
                     </tr>
                   )
                 })}

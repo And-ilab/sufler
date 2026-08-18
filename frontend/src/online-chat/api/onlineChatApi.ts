@@ -16,14 +16,17 @@ export type OnlineChatDialog = {
   channel: string
   status: DialogStatus
   outcome?: string
+  routing_reason?: string
   initiated_by?: 'client' | 'operator'
   client_first_name: string
   client_last_name: string
   client_phone: string
   client_external_id?: string
   client_name: string
+  client_fields?: { label: string; value: string }[]
   client_online?: boolean
   operator_name: string
+  operator_avatar?: string
   department_id?: string | null
   department_name?: string | null
   preview: string
@@ -296,6 +299,20 @@ export async function submitSuflerHintFeedback(payload: {
   request_id?: string
 }): Promise<void> {
   const response = await fetch('/api/v1/online-chat/sufler-feedback/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  await parseJson<{ ok: boolean }>(response)
+}
+
+export async function reportSuflerOutage(payload: {
+  dialog_id?: string
+  operator_name?: string
+  query?: string
+  detail?: string
+}): Promise<void> {
+  const response = await fetch('/api/v1/online-chat/sufler-outage/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

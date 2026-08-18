@@ -273,6 +273,30 @@ class ChannelWebhooksTest(TestCase):
         self.assertEqual(Dialog.objects.count(), 2)
 
     @patch("online_chat.telegram_onboarding.send_telegram_text")
+    def test_telegram_start_without_entities_still_onboards(self, send_mock):
+        response = self.client.post(
+            "/api/v1/channels/telegram/webhook/",
+            data=json.dumps(
+                {
+                    "update_id": 1,
+                    "message": {
+                        "message_id": 10,
+                        "text": "/start",
+                        "chat": {"id": 4242, "type": "private"},
+                        "from": {"id": 4242, "first_name": "Анна"},
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["routed_to"], "onboarding")
+        self.assertEqual(response.json()["step"], TelegramOnboardingSession.Step.AWAIT_QUESTION)
+        greeting = send_mock.call_args[0][1]
+        self.assertIn("вопрос", greeting.casefold())
+        self.assertEqual(Dialog.objects.count(), 0)
+
+    @patch("online_chat.telegram_onboarding.send_telegram_text")
     def test_telegram_start_with_bot_username(self, send_mock):
         start = self._tg("/start@sufler_support_bot", update_id=1)
         self.assertEqual(start.status_code, 200)

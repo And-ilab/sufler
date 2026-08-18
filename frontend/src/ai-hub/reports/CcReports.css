@@ -3,6 +3,35 @@
   gap: var(--space-4);
 }
 
+.rpt-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 2px 12px;
+}
+
+.rpt-brand__logo {
+  height: 30px;
+  width: auto;
+  display: block;
+}
+
+.rpt-brand__titles {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.rpt-brand__titles strong {
+  font-size: 15px;
+  color: #0a5c33;
+}
+
+.rpt-brand__titles span {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 .cc-reports__filters-form {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;

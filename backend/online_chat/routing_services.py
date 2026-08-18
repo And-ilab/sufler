@@ -17,7 +17,16 @@ from online_chat.models import (
     OperatorProfile,
     RoutingRule,
     WidgetPlacement,
+    WorkScheduleSettings,
 )
+
+
+def line_is_open(now=None) -> bool:
+    """Whether the online-chat line currently distributes dialogs to operators."""
+    try:
+        return WorkScheduleSettings.get_solo().is_open(now)
+    except Exception:  # pragma: no cover - never block on settings lookup
+        return True
 
 
 def record_event(
@@ -252,14 +261,29 @@ def _max_load_for_dialog(dialog: Dialog) -> int | None:
 def auto_assign_dialog(dialog: Dialog) -> Dialog | None:
     if dialog.status != Dialog.Status.WAITING:
         return None
+    # Offline-parked dialogs (arrived outside working hours / via offline widget)
+    # are not distributed until the working day starts.
+    if dialog.outcome == Dialog.Outcome.OFFLINE:
+        return None
+    # Demo leftovers reserved for Sheipa until "Начать рабочий день".
+    if "sheipa_demo" in (dialog.routing_reason or ""):
+        return None
+    # Outside working hours the line does not auto-distribute at all.
+    if not line_is_open():
+        return None
     max_load = _max_load_for_dialog(dialog)
-    for candidate in _eligible_operators(dialog, max_load=max_load)[:20]:
+    candidates = list(_eligible_operators(dialog, max_load=max_load)[:20])
+    # Offline-widget demo clients stay with Sheipa — never regular operators.
+    if "offline_demo" in (dialog.routing_reason or ""):
+        candidates = [
+            op for op in candidates if op.external_id == "dev-operator-sheipa"
+        ]
+    for candidate in candidates:
         try:
             return accept_waiting_dialog(dialog.pk, operator=candidate)
         except ValueError:
             continue
     return None
-
 
 def waiting_queue_queryset(*, department: Department | None = None):
     """FIFO by last client activity — newest writers go to the end of the queue."""
@@ -275,9 +299,45 @@ def waiting_queue_queryset(*, department: Department | None = None):
     return qs
 
 
+def release_offline_queue(*, include_demo: bool = False) -> int:
+    """Move parked offline dialogs back into the live waiting queue.
+
+    Calendar opening releases only real after-hours dialogs. The demo offline
+    widget keeps its queue until an operator explicitly starts the working day.
+    """
+    qs = Dialog.objects.filter(
+        status=Dialog.Status.WAITING,
+        outcome=Dialog.Outcome.OFFLINE,
+    )
+    if not include_demo:
+        qs = qs.exclude(routing_reason__contains="offline_demo")
+    updated = qs.update(outcome="")
+    return int(updated)
+
+
+def release_sheipa_demo_holds() -> int:
+    """Allow Sheipa demo leftovers to enter normal auto-assignment."""
+    updated = 0
+    for dialog in Dialog.objects.filter(
+        status=Dialog.Status.WAITING,
+        routing_reason__contains="sheipa_demo",
+    ):
+        reason = (dialog.routing_reason or "").replace("sheipa_demo", "").strip(";")
+        while ";;" in reason:
+            reason = reason.replace(";;", ";")
+        dialog.routing_reason = reason
+        dialog.save(update_fields=["routing_reason", "updated_at"])
+        updated += 1
+    return updated
+
+
 def run_assignments(*, department: Department | None = None) -> list[Dialog]:
+    # Outside working hours nothing is distributed (offline queue only).
+    if not line_is_open():
+        return []
     # Drop expired holds opportunistically.
     OperatorAssignmentHold.objects.filter(until__lte=timezone.now()).delete()
+    release_offline_queue(include_demo=False)
     qs = waiting_queue_queryset(department=department)
     assigned: list[Dialog] = []
     for dialog in qs[:500]:

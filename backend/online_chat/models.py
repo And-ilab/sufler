@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import re
 import uuid
+from datetime import time as dt_time
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
+
+
+def default_workdays() -> list[int]:
+    """Mon–Fri by default (Python weekday(): Mon=0 … Sun=6)."""
+    return [0, 1, 2, 3, 4]
 
 
 def normalize_phone(phone: str) -> str:
@@ -348,6 +354,9 @@ class Dialog(models.Model):
     client_last_name = models.CharField(max_length=100, blank=True, default="")
     client_phone = models.CharField(max_length=40, blank=True, default="")
     client_external_id = models.CharField(max_length=160, blank=True, default="", db_index=True)
+    # Data the client filled in the pre-chat / bot onboarding form, as an ordered
+    # list of {"label": str, "value": str} for display in the ARM client card.
+    client_fields = models.JSONField(default=list, blank=True)
     entry_url = models.URLField(blank=True, default="")
     locale = models.CharField(max_length=16, blank=True, default="ru")
     operator_name = models.CharField(max_length=120, blank=True, default="")
@@ -651,6 +660,106 @@ class ServiceLevelSettings(models.Model):
             defaults={"first_response_seconds": cls.DEFAULT_FIRST_RESPONSE_SECONDS},
         )
         return obj
+
+
+class WorkScheduleSettings(models.Model):
+    """Singleton work calendar for the online chat line (admin-configurable)."""
+
+    class Override(models.TextChoices):
+        AUTO = "auto", "По расписанию"
+        OPEN = "open", "Рабочий день начат"
+        CLOSED = "closed", "Нерабочее время"
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    enabled = models.BooleanField(
+        default=False,
+        help_text="Учитывать рабочее время: вне графика диалоги не распределяются",
+    )
+    start_time = models.TimeField(default=dt_time(9, 0))
+    end_time = models.TimeField(default=dt_time(18, 0))
+    # Python weekday(): Mon=0 … Sun=6. Default template for days without overrides.
+    workdays = models.JSONField(default=default_workdays, blank=True)
+    # ISO dates ("YYYY-MM-DD") that are always non-working (holidays) — legacy.
+    holidays = models.JSONField(default=list, blank=True)
+    # Per-day overrides: {"YYYY-MM-DD": {"is_workday": bool, "start_time"?: "HH:MM", "end_time"?: "HH:MM"}}
+    day_overrides = models.JSONField(default=dict, blank=True)
+    manual_override = models.CharField(
+        max_length=8,
+        choices=Override.choices,
+        default=Override.AUTO,
+        help_text="Ручное переопределение расписания (демо / форс-мажор)",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Work schedule settings"
+        verbose_name_plural = "Work schedule settings"
+
+    def __str__(self) -> str:
+        return f"work_schedule:{'on' if self.enabled else 'off'}:{self.manual_override}"
+
+    @classmethod
+    def get_solo(cls) -> WorkScheduleSettings:
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def _parse_override_time(self, value, fallback):
+        if not value:
+            return fallback
+        if hasattr(value, "hour"):
+            return value
+        try:
+            parts = str(value).strip().split(":")
+            return dt_time(int(parts[0]), int(parts[1]))
+        except (ValueError, TypeError, IndexError):
+            return fallback
+
+    def day_plan(self, local_date):
+        """Resolved work plan for a calendar date (defaults + day_overrides)."""
+        key = local_date.isoformat() if hasattr(local_date, "isoformat") else str(local_date)
+        overrides = self.day_overrides or {}
+        raw = overrides.get(key) if isinstance(overrides, dict) else None
+        default_work = local_date.weekday() in (self.workdays or default_workdays())
+        if key in (self.holidays or []):
+            default_work = False
+        if isinstance(raw, dict):
+            is_workday = bool(raw.get("is_workday", default_work))
+            start = self._parse_override_time(raw.get("start_time"), self.start_time)
+            end = self._parse_override_time(raw.get("end_time"), self.end_time)
+            return {
+                "date": key,
+                "is_workday": is_workday,
+                "start_time": start,
+                "end_time": end,
+                "has_override": True,
+            }
+        return {
+            "date": key,
+            "is_workday": default_work,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "has_override": False,
+        }
+
+    def is_open(self, now=None) -> bool:
+        """Whether the line is currently operating (accepting live operators)."""
+        if self.manual_override == self.Override.OPEN:
+            return True
+        if self.manual_override == self.Override.CLOSED:
+            return False
+        if not self.enabled:
+            return True
+        local = timezone.localtime(now) if now else timezone.localtime()
+        plan = self.day_plan(local.date())
+        if not plan["is_workday"]:
+            return False
+        start = plan["start_time"]
+        end = plan["end_time"]
+        current = local.time()
+        if start <= end:
+            return start <= current < end
+        # Overnight window (e.g. 22:00–06:00).
+        return current >= start or current < end
 
 
 class OperatorAssignmentHold(models.Model):

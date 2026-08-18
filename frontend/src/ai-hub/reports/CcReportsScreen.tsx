@@ -424,6 +424,17 @@ export function CcReportsScreen({
 
   return (
     <div className="rpt-body" data-testid="cc-reports-screen">
+      <div className="rpt-brand">
+        <img
+          className="rpt-brand__logo"
+          src="/assets/belarusbank-wordmark-green.png"
+          alt="Беларусбанк"
+        />
+        <div className="rpt-brand__titles">
+          <strong>Аналитика контакт-центра</strong>
+          <span>Беларусбанк</span>
+        </div>
+      </div>
       <div className="rpt-row rpt-row--end">
         <button type="button" className="rpt-pill is-active" onClick={() => setPanel('reports')}>
           Готовые отчёты

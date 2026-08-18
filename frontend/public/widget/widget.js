@@ -23,6 +23,11 @@
   var QUERY_PARAMS = new URLSearchParams(global.location.search || '');
   var SIM_CLIENT = QUERY_PARAMS.get('sim_client') || '';
   var RESUME_DIALOG_ID = QUERY_PARAMS.get('dialog_id') || '';
+  // Demo: an offline widget URL (?offline=1) always behaves as non-working hours.
+  var OFFLINE_DEMO =
+    QUERY_PARAMS.get('offline') === '1' ||
+    (SCRIPT && SCRIPT.getAttribute('data-offline') === '1') ||
+    false;
   var LOGO_SRC =
     (SCRIPT && SCRIPT.getAttribute('data-logo-src')) ||
     '/assets/belarusbank-logo.png';
@@ -207,7 +212,9 @@
         ';display:flex;align-items:center;gap:8px;}',
       '.op-strip[hidden]{display:none!important;}',
       '.avatar{width:28px;height:28px;border-radius:14px;display:flex;align-items:center;justify-content:center;',
-      'font-size:10px;font-weight:600;color:#fff;flex-shrink:0;}',
+      'font-size:10px;font-weight:600;color:#fff;flex-shrink:0;overflow:hidden;}',
+      '.avatar--photo{background:' + WP.avatarOperator + ';}',
+      '.avatar--photo img{width:100%;height:100%;object-fit:cover;display:block;}',
       '.op-meta{flex:1;min-width:0;}',
       '.op-name{font-size:12px;font-weight:600;color:' + WP.text + ';}',
       '.op-role{font-size:11px;color:' + WP.textSecondary + ';}',
@@ -550,6 +557,7 @@
       operatorName: STR.operatorName,
       operatorShort: STR.operatorShort,
       operatorInitials: STR.operatorInitials,
+      operatorAvatar: '',
       unreadCount: 0,
       typingDebounceTimer: null,
       typingActive: false,
@@ -687,6 +695,42 @@
     function apiUrl(path) {
       var base = (API_BASE || '').replace(/\/$/, '');
       return base + path;
+    }
+
+    /** Stable HTTP URL for operator photo (works with data URLs stored server-side). */
+    function operatorPhotoApiUrl(operatorId) {
+      if (!operatorId) return '';
+      return apiUrl(
+        '/api/v1/online-chat/operators/' + encodeURIComponent(operatorId) + '/photo/',
+      );
+    }
+
+    function resolveOperatorAvatarUrl(message, dialog) {
+      var messageId = message && message.operator_id;
+      if (messageId) return operatorPhotoApiUrl(messageId);
+      var dialogId = dialog && dialog.operator_id;
+      if (dialogId) return operatorPhotoApiUrl(dialogId);
+      var inline =
+        (message && message.operator_avatar) ||
+        (dialog && dialog.operator_avatar) ||
+        '';
+      return inline || '';
+    }
+
+    function createOperatorAvatarNode(url) {
+      if (!url) return null;
+      var wrap = document.createElement('div');
+      wrap.className = 'avatar avatar--photo';
+      var img = document.createElement('img');
+      img.src = url;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.onerror = function () {
+        if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      };
+      wrap.appendChild(img);
+      return wrap;
     }
 
     function wsUrl(path) {
@@ -979,14 +1023,15 @@
       row.className = 'row row--' + (isClient ? 'client' : 'operator');
       if (messageId) row.setAttribute('data-message-id', messageId);
 
-      var avatarHtml =
-        '<div class="avatar" style="background:' +
-        (isClient ? WP.avatarClient : WP.avatarOperator) +
-        ';color:' +
-        (isClient ? WP.clientBubbleText : '#fff') +
-        '">' +
-        escapeHtml(initials || (isClient ? state.clientInitials : state.operatorInitials)) +
-        '</div>';
+      var avatarHtml = isClient
+        ? '<div class="avatar" style="background:' +
+          WP.avatarClient +
+          ';color:' +
+          WP.clientBubbleText +
+          '">' +
+          escapeHtml(initials || state.clientInitials) +
+          '</div>'
+        : '';
 
       var timeBlock = time
         ? '<div class="bubble-time">' +
@@ -1028,7 +1073,11 @@
         (isClient ? 'client' : 'operator') +
         '">' +
         '<div class="bubble-label">' +
-        escapeHtml(label || (isClient ? STR.you : state.operatorShort)) +
+        escapeHtml(
+          options.operatorLabel ||
+            label ||
+            (isClient ? STR.you : state.operatorShort),
+        ) +
         '</div>' +
         quoteBlock +
         textBlock +
@@ -1036,7 +1085,13 @@
         timeBlock +
         '</div>';
 
-      row.innerHTML = isClient ? bubble + avatarHtml : avatarHtml + bubble;
+      if (isClient) {
+        row.innerHTML = bubble + avatarHtml;
+      } else {
+        row.innerHTML = bubble;
+        var operatorAvatarNode = createOperatorAvatarNode(options.avatarUrl || '');
+        if (operatorAvatarNode) row.insertBefore(operatorAvatarNode, row.firstChild);
+      }
       var downloadBtn = row.querySelector('[data-attachment-download]');
       if (downloadBtn) {
         downloadBtn.addEventListener('click', function () {
@@ -1168,21 +1223,39 @@
       return cleaned.split(/\s+/)[0] || STR.operatorShort;
     }
 
-    function applyOperatorIdentity(name) {
+    function applyOperatorIdentity(name, avatar, operatorId) {
       var full = String(name || '').trim() || STR.operatorName;
       state.operatorName = full;
       state.operatorShort = shortNameFromFull(full);
       state.operatorInitials = initialsFromName(full);
+      var avatarUrl = resolveOperatorAvatarUrl(
+        {
+          operator_id: operatorId || '',
+          operator_avatar: typeof avatar === 'string' ? avatar : '',
+        },
+        null,
+      );
+      state.operatorAvatar = avatarUrl;
       var nameNode = opStrip.querySelector('.op-name');
       if (nameNode) nameNode.textContent = full;
-      var avatarNode = opStrip.querySelector('.avatar');
-      if (avatarNode) avatarNode.textContent = state.operatorInitials;
+      var existingAvatar = opStrip.querySelector('.avatar');
+      if (existingAvatar) existingAvatar.remove();
+      var avatarNode = createOperatorAvatarNode(avatarUrl);
+      if (avatarNode) {
+        var meta = opStrip.querySelector('.op-meta');
+        if (meta) opStrip.insertBefore(avatarNode, meta);
+        else opStrip.insertBefore(avatarNode, opStrip.firstChild);
+      }
     }
 
     /** Call when operator joins the dialog (API/WS or demo hook). */
     function connectOperator(operatorName, options) {
       options = options || {};
-      applyOperatorIdentity(operatorName || state.operatorName);
+      applyOperatorIdentity(
+        operatorName || state.operatorName,
+        options.avatar,
+        options.operatorId || options.operator_id || '',
+      );
       if (state.operatorConnected) return;
       state.operatorConnected = true;
       setWaitingHint(false);
@@ -1222,23 +1295,40 @@
       }
       if (message.speaker === 'operator' || message.speaker === 'bot') {
         setWaitingHint(false);
+        var avatarUrl =
+          message.speaker === 'bot' ? '' : resolveOperatorAvatarUrl(message, null);
         if (
           message.speaker === 'operator' &&
           !state.operatorConnected
         ) {
-          connectOperator(state.operatorName, { announce: false });
+          connectOperator(message.operator_name || state.operatorName, {
+            announce: false,
+            avatar: message.operator_avatar || '',
+            operatorId: message.operator_id || '',
+          });
         }
+        var remoteOperatorName =
+          message.speaker === 'operator'
+            ? message.operator_name || state.operatorName
+            : state.operatorName;
         addBubble(
           'operator',
           message.text,
-          message.speaker === 'bot' ? 'Виртуальный помощник' : state.operatorShort,
-          message.speaker === 'bot' ? 'Б' : state.operatorInitials,
+          message.speaker === 'bot'
+            ? 'Виртуальный помощник'
+            : shortNameFromFull(remoteOperatorName),
+          message.speaker === 'bot' ? 'Б' : initialsFromName(remoteOperatorName),
           formatTime(new Date(message.created_at || Date.now())),
           Object.assign(
             {
               id: message.id,
               receiptStatus: message.receipt_status,
               quotedText: message.quoted_text,
+              avatarUrl: avatarUrl,
+              operatorLabel:
+                message.speaker === 'bot'
+                  ? 'Виртуальный помощник'
+                  : shortNameFromFull(remoteOperatorName),
             },
             attachmentOptionsFromMessage(message),
           ),
@@ -1298,6 +1388,8 @@
         if (type === 'operator.joined') {
           connectOperator(payload.operator_name, {
             announce: !payload.system_message,
+            avatar: payload.operator_avatar || '',
+            operatorId: payload.operator_id || '',
           });
           if (payload.system_message) handleRemoteMessage(payload.system_message);
           return;
@@ -1306,7 +1398,11 @@
           if (payload.system_message) handleRemoteMessage(payload.system_message);
           connectOperator(
             payload.to_operator_name || payload.operator_name,
-            { announce: false },
+            {
+              announce: false,
+              avatar: payload.operator_avatar || '',
+              operatorId: payload.operator_id || '',
+            },
           );
           return;
         }
@@ -1481,6 +1577,8 @@
           first_name: profile.firstName || '',
           last_name: profile.lastName || '',
           phone: profile.phone || '',
+          fields: profile.fields || [],
+          offline_demo: OFFLINE_DEMO,
           locale: LOCALE,
           page_url: global.location.href,
           client_external_id: SIM_CLIENT,
@@ -1675,31 +1773,22 @@
         missing[0].focus();
         return null;
       }
-      var extras = [];
-      Object.keys(values).forEach(function (key) {
-        if (key === 'name' || key === 'last_name' || key === 'phone') return;
-        if (!values[key]) return;
-        var label = inputLabel(formInputs[key]) || key;
-        extras.push(label + ': ' + values[key]);
+      var labeledFields = [];
+      var coreKeys = { name: 1, first_name: 1, last_name: 1, phone: 1, question: 1 };
+      resolveFormFields().forEach(function (field) {
+        var value = (values[field.key] || '').trim();
+        if (!value || coreKeys[field.key]) return;
+        labeledFields.push({ label: field.label || field.key, value: value });
       });
-      var questionText = question;
-      if (extras.length) {
-        questionText = extras.join('\n') + '\n\n' + question;
-      }
       return {
         firstName: values.name || '',
         lastName: values.last_name || '',
         phone: values.phone || '',
-        question: questionText,
+        question: question,
         displayQuestion: question,
         values: values,
+        fields: labeledFields,
       };
-    }
-
-    function inputLabel(input) {
-      if (!input || !input.parentElement) return '';
-      var label = input.parentElement.querySelector('label');
-      return label ? String(label.textContent || '').replace(/\s*\*$/, '').trim() : '';
     }
 
     if (questionEl) {
@@ -1735,7 +1824,7 @@
         { receiptStatus: 'delivered' },
       );
       setWaitingHint(true);
-      createDialog(form.question, form).then(function (body) {
+      createDialog(form.displayQuestion || form.question, form).then(function (body) {
         if (!body || !body.message || !body.message.id) return;
         firstRow.setAttribute('data-message-id', body.message.id);
         setMessageReceipt(body.message.id, body.message.receipt_status || 'delivered');
@@ -1850,6 +1939,7 @@
             state.clientInitials = initialsFromName(
               (dialog.client_first_name || '') + ' ' + (dialog.client_last_name || ''),
             );
+            state.operatorAvatar = resolveOperatorAvatarUrl(null, dialog);
             showView('chat');
             setOpen(true);
             messagesEl.innerHTML = '';
@@ -1879,22 +1969,33 @@
                 return;
               }
               if (message.speaker === 'operator' || message.speaker === 'bot') {
-                if (message.speaker === 'operator') {
-                  connectOperator(dialog.operator_name, { announce: false });
-                }
+                var historyOperatorName =
+                  message.speaker === 'operator'
+                    ? message.operator_name || dialog.operator_name || state.operatorName
+                    : state.operatorName;
                 addBubble(
                   'operator',
                   message.text,
                   message.speaker === 'bot'
                     ? 'Виртуальный помощник'
-                    : state.operatorShort,
-                  message.speaker === 'bot' ? 'Б' : state.operatorInitials,
+                    : shortNameFromFull(historyOperatorName),
+                  message.speaker === 'bot'
+                    ? 'Б'
+                    : initialsFromName(historyOperatorName),
                   formatTime(new Date(message.created_at || Date.now())),
                   Object.assign(
                     {
                       id: message.id,
                       receiptStatus: message.receipt_status,
                       quotedText: message.quoted_text,
+                      avatarUrl:
+                        message.speaker === 'bot'
+                          ? ''
+                          : resolveOperatorAvatarUrl(message, dialog),
+                      operatorLabel:
+                        message.speaker === 'bot'
+                          ? 'Виртуальный помощник'
+                          : shortNameFromFull(historyOperatorName),
                     },
                     attachmentOptionsFromMessage(message),
                   ),
@@ -1902,7 +2003,11 @@
               }
             });
             if (dialog.status === 'active' && dialog.operator_name) {
-              connectOperator(dialog.operator_name, { announce: false });
+              connectOperator(dialog.operator_name, {
+                announce: false,
+                avatar: dialog.operator_avatar || '',
+                operatorId: dialog.operator_id || '',
+              });
             } else if (dialog.status === 'waiting') {
               setWaitingHint(true);
             }
