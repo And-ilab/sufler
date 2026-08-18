@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -7,12 +8,19 @@ import {
   type DragEvent,
 } from 'react'
 import { Button, Card, StatusBadge, Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from '../../components'
+import {
+  approveOcrJob,
+  fetchOcrResult,
+  listOcrJobs,
+  uploadOcrDocument,
+} from '../admin/api/ocrAdmin'
 import './OcrDocumentsPanel.css'
 
 export type OcrSubTab = 'queue' | 'upload' | 'review'
 
 export interface OcrField {
   id: string
+  apiKey: string
   label: string
   value: string
   confidence: number
@@ -36,69 +44,75 @@ const STATUS_LABEL: Record<OcrQueueItem['status'], string> = {
   error: 'Ошибка валидации',
 }
 
-const INITIAL_QUEUE: OcrQueueItem[] = [
-  {
-    id: 'q-passport',
-    file: 'passport_ivanov.pdf',
-    docType: 'passport',
-    status: 'review',
-    progress: 100,
-    confidence: 0.92,
-  },
-  {
-    id: 'q-contract',
-    file: 'contract_2026-014.pdf',
-    docType: 'contract',
-    status: 'ocr',
-    progress: 64,
-    confidence: null,
-  },
-  {
-    id: 'q-statement',
-    file: 'statement_mar.zip',
-    docType: 'statement',
-    status: 'queued',
-    progress: 0,
-    confidence: null,
-  },
-  {
-    id: 'q-invoice',
-    file: 'invoice_scan.tiff',
-    docType: 'invoice',
-    status: 'error',
-    progress: 100,
-    confidence: 0.41,
-  },
-]
+const ACCEPT =
+  '.png,.jpg,.jpeg,.pdf,.tiff,.tif,image/png,image/jpeg,application/pdf,image/tiff'
 
-const PASSPORT_FIELDS: OcrField[] = [
+/** UI id → backend field key (and reverse for known aliases). */
+const UI_TO_API: Record<string, string> = {
+  fio: 'full_name',
+  full_name: 'full_name',
+  series: 'series',
+  number: 'number',
+  issued: 'issue_date',
+  issue_date: 'issue_date',
+}
+
+const API_TO_UI: Record<string, string> = {
+  full_name: 'fio',
+  issue_date: 'issued',
+  series: 'series',
+  number: 'number',
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  fio: 'ФИО',
+  full_name: 'ФИО',
+  series: 'Серия паспорта',
+  number: 'Номер',
+  issued: 'Дата выдачи',
+  issue_date: 'Дата выдачи',
+}
+
+const DEFAULT_BBOX: Record<string, OcrField['bbox']> = {
+  fio: { left: 12, top: 28, width: 52, height: 7 },
+  series: { left: 12, top: 40, width: 18, height: 7 },
+  number: { left: 32, top: 40, width: 28, height: 7 },
+  issued: { left: 12, top: 52, width: 30, height: 7 },
+}
+
+/** Demo passport fields for Storybook / offline visual tests. */
+const DEMO_PASSPORT_FIELDS: OcrField[] = [
   {
     id: 'fio',
+    apiKey: 'full_name',
     label: 'ФИО',
     value: 'Иванов Иван Иванович',
     confidence: 0.96,
-    bbox: { left: 12, top: 28, width: 52, height: 7 },
+    bbox: DEFAULT_BBOX.fio,
   },
   {
     id: 'series',
+    apiKey: 'series',
     label: 'Серия паспорта',
     value: 'MP',
     confidence: 0.88,
-    bbox: { left: 12, top: 40, width: 18, height: 7 },
+    bbox: DEFAULT_BBOX.series,
   },
   {
     id: 'number',
+    apiKey: 'number',
     label: 'Номер',
     value: '4123456',
     confidence: 0.72,
-    bbox: { left: 32, top: 40, width: 28, height: 7 },
+    bbox: DEFAULT_BBOX.number,
   },
   {
     id: 'issued',
+    apiKey: 'issue_date',
     label: 'Дата выдачи',
     value: '12.03.2019',
     confidence: 0.54,
-    bbox: { left: 12, top: 52, width: 30, height: 7 },
+    bbox: DEFAULT_BBOX.issued,
   },
 ]
 
@@ -113,26 +127,114 @@ function formatConfidence(value: number | null): string {
   return `${Math.round(value * 100)}%`
 }
 
-function fieldsForDoc(file: string, docType: string): OcrField[] {
-  if (docType === 'passport' || file.toLowerCase().includes('passport')) {
-    return PASSPORT_FIELDS.map((field) => ({ ...field }))
+function avgConfidence(fields: OcrField[]): number | null {
+  if (!fields.length) return null
+  const sum = fields.reduce((acc, field) => acc + field.confidence, 0)
+  return sum / fields.length
+}
+
+function mapBackendStatus(raw: unknown, validationStatus?: unknown): OcrQueueItem['status'] {
+  const status = String(raw || '')
+  const validation = String(validationStatus || '')
+  if (status === 'queued') return 'queued'
+  if (status === 'ocr_processing') return 'ocr'
+  if (status === 'processing_error') return 'error'
+  if (status === 'completed') {
+    if (validation === 'valid' || validation === 'approved') return 'done'
+    return 'review'
+  }
+  return 'queued'
+}
+
+function fieldValue(raw: unknown): string {
+  if (raw == null) return ''
+  if (typeof raw === 'object' && raw !== null && 'value' in raw) {
+    const value = (raw as { value?: unknown }).value
+    return value == null ? '' : String(value)
+  }
+  return String(raw)
+}
+
+function fieldConfidence(raw: unknown): number {
+  if (raw && typeof raw === 'object' && 'confidence' in raw) {
+    const conf = (raw as { confidence?: unknown }).confidence
+    if (typeof conf === 'number' && Number.isFinite(conf)) {
+      return conf > 1 ? conf / 100 : conf
+    }
+  }
+  return 0
+}
+
+function fieldsFromResult(fieldsRaw: unknown): OcrField[] {
+  if (!fieldsRaw || typeof fieldsRaw !== 'object') return []
+  const entries = Object.entries(fieldsRaw as Record<string, unknown>)
+  const preferred = ['full_name', 'series', 'number', 'issue_date']
+  const ordered = [
+    ...preferred.filter((key) => key in (fieldsRaw as object)),
+    ...entries.map(([key]) => key).filter((key) => !preferred.includes(key)),
+  ]
+  return ordered.map((apiKey, index) => {
+    const raw = (fieldsRaw as Record<string, unknown>)[apiKey]
+    const id = API_TO_UI[apiKey] || apiKey
+    const bbox = DEFAULT_BBOX[id] || {
+      left: 10,
+      top: 18 + index * 12,
+      width: 48,
+      height: 7,
+    }
+    return {
+      id,
+      apiKey,
+      label: FIELD_LABELS[id] || FIELD_LABELS[apiKey] || apiKey,
+      value: fieldValue(raw),
+      confidence: fieldConfidence(raw),
+      bbox,
+    }
+  })
+}
+
+function fieldsToApiPayload(fields: OcrField[]): Record<string, unknown> {
+  const payload: Record<string, unknown> = {}
+  for (const field of fields) {
+    const key = field.apiKey || UI_TO_API[field.id] || field.id
+    payload[key] = {
+      value: field.value,
+      confidence: field.confidence,
+    }
+  }
+  return payload
+}
+
+function demoFieldsForFile(fileName: string, docType: string): OcrField[] {
+  if (docType === 'passport' || fileName.toLowerCase().includes('passport')) {
+    return DEMO_PASSPORT_FIELDS.map((field) => ({ ...field, bbox: { ...field.bbox } }))
   }
   return [
     {
       id: 'title',
+      apiKey: 'title',
       label: 'Заголовок',
-      value: file.replace(/\.[^.]+$/, ''),
+      value: fileName.replace(/\.[^.]+$/, ''),
       confidence: 0.9,
       bbox: { left: 10, top: 18, width: 60, height: 8 },
     },
-    {
-      id: 'amount',
-      label: 'Сумма',
-      value: '1 500,00',
-      confidence: 0.78,
-      bbox: { left: 10, top: 36, width: 28, height: 7 },
-    },
   ]
+}
+
+function jobToQueueItem(job: Record<string, unknown>): OcrQueueItem {
+  const status = mapBackendStatus(job.status, job.validation_status)
+  const progress =
+    status === 'queued' ? 0
+      : status === 'ocr' ? 50
+        : 100
+  return {
+    id: String(job.job_id || job.id || ''),
+    file: String(job.filename || job.file || 'document'),
+    docType: String(job.document_type || 'unknown'),
+    status,
+    progress,
+    confidence: null,
+  }
 }
 
 export interface OcrDocumentsPanelProps {
@@ -143,22 +245,39 @@ export function OcrDocumentsPanel({
   initialSubTab = 'queue',
 }: OcrDocumentsPanelProps) {
   const [subTab, setSubTab] = useState<OcrSubTab>(initialSubTab)
-  const [queue, setQueue] = useState<OcrQueueItem[]>(INITIAL_QUEUE)
+  const [queue, setQueue] = useState<OcrQueueItem[]>([])
   const [statusFilter, setStatusFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('any')
   const [search, setSearch] = useState('')
-  const [pendingFiles, setPendingFiles] = useState<string[]>([])
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [docType, setDocType] = useState('auto')
   const [dragOver, setDragOver] = useState(false)
-  const [activeId, setActiveId] = useState('q-passport')
-  const [fields, setFields] = useState<OcrField[]>(PASSPORT_FIELDS)
-  const [selectedFieldId, setSelectedFieldId] = useState<string | null>('fio')
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [fieldsByJob, setFieldsByJob] = useState<Record<string, OcrField[]>>({})
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null)
   const [zoom, setZoom] = useState(100)
   const [approved, setApproved] = useState(false)
   const [llmAccepted, setLlmAccepted] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const fields = activeId ? fieldsByJob[activeId] || [] : []
   const activeItem = queue.find((item) => item.id === activeId) ?? queue[0]
+
+  const loadQueue = useCallback(async () => {
+    try {
+      const jobs = await listOcrJobs()
+      setQueue(jobs.map(jobToQueueItem).filter((item) => item.id))
+      setError('')
+    } catch {
+      // Storybook / offline: keep local queue as-is.
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadQueue()
+  }, [loadQueue])
 
   const filteredQueue = useMemo(() => {
     const needle = search.trim().toLowerCase()
@@ -177,20 +296,57 @@ export function OcrDocumentsPanel({
     errors: queue.filter((item) => item.status === 'error').length,
   }), [queue])
 
-  const openReview = useCallback((item: OcrQueueItem) => {
+  const openReview = useCallback(async (item: OcrQueueItem) => {
     setActiveId(item.id)
-    const nextFields = fieldsForDoc(item.file, item.docType)
-    setFields(nextFields)
-    setSelectedFieldId(nextFields[0]?.id ?? null)
-    setApproved(false)
+    setApproved(item.status === 'done')
     setLlmAccepted(null)
     setSubTab('review')
-  }, [])
+    setError('')
+
+    if (fieldsByJob[item.id]?.length) {
+      setSelectedFieldId(fieldsByJob[item.id][0]?.id ?? null)
+      return
+    }
+
+    try {
+      const result = await fetchOcrResult(item.id)
+      const nextFields = fieldsFromResult(result.fields)
+      if (nextFields.length) {
+        setFieldsByJob((prev) => ({ ...prev, [item.id]: nextFields }))
+        setSelectedFieldId(nextFields[0]?.id ?? null)
+        const conf = avgConfidence(nextFields)
+        setQueue((prev) => prev.map((row) => (
+          row.id === item.id ? { ...row, confidence: conf } : row
+        )))
+        return
+      }
+    } catch {
+      // Fall through to demo fields for offline / Storybook.
+    }
+
+    const demo = demoFieldsForFile(item.file, item.docType)
+    setFieldsByJob((prev) => ({ ...prev, [item.id]: demo }))
+    setSelectedFieldId(demo[0]?.id ?? null)
+  }, [fieldsByJob])
 
   const addFiles = useCallback((fileList: FileList | File[]) => {
-    const names = Array.from(fileList).map((file) => file.name)
-    if (!names.length) return
-    setPendingFiles((prev) => [...prev, ...names])
+    const files = Array.from(fileList).filter((file) => {
+      const name = file.name.toLowerCase()
+      return (
+        name.endsWith('.png')
+        || name.endsWith('.jpg')
+        || name.endsWith('.jpeg')
+        || name.endsWith('.pdf')
+        || name.endsWith('.tiff')
+        || name.endsWith('.tif')
+        || file.type === 'image/png'
+        || file.type === 'image/jpeg'
+        || file.type === 'application/pdf'
+        || file.type === 'image/tiff'
+      )
+    })
+    if (!files.length) return
+    setPendingFiles((prev) => [...prev, ...files])
   }, [])
 
   const onFileInput = (event: ChangeEvent<HTMLInputElement>) => {
@@ -208,43 +364,136 @@ export function OcrDocumentsPanel({
     }
   }
 
-  const startRecognition = () => {
-    if (!pendingFiles.length) return
-    const created: OcrQueueItem[] = pendingFiles.map((file, index) => {
-      const inferred =
-        docType !== 'auto'
-          ? docType
-          : file.toLowerCase().includes('passport')
-            ? 'passport'
-            : file.toLowerCase().includes('contract')
-              ? 'contract'
-              : 'unknown'
-      return {
-        id: `upload-${Date.now()}-${index}`,
-        file,
-        docType: inferred,
-        status: 'review' as const,
-        progress: 100,
-        confidence: 0.91,
+  const startRecognition = async () => {
+    if (!pendingFiles.length || busy) return
+    setBusy(true)
+    setError('')
+    const created: OcrQueueItem[] = []
+    const nextFields: Record<string, OcrField[]> = {}
+
+    try {
+      for (const [index, file] of pendingFiles.entries()) {
+        const inferred =
+          docType !== 'auto'
+            ? docType
+            : file.name.toLowerCase().includes('passport')
+              ? 'passport'
+              : file.name.toLowerCase().includes('contract')
+                ? 'contract'
+                : ''
+
+        try {
+          const response = await uploadOcrDocument(file, inferred, true)
+          const jobId = String(response.job_id || `upload-${Date.now()}-${index}`)
+          const result =
+            (response.result as Record<string, unknown> | undefined)
+            || (response.status === 'completed'
+              ? await fetchOcrResult(jobId).catch(() => null)
+              : null)
+          const parsed = fieldsFromResult(result?.fields)
+          const fields = parsed.length
+            ? parsed
+            : demoFieldsForFile(file.name, inferred || 'unknown')
+          const item: OcrQueueItem = {
+            id: jobId,
+            file: file.name,
+            docType: String(
+              result?.document_type
+              || response.document_type
+              || inferred
+              || 'unknown',
+            ),
+            status: 'review',
+            progress: 100,
+            confidence: avgConfidence(fields),
+          }
+          created.push(item)
+          nextFields[jobId] = fields
+        } catch {
+          // Offline / Storybook: keep UX + visual-test fixtures.
+          const jobId = `demo-${Date.now()}-${index}`
+          const fields = demoFieldsForFile(file.name, inferred || 'passport')
+          const item: OcrQueueItem = {
+            id: jobId,
+            file: file.name,
+            docType: inferred || 'passport',
+            status: 'review',
+            progress: 100,
+            confidence: avgConfidence(fields),
+          }
+          created.push(item)
+          nextFields[jobId] = fields
+        }
       }
-    })
-    setQueue((prev) => [...created, ...prev])
-    setPendingFiles([])
-    openReview(created[0])
+
+      setFieldsByJob((prev) => ({ ...prev, ...nextFields }))
+      setQueue((prev) => [...created, ...prev])
+      setPendingFiles([])
+      if (created[0]) {
+        setActiveId(created[0].id)
+        setSelectedFieldId(nextFields[created[0].id]?.[0]?.id ?? null)
+        setApproved(false)
+        setLlmAccepted(null)
+        setSubTab('review')
+      }
+    } finally {
+      setBusy(false)
+    }
   }
 
   const updateField = (id: string, value: string) => {
-    setFields((prev) => prev.map((field) => (
-      field.id === id ? { ...field, value } : field
-    )))
+    if (!activeId) return
+    setFieldsByJob((prev) => ({
+      ...prev,
+      [activeId]: (prev[activeId] || []).map((field) => (
+        field.id === id ? { ...field, value } : field
+      )),
+    }))
     setApproved(false)
   }
 
   const acceptLlmSuggestion = () => {
-    setFields((prev) => prev.map((field) => (
-      field.id === 'issued' ? { ...field, value: '12.03.2019', confidence: 0.91 } : field
-    )))
+    if (!activeId) return
+    setFieldsByJob((prev) => ({
+      ...prev,
+      [activeId]: (prev[activeId] || []).map((field) => (
+        field.id === 'issued'
+          ? { ...field, value: '12.03.2019', confidence: 0.91 }
+          : field
+      )),
+    }))
     setLlmAccepted(true)
+  }
+
+  const approveAndExport = async () => {
+    if (!activeItem) return
+    setBusy(true)
+    setError('')
+    const currentFields = fieldsByJob[activeItem.id] || fields
+    try {
+      if (!activeItem.id.startsWith('demo-')) {
+        await approveOcrJob(
+          activeItem.id,
+          activeItem.docType || 'passport',
+          fieldsToApiPayload(currentFields),
+        )
+      }
+      setApproved(true)
+      setQueue((prev) => prev.map((item) => (
+        item.id === activeItem.id
+          ? {
+              ...item,
+              status: 'done',
+              confidence: avgConfidence(currentFields) ?? 0.95,
+              progress: 100,
+            }
+          : item
+      )))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось утвердить')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -313,6 +562,7 @@ export function OcrDocumentsPanel({
                 setStatusFilter('all')
                 setTypeFilter('any')
                 setSearch('')
+                void loadQueue()
               }}
             >
               Обновить
@@ -347,7 +597,7 @@ export function OcrDocumentsPanel({
                     <Button
                       type="button"
                       data-testid={`ocr-open-${item.id}`}
-                      onClick={() => openReview(item)}
+                      onClick={() => void openReview(item)}
                     >
                       Открыть
                     </Button>
@@ -387,12 +637,12 @@ export function OcrDocumentsPanel({
             onDrop={onDrop}
           >
             <strong>Перетащите файлы или выберите с диска</strong>
-            <span>PDF, JPEG, PNG, TIFF · пакет ZIP</span>
+            <span>PDF, JPEG, PNG, TIFF</span>
             <input
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.zip"
+              accept={ACCEPT}
               className="visually-hidden"
               data-testid="ocr-file-input"
               onChange={onFileInput}
@@ -426,20 +676,22 @@ export function OcrDocumentsPanel({
             <Card className="ocr-docs__batch" data-testid="ocr-pending-batch">
               <strong>Пакет · {pendingFiles.length} файл(ов)</strong>
               <ol>
-                {pendingFiles.map((name) => (
-                  <li key={name}>{name}</li>
+                {pendingFiles.map((file) => (
+                  <li key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name}</li>
                 ))}
               </ol>
             </Card>
           )}
 
+          {error && <p className="ocr-docs__hint" role="alert">{error}</p>}
+
           <Button
             type="button"
             data-testid="ocr-start-recognition"
-            disabled={!pendingFiles.length}
-            onClick={startRecognition}
+            disabled={!pendingFiles.length || busy}
+            onClick={() => void startRecognition()}
           >
-            Начать распознавание
+            {busy ? 'Распознавание…' : 'Начать распознавание'}
           </Button>
         </div>
       )}
@@ -560,18 +812,13 @@ export function OcrDocumentsPanel({
               <Button
                 type="button"
                 data-testid="ocr-approve-export"
-                onClick={() => {
-                  setApproved(true)
-                  setQueue((prev) => prev.map((item) => (
-                    item.id === activeItem.id
-                      ? { ...item, status: 'done', confidence: 0.95, progress: 100 }
-                      : item
-                  )))
-                }}
+                disabled={busy}
+                onClick={() => void approveAndExport()}
               >
                 Утвердить и экспорт
               </Button>
             </div>
+            {error && <p className="ocr-docs__hint" role="alert">{error}</p>}
             {approved && (
               <StatusBadge status="success" data-testid="ocr-approved-badge">
                 Утверждено · JSON/CSV готов

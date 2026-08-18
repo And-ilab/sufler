@@ -2,6 +2,7 @@ from django.urls import path
 
 from assistant.views import (
     assistant_attachment_extract,
+    assistant_attachment_ocr,
     assistant_chat,
     assistant_knowledge_bases,
     assistant_models,
@@ -10,6 +11,7 @@ from assistant.views import (
     assistant_reports_analytics,
     assistant_reports_catalog,
     assistant_reports_export,
+    assistant_source_download,
 )
 
 urlpatterns = [
@@ -18,6 +20,16 @@ urlpatterns = [
         "attachments/extract",
         assistant_attachment_extract,
         name="assistant_attachment_extract",
+    ),
+    path(
+        "attachments/ocr",
+        assistant_attachment_ocr,
+        name="assistant_attachment_ocr",
+    ),
+    path(
+        "sources/download",
+        assistant_source_download,
+        name="assistant_source_download",
     ),
     path("models/", assistant_models, name="assistant_models"),
     path("kbs/", assistant_knowledge_bases, name="assistant_knowledge_bases"),

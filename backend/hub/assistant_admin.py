@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import quote
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
@@ -366,6 +368,71 @@ def _unique_assistant_slug(raw: str) -> str:
     return candidate
 
 
+def assistant_source_download_url(
+    *,
+    kb_slug: str,
+    article_id: int | str,
+) -> str:
+    """Permalink opened from chat citations → original file download."""
+    return (
+        "/api/v1/assistant/sources/download"
+        f"?kb_slug={quote(str(kb_slug), safe='')}"
+        f"&article_id={quote(str(article_id), safe='')}"
+    )
+
+
+def _kb_storage_root() -> Path:
+    root = Path(getattr(settings, "ASSISTANT_KB_STORAGE_ROOT", ""))
+    if not str(root):
+        root = Path(settings.BASE_DIR) / "var" / "assistant-kb"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def store_assistant_original(
+    *,
+    kb_id: int,
+    document_id: int,
+    filename: str,
+    data: bytes,
+) -> str:
+    """Persist original bytes; return relative path under storage root."""
+    safe_name = Path(filename).name.strip() or "document.bin"
+    rel = f"{kb_id}/{document_id}/{safe_name}"
+    path = _kb_storage_root() / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return rel.replace("\\", "/")
+
+
+def resolve_assistant_original_path(
+    document: AssistantKnowledgeBaseDocument,
+) -> Path | None:
+    rel = (document.original_relpath or "").strip()
+    if not rel:
+        return None
+    path = (_kb_storage_root() / rel).resolve()
+    root = _kb_storage_root().resolve()
+    if root not in path.parents and path != root:
+        return None
+    if not path.is_file():
+        return None
+    return path
+
+
+def delete_assistant_original(document: AssistantKnowledgeBaseDocument) -> None:
+    path = resolve_assistant_original_path(document)
+    if path is None:
+        return
+    try:
+        path.unlink(missing_ok=True)
+        parent = path.parent
+        if parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+    except OSError:
+        pass
+
+
 def serialize_document(document: AssistantKnowledgeBaseDocument) -> dict[str, Any]:
     return {
         "id": document.pk,
@@ -375,6 +442,11 @@ def serialize_document(document: AssistantKnowledgeBaseDocument) -> dict[str, An
         "status": document.status,
         "status_message": document.status_message,
         "chunk_count": document.chunk_count,
+        "has_original": bool(document.original_relpath),
+        "download_url": assistant_source_download_url(
+            kb_slug=document.knowledge_base.slug,
+            article_id=document.article_id,
+        ),
         "uploaded_at": document.uploaded_at.isoformat(),
         "indexed_at": (
             document.indexed_at.isoformat() if document.indexed_at else None
@@ -602,6 +674,14 @@ def upload_assistant_document(
         )
         document.article_id = ARTICLE_ID_BASE + document.pk
         document.save(update_fields=("article_id",))
+        relpath = store_assistant_original(
+            kb_id=kb.pk,
+            document_id=document.pk,
+            filename=cleaned_name,
+            data=data,
+        )
+        document.original_relpath = relpath
+        document.save(update_fields=("original_relpath",))
         kb.document_count = kb.documents.count()
         kb.status = AssistantKnowledgeBase.STATUS_IDLE
         kb.status_message = "Документ загружен, требуется переиндексация"
@@ -646,6 +726,7 @@ def delete_assistant_document(kb_id: int, document_id: int) -> dict[str, Any]:
             kb_slug=kb.slug,
             article_id=document.article_id,
         ).delete()
+        delete_assistant_original(document)
         document.delete()
         kb.document_count = kb.documents.count()
         kb.chunk_count = AssistantProductionChunk.objects.filter(
@@ -718,10 +799,9 @@ def reindex_assistant_kb(kb_id: int) -> dict[str, Any]:
                             chunk_index=index,
                             title=document.filename,
                             content=chunk,
-                            permalink=(
-                                f"/ai-hub/admin/capabilities"
-                                f"?kb={kb.slug}&doc={document.pk}"
-                                f"&file={document.filename}"
+                            permalink=assistant_source_download_url(
+                                kb_slug=kb.slug,
+                                article_id=document.article_id,
                             ),
                             locale="ru",
                             visibility_scope=["assistant", kb.scope],

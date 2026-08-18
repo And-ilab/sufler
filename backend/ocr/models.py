@@ -1,4 +1,4 @@
-"""OCR job tracking for IV.5 upload → Celery → MinIO pipeline."""
+"""OCR job tracking and admin-managed document templates (IV.5 / FR-OCR-20)."""
 
 from __future__ import annotations
 
@@ -31,6 +31,8 @@ class OcrJob(models.Model):
     original_object_key = models.CharField(max_length=512)
     result_object_key = models.CharField(max_length=512, blank=True)
     ocr_model = models.CharField(max_length=255, blank=True)
+    document_type = models.CharField(max_length=64, blank=True, db_index=True)
+    validation_status = models.CharField(max_length=32, blank=True)
     error_message = models.TextField(blank=True)
     created_by = models.CharField(max_length=150, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -42,3 +44,68 @@ class OcrJob(models.Model):
 
     def __str__(self) -> str:
         return f"{self.job_id} ({self.status})"
+
+
+class OcrDocumentTemplate(models.Model):
+    """Admin-published field schema for a document type (Template Registry)."""
+
+    STATUS_DRAFT = "draft"
+    STATUS_PUBLISHED = "published"
+    STATUS_ARCHIVED = "archived"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_PUBLISHED, "Published"),
+        (STATUS_ARCHIVED, "Archived"),
+    )
+
+    doc_type = models.SlugField(max_length=64, unique=True)
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    template_version = models.PositiveIntegerField(default=1)
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+        db_index=True,
+    )
+    required_fields = models.JSONField(default=list)
+    field_schema = models.JSONField(default=dict)
+    confidence_min = models.FloatField(default=0.6)
+    sample_prompt = models.TextField(
+        blank=True,
+        help_text="Example OCR text used while training / validating the template",
+    )
+    owner = models.CharField(max_length=150, blank=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("doc_type",)
+
+    def __str__(self) -> str:
+        return f"{self.doc_type} v{self.template_version} ({self.status})"
+
+
+class OcrTemplateSample(models.Model):
+    """Labeled training sample attached to a template by OCR admin."""
+
+    template = models.ForeignKey(
+        OcrDocumentTemplate,
+        related_name="samples",
+        on_delete=models.CASCADE,
+    )
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=128, blank=True)
+    object_key = models.CharField(max_length=512, blank=True)
+    ocr_text = models.TextField(blank=True)
+    expected_fields = models.JSONField(default=dict)
+    notes = models.TextField(blank=True)
+    created_by = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"sample:{self.filename}@{self.template.doc_type}"

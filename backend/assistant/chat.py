@@ -225,16 +225,30 @@ def _last_user_text(messages: Sequence[Mapping[str, str]]) -> str:
 
 
 def _citation(document: Mapping[str, Any]) -> dict[str, Any]:
+    kb_slug = str(document.get("kb_slug") or "")
+    article_id = document.get("article_id")
+    permalink = str(document.get("permalink") or "")
+    # Always prefer download API so chat sources open the file, not admin UI.
+    if kb_slug and article_id is not None:
+        try:
+            from hub.assistant_admin import assistant_source_download_url
+
+            permalink = assistant_source_download_url(
+                kb_slug=kb_slug,
+                article_id=article_id,
+            )
+        except Exception:
+            pass
     return {
         "id": (
-            f"{document.get('kb_slug')}:{document.get('article_id')}:"
+            f"{kb_slug}:{article_id}:"
             f"{document.get('chunk_index')}"
         ),
-        "kb_slug": document.get("kb_slug"),
-        "article_id": document["article_id"],
+        "kb_slug": kb_slug or document.get("kb_slug"),
+        "article_id": article_id,
         "chunk_index": document["chunk_index"],
         "title": document["title"],
-        "permalink": document["permalink"],
+        "permalink": permalink,
         "snippet": document.get("snippet") or "",
         "relevance_percent": document.get("relevance_percent"),
     }

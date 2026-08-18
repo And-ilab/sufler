@@ -131,38 +131,13 @@
   gap: var(--space-1);
 }
 
-.hub-panel__controls button {
+.hub-panel__controls button,
+.hub-panel__controls a {
   display: inline-grid;
   width: 32px;
   height: 32px;
   place-items: center;
   color: var(--color-white);
-  border: 0;
-  border-radius: var(--radius);
-  background: transparent;
-  cursor: pointer;
-}
-
-.hub-panel__controls button:hover {
-  background: color-mix(in srgb, var(--color-white) 16%, transparent);
-}
-
-.hub-panel__menu {
-  position: absolute;
-  top: 52px;
-  right: var(--space-3);
-  z-index: 5;
-  display: grid;
-  min-width: 220px;
-  padding: var(--space-2);
-  box-shadow: var(--shadow-md);
-}
-
-.hub-panel__menu a,
-.hub-panel__menu button {
-  padding: var(--space-3);
-  color: var(--color-text);
-  text-align: left;
   text-decoration: none;
   border: 0;
   border-radius: var(--radius);
@@ -170,10 +145,9 @@
   cursor: pointer;
 }
 
-.hub-panel__menu a:hover,
-.hub-panel__menu button:hover {
-  color: var(--color-primary);
-  background: var(--color-info-bg);
+.hub-panel__controls button:hover,
+.hub-panel__controls a:hover {
+  background: color-mix(in srgb, var(--color-white) 16%, transparent);
 }
 
 .hub-panel__tabs {

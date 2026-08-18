@@ -488,6 +488,14 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
+# Original assistant KB uploads (for source download from chat citations).
+ASSISTANT_KB_STORAGE_ROOT = Path(
+    os.getenv(
+        "ASSISTANT_KB_STORAGE_ROOT",
+        str(BASE_DIR / "var" / "assistant-kb"),
+    )
+)
+
 # Django REST Framework + drf-spectacular (OpenAPI `/api/schema/`).
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",

@@ -99,7 +99,7 @@ test('admin sidebar exposes all groups and routable screens', async ({ page }) =
     'audit', 'llm_config_assistant', 'model_params', 'prompts_assistant',
     'capabilities', 'kb_admin', 'qu_admin', 'data_sources', 'assistant_tools',
     'monitoring', 'llm_config_cc', 'model_params/cc', 'scenario_editor',
-    'scenario_test', 'scenario_bindings', 'sufler_policies', 'doc_types',
+    'scenario_test', 'scenario_bindings', 'sufler_policies', 'ocr', 'doc_types',
     'doc_export', 'external',
   ]
   for (const route of routes) {
@@ -373,7 +373,9 @@ test('assistant window III.3 streams tokens, shows tools and feedback', async ({
   const seedFeedback = page.locator('[data-testid^="feedback-useful-"]').first()
   await seedFeedback.click()
   await expect(page.getByText('Оценка сохранена')).toBeVisible()
-  await expect(seedFeedback).toBeDisabled()
+  await expect(page.locator('[data-testid^="feedback-useful-"]')).toHaveCount(0)
+  await expect(page.locator('[data-testid^="feedback-incomplete-"]')).toHaveCount(0)
+  await expect(page.locator('[data-testid^="feedback-incorrect-"]')).toHaveCount(0)
 
   await page.getByTestId('asst-draft').fill('Нужна справка о вкладе')
   await page.getByTestId('asst-send').click()
