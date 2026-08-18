@@ -49,9 +49,15 @@ class ModelGatewayTest(unittest.TestCase):
                     response["model"],
                     self.gateway.get_profile(profile).model,
                 )
+                if profile == "docs_ocr":
+                    expected = self.gateway._stub_docs_ocr_content(
+                        self.messages
+                    )
+                else:
+                    expected = STUB_RESPONSES[profile]
                 self.assertEqual(
                     response["choices"][0]["message"]["content"],
-                    STUB_RESPONSES[profile],
+                    expected,
                 )
                 self.assertEqual(
                     response["choices"][0]["finish_reason"],

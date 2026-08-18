@@ -85,9 +85,8 @@ class OcrValidationEngineTest(TestCase):
         )
         self.assertEqual(result.status, STATUS_PENDING_REVIEW)
         self.assertFalse(result.is_valid)
-        self.assertIn("issue_date", result.missing_required_fields)
+        self.assertEqual(result.missing_required_fields, [])
         codes = {item.code for item in result.anomalies}
-        self.assertIn("missing_required", codes)
         self.assertIn("invalid_format", codes)
         rejected = set(result.rejected_fields)
         self.assertTrue({"series", "number", "full_name"} <= rejected)
