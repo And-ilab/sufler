@@ -24,6 +24,7 @@ from online_chat.models import (
     BotConfiguration,
     ClientBlock,
     Dialog,
+    DialogCloseTopicNode,
     DialogFeedback,
     DialogMessage,
     DialogTranscriptEmail,
@@ -622,6 +623,7 @@ def serialize_dialog(
         "outcome": dialog.outcome,
         "preview": dialog.preview,
         "close_topic": dialog.close_topic,
+        "close_topic_id": str(dialog.close_topic_node_id) if dialog.close_topic_node_id else None,
         "created_at": dialog.created_at.isoformat(),
         "updated_at": dialog.updated_at.isoformat(),
         "accepted_at": dialog.accepted_at.isoformat() if dialog.accepted_at else None,
@@ -807,12 +809,11 @@ def create_dialog_with_message(
     if initiated_by == Dialog.InitiatedBy.OPERATOR and operator_name.strip():
         status = Dialog.Status.ACTIVE
     # Client arriving outside working hours is parked until the line opens.
-    # Offline-widget demo clients (force_offline) always park with offline_demo
-    # and are released only when Sheipa starts the working day.
-    # Sheipa leftover stubs (skip_auto_assign) stay as regular waiting holds.
+    # ``force_offline`` lets internal callers (tests, tooling) simulate that
+    # without depending on the real clock/schedule.
     line_open = line_is_open()
     is_offline_intake = initiated_by == Dialog.InitiatedBy.CLIENT and (
-        force_offline or (not skip_auto_assign and not line_open)
+        force_offline or not line_open
     )
     normalized_phone = format_phone_e164(client_phone) if client_phone else ""
 
@@ -824,17 +825,9 @@ def create_dialog_with_message(
     queue_full = department_queue_is_full(department)
     if queue_full:
         routing_reason = f"{routing_reason};queue_full"
-    if force_offline:
-        routing_reason = (
-            f"{routing_reason};offline_demo" if routing_reason else "offline_demo"
-        )
-    elif is_offline_intake:
+    if is_offline_intake:
         routing_reason = (
             f"{routing_reason};offline_hours" if routing_reason else "offline_hours"
-        )
-    if skip_auto_assign and not is_offline_intake:
-        routing_reason = (
-            f"{routing_reason};sheipa_demo" if routing_reason else "sheipa_demo"
         )
     bot = _active_bot_for_department(department.id if department else None)
     now = timezone.now()
@@ -1071,12 +1064,6 @@ def accept_dialog(dialog: Dialog, operator_name: str) -> Dialog:
         display_name=operator_name,
         is_active=True,
     ).first()
-    reason = dialog.routing_reason or ""
-    if "offline_demo" in reason:
-        if not operator or operator.external_id != "dev-operator-sheipa":
-            raise ValueError("offline demo dialog is reserved for Sheipa")
-    if "sheipa_demo" in reason:
-        raise ValueError("dialog is held until working day starts")
     dialog = accept_waiting_dialog(
         dialog.pk,
         operator=operator,
@@ -1145,9 +1132,14 @@ def transfer_dialog(
     return dialog
 
 
-def close_dialog(dialog: Dialog, *, topic: str) -> Dialog:
+def close_dialog(
+    dialog: Dialog,
+    *,
+    topic: str,
+    topic_node: DialogCloseTopicNode | None = None,
+) -> Dialog:
     previous_operator = dialog.operator
-    dialog.mark_closed(topic)
+    dialog.mark_closed(topic, topic_node=topic_node)
     record_event(dialog, "closed", actor_name=dialog.operator_name, payload={"topic": topic})
     system = DialogMessage.objects.create(
         dialog=dialog,

@@ -557,7 +557,7 @@ class WorkScheduleTests(TestCase):
         )
         self.assertEqual(dialog.status, Dialog.Status.WAITING)
         self.assertEqual(dialog.outcome, Dialog.Outcome.OFFLINE)
-        self.assertIn("offline_demo", dialog.routing_reason)
+        self.assertIn("offline_hours", dialog.routing_reason)
         self.assertIsNone(auto_assign_dialog(dialog))
 
     def test_calendar_closed_on_weekend(self) -> None:
@@ -607,3 +607,125 @@ class WorkScheduleTests(TestCase):
         self.assertTrue(schedule.is_open(sunday_noon))
         sunday_evening = dj_tz.make_aware(datetime(2026, 8, 16, 15, 0))
         self.assertFalse(schedule.is_open(sunday_evening))
+
+
+class ShiftTransitionTests(TestCase):
+    """End-of-shift close/open: dialogs return to the queue, operators go offline."""
+
+    def setUp(self) -> None:
+        self.department = Department.objects.create(code="support", name="Support")
+        self.placement = WidgetPlacement.objects.create(
+            widget_id="site-main", name="Main", department=self.department
+        )
+        self.operator = OperatorProfile.objects.create(
+            external_id="op-1",
+            display_name="Иванов И.И.",
+            presence=OperatorProfile.Presence.ONLINE,
+            max_active_dialogs=3,
+        )
+        self.operator.departments.set([self.department])
+        self.supervisor = OperatorProfile.objects.create(
+            external_id="sup-1",
+            display_name="Козлова Е.В.",
+            role=OperatorProfile.Role.SUPERVISOR,
+            presence=OperatorProfile.Presence.ONLINE,
+            max_active_dialogs=99,
+        )
+        self.supervisor.departments.set([self.department])
+
+    def test_close_working_day_returns_active_dialogs_and_offlines_operators(self) -> None:
+        dialog, _ = create_dialog_with_message(
+            text="Нужна консультация",
+            widget_id="site-main",
+            client_external_id="client-1",
+        )
+        # Only eligible online operator — auto-assigned immediately on create.
+        dialog.refresh_from_db()
+        self.assertEqual(dialog.status, Dialog.Status.ACTIVE)
+        self.assertEqual(dialog.operator_id, self.operator.id)
+        original_created_at = dialog.created_at
+
+        from online_chat.routing_services import close_working_day
+
+        result = close_working_day()
+        self.assertEqual(result["returned_to_queue"], 1)
+
+        dialog.refresh_from_db()
+        self.assertEqual(dialog.status, Dialog.Status.WAITING)
+        self.assertIsNone(dialog.operator)
+        self.assertEqual(dialog.operator_name, "")
+        # Priority (created_at) is preserved so it re-enters the queue where it was.
+        self.assertEqual(dialog.created_at, original_created_at)
+
+        self.operator.refresh_from_db()
+        self.assertEqual(self.operator.presence, OperatorProfile.Presence.OFFLINE)
+
+    def test_offline_operator_cannot_be_auto_assigned_after_close(self) -> None:
+        from online_chat.routing_services import close_working_day, run_assignments
+
+        close_working_day()
+        dialog, _ = create_dialog_with_message(
+            text="Ночной вопрос",
+            widget_id="site-main",
+            client_external_id="client-2",
+            force_offline=True,
+        )
+        self.assertEqual(dialog.outcome, Dialog.Outcome.OFFLINE)
+        assigned = run_assignments()
+        self.assertEqual(assigned, [])
+        dialog.refresh_from_db()
+        self.assertEqual(dialog.status, Dialog.Status.WAITING)
+
+    def test_open_working_day_flushes_offline_backlog(self) -> None:
+        from online_chat.routing_services import close_working_day, open_working_day
+
+        close_working_day()
+        dialog, _ = create_dialog_with_message(
+            text="Ночной вопрос",
+            widget_id="site-main",
+            client_external_id="client-3",
+            force_offline=True,
+        )
+        # Operator is offline (post-close) — nothing eligible until it comes online.
+        self.operator.presence = OperatorProfile.Presence.ONLINE
+        self.operator.save(update_fields=["presence"])
+        result = open_working_day()
+        dialog.refresh_from_db()
+        self.assertEqual(dialog.outcome, "")
+        self.assertEqual(dialog.status, Dialog.Status.ACTIVE)
+        self.assertEqual(result["assigned"], 1)
+
+    def test_sync_schedule_state_is_idempotent_and_transition_driven(self) -> None:
+        from online_chat.models import WorkScheduleSettings
+        from online_chat.routing_services import sync_schedule_state
+
+        schedule = WorkScheduleSettings.get_solo()
+        schedule.manual_override = WorkScheduleSettings.Override.OPEN
+        schedule.save(update_fields=["manual_override"])
+
+        # First observation ever — records state, no side effects triggered.
+        first = sync_schedule_state(schedule)
+        self.assertFalse(first["changed"])
+        schedule.refresh_from_db()
+        self.assertTrue(schedule.last_open_state)
+
+        # No actual change → still a no-op.
+        second = sync_schedule_state(schedule)
+        self.assertFalse(second["changed"])
+
+        dialog, _ = create_dialog_with_message(
+            text="Вопрос",
+            widget_id="site-main",
+            client_external_id="client-4",
+        )
+        # Only eligible online operator — auto-assigned immediately on create.
+        dialog.refresh_from_db()
+        self.assertEqual(dialog.status, Dialog.Status.ACTIVE)
+
+        schedule.manual_override = WorkScheduleSettings.Override.CLOSED
+        schedule.save(update_fields=["manual_override"])
+        closed = sync_schedule_state(schedule)
+        self.assertTrue(closed["changed"])
+        self.assertEqual(closed["returned_to_queue"], 1)
+        dialog.refresh_from_db()
+        self.assertEqual(dialog.status, Dialog.Status.WAITING)

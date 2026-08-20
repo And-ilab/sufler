@@ -23,11 +23,6 @@
   var QUERY_PARAMS = new URLSearchParams(global.location.search || '');
   var SIM_CLIENT = QUERY_PARAMS.get('sim_client') || '';
   var RESUME_DIALOG_ID = QUERY_PARAMS.get('dialog_id') || '';
-  // Demo: an offline widget URL (?offline=1) always behaves as non-working hours.
-  var OFFLINE_DEMO =
-    QUERY_PARAMS.get('offline') === '1' ||
-    (SCRIPT && SCRIPT.getAttribute('data-offline') === '1') ||
-    false;
   var LOGO_SRC =
     (SCRIPT && SCRIPT.getAttribute('data-logo-src')) ||
     '/assets/belarusbank-logo.png';
@@ -717,17 +712,35 @@
       return inline || '';
     }
 
+    /** Generic person silhouette — shown whenever the bank employee has no photo set. */
+    var OPERATOR_SILHOUETTE_SVG =
+      '<svg viewBox="0 0 40 40" width="100%" height="100%" aria-hidden="true" focusable="false">' +
+      '<circle cx="20" cy="20" r="20" fill="' + WP.avatarOperator + '"/>' +
+      '<circle cx="20" cy="16" r="7" fill="#ffffffcc"/>' +
+      '<path d="M5 39c1.9-11 8.4-16.5 15-16.5S33.1 28 35 39" fill="#ffffffcc"/>' +
+      '</svg>';
+
+    /**
+     * Avatar for a bank employee (operator/supervisor) bubble or the op-strip header.
+     * Always renders something: the employee's photo when set, otherwise a generic
+     * silhouette icon — never an empty/missing avatar slot.
+     */
     function createOperatorAvatarNode(url) {
-      if (!url) return null;
       var wrap = document.createElement('div');
       wrap.className = 'avatar avatar--photo';
+      if (!url) {
+        wrap.innerHTML = OPERATOR_SILHOUETTE_SVG;
+        return wrap;
+      }
       var img = document.createElement('img');
       img.src = url;
       img.alt = '';
       img.loading = 'lazy';
       img.decoding = 'async';
       img.onerror = function () {
-        if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+        // Photo URL failed (e.g. no photo set server-side, 404) — fall back to
+        // the silhouette instead of leaving the avatar slot empty.
+        wrap.innerHTML = OPERATOR_SILHOUETTE_SVG;
       };
       wrap.appendChild(img);
       return wrap;
@@ -1089,8 +1102,12 @@
         row.innerHTML = bubble + avatarHtml;
       } else {
         row.innerHTML = bubble;
-        var operatorAvatarNode = createOperatorAvatarNode(options.avatarUrl || '');
-        if (operatorAvatarNode) row.insertBefore(operatorAvatarNode, row.firstChild);
+        // Bot ("Виртуальный помощник") keeps its current no-avatar look — the
+        // silhouette fallback is only for real bank employees (operators/supervisors).
+        if (!options.isBot) {
+          var operatorAvatarNode = createOperatorAvatarNode(options.avatarUrl || '');
+          row.insertBefore(operatorAvatarNode, row.firstChild);
+        }
       }
       var downloadBtn = row.querySelector('[data-attachment-download]');
       if (downloadBtn) {
@@ -1325,6 +1342,7 @@
               receiptStatus: message.receipt_status,
               quotedText: message.quoted_text,
               avatarUrl: avatarUrl,
+              isBot: message.speaker === 'bot',
               operatorLabel:
                 message.speaker === 'bot'
                   ? 'Виртуальный помощник'
@@ -1578,7 +1596,6 @@
           last_name: profile.lastName || '',
           phone: profile.phone || '',
           fields: profile.fields || [],
-          offline_demo: OFFLINE_DEMO,
           locale: LOCALE,
           page_url: global.location.href,
           client_external_id: SIM_CLIENT,
@@ -1992,6 +2009,7 @@
                         message.speaker === 'bot'
                           ? ''
                           : resolveOperatorAvatarUrl(message, dialog),
+                      isBot: message.speaker === 'bot',
                       operatorLabel:
                         message.speaker === 'bot'
                           ? 'Виртуальный помощник'

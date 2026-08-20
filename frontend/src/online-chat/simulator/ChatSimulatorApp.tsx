@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { resetSimulation, seedSimulation, type SeedResult } from '../api/managementApi'
+import {
+  controlWorkDay,
+  getWorkScheduleStatus,
+  resetSimulation,
+  seedSimulation,
+  type SeedResult,
+} from '../api/managementApi'
 import '../shell/Management.css'
 
 const SIM_SEED_STORAGE_KEY = 'online-chat-simulator-seed-v1'
@@ -77,6 +83,46 @@ export function ChatSimulatorApp() {
   const [notice, setNotice] = useState(
     stored?.result ? 'Восстановлен последний сценарий симулятора.' : '',
   )
+  // Test-only online/offline toggle. In production there is no such button —
+  // the line switches automatically by the admin-configured work schedule.
+  const [lineOpen, setLineOpen] = useState<boolean | null>(null)
+  const [scheduleLoading, setScheduleLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const syncSchedule = () => {
+      void getWorkScheduleStatus()
+        .then((status) => {
+          if (!cancelled) setLineOpen(status.is_open)
+        })
+        .catch(() => undefined)
+    }
+    syncSchedule()
+    const timer = window.setInterval(syncSchedule, 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  const toggleLine = async () => {
+    setScheduleLoading(true)
+    setError('')
+    try {
+      const nextAction = lineOpen ? 'stop' : 'start'
+      const response = await controlWorkDay(nextAction)
+      setLineOpen(response.is_open)
+      setNotice(
+        response.is_open
+          ? 'Линия переведена в онлайн. Диалоги из общей очереди распределяются операторам.'
+          : 'Линия переведена в офлайн. Текущие диалоги вернулись в общую очередь, операторы офлайн.',
+      )
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Не удалось переключить режим линии')
+    } finally {
+      setScheduleLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (!result) {
@@ -161,7 +207,26 @@ export function ChatSimulatorApp() {
               Тестовый стенд: создайте клиентов здесь — в АРМ появятся только реальные диалоги симулятора (без заглушек).
             </p>
           </div>
+          <button
+            type="button"
+            className={lineOpen ? 'is-danger' : undefined}
+            onClick={() => void toggleLine()}
+            disabled={scheduleLoading || lineOpen === null}
+            title="Только для теста/демо — в проде режим переключается автоматически по расписанию"
+          >
+            {lineOpen === null
+              ? 'Проверка режима линии…'
+              : scheduleLoading
+                ? 'Переключение…'
+                : lineOpen
+                  ? '🟢 Линия онлайн · перевести в офлайн'
+                  : '⚪ Линия офлайн · перевести в онлайн'}
+          </button>
         </div>
+        <p className="chat-management__muted">
+          Переключатель выше — только для демо/теста в симуляторе. В проде онлайн/офлайн управляется
+          автоматически по рабочему расписанию (настраивается администратором), без кнопки.
+        </p>
         <p className="chat-management__notice">
           1) Создайте сценарий → 2) Откройте оператора (режим работы, не просмотр) и виджеты клиентов → 3) Пишите с обеих сторон.
           При автоназначении часть диалогов сразу уходит операторам (лимит нагрузки), остальные — в «Общую очередь».
@@ -270,7 +335,7 @@ export function ChatSimulatorApp() {
                   <h2>АРМ операторов</h2>
                 </div>
                 <ul className="chat-management__list">
-                  {operatorNames.filter((name) => !name.startsWith('Шейпа')).map((name) => (
+                  {operatorNames.map((name) => (
                     <li key={name}>
                       <a
                         className="chat-button is-secondary"
@@ -282,26 +347,6 @@ export function ChatSimulatorApp() {
                       </a>
                     </li>
                   ))}
-                </ul>
-                <div className="chat-management__toolbar" style={{ marginTop: 16 }}>
-                  <h2>Демо: нерабочее время</h2>
-                </div>
-                <p className="chat-management__muted">
-                  В очереди Шейпы — 2 вчерашних обычных заглушки и 2 офлайн. Офлайн-клиенты
-                  не попадают к обычным операторам. После «Начать рабочий день» запускается
-                  автораспределение; до старта можно писать через офлайн-виджет.
-                </p>
-                <ul className="chat-management__list">
-                  <li>
-                    <a
-                      className="chat-button"
-                      href={`/online-chat?mode=operate&operator=${encodeURIComponent('Шейпа Дмитриевна Волкова')}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Шейпа Д. В. · офлайн-смена
-                    </a>
-                  </li>
                 </ul>
               </div>
               <div className="chat-management__card">
@@ -323,24 +368,6 @@ export function ChatSimulatorApp() {
                       </a>
                     </li>
                   ))}
-                </ul>
-                <div className="chat-management__toolbar" style={{ marginTop: 16 }}>
-                  <h2>Виджет вне графика</h2>
-                </div>
-                <p className="chat-management__muted">
-                  Тот же виджет, но всегда в режиме нерабочего времени. Сообщения уходят в офлайн-очередь.
-                </p>
-                <ul className="chat-management__list">
-                  <li>
-                    <a
-                      className="chat-button"
-                      href="/widget/sample.html?offline=1"
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Открыть офлайн-виджет
-                    </a>
-                  </li>
                 </ul>
               </div>
             </section>

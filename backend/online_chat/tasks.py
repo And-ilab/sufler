@@ -72,6 +72,32 @@ def run_assignments_after_delay(operator_id: str = "") -> dict[str, int]:
 
 
 @shared_task
+def sync_work_schedule() -> dict[str, object]:
+    """Periodic check that drives the automatic online/offline transition.
+
+    Production has no manual button: the admin configures the work schedule
+    once (``WorkScheduleSettings``), and this task notices when the clock
+    crosses the open/close boundary and applies the matching side effects
+    (return active dialogs to the shared queue + take operators offline, or
+    flush the offline backlog) — see ``routing_services.sync_schedule_state``.
+    Idempotent: a no-op whenever the resolved state hasn't actually changed.
+    """
+    from online_chat.routing_services import sync_schedule_state
+
+    result = sync_schedule_state()
+    if result.get("changed"):
+        from online_chat.services import ARM_GROUP, broadcast
+        from online_chat.models import WorkScheduleSettings
+
+        obj = WorkScheduleSettings.get_solo()
+        broadcast(ARM_GROUP, "work_schedule.updated", {
+            "is_open": obj.is_open(),
+            "manual_override": obj.manual_override,
+        })
+    return result
+
+
+@shared_task
 def classify_stale_dialogs() -> dict[str, int]:
     timeout = max(60, int(settings.ONLINE_CHAT_LOST_TIMEOUT_SECONDS))
     cutoff = timezone.now() - timedelta(seconds=timeout)
