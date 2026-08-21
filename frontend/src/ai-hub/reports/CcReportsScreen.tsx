@@ -258,7 +258,7 @@ export function CcReportsScreen({
 
   useEffect(() => {
     void fetchBuilderTemplates()
-      .then((data) => setSavedTemplates(data.saved || []))
+      .then((data) => setSavedTemplates([...(data.templates || []), ...(data.saved || [])]))
       .catch(() => setSavedTemplates([]))
   }, [panel])
 

@@ -712,37 +712,34 @@
       return inline || '';
     }
 
-    /** Generic person silhouette — shown whenever the bank employee has no photo set. */
-    var OPERATOR_SILHOUETTE_SVG =
-      '<svg viewBox="0 0 40 40" width="100%" height="100%" aria-hidden="true" focusable="false">' +
-      '<circle cx="20" cy="20" r="20" fill="' + WP.avatarOperator + '"/>' +
-      '<circle cx="20" cy="16" r="7" fill="#ffffffcc"/>' +
-      '<path d="M5 39c1.9-11 8.4-16.5 15-16.5S33.1 28 35 39" fill="#ffffffcc"/>' +
-      '</svg>';
-
     /**
      * Avatar for a bank employee (operator/supervisor) bubble or the op-strip header.
-     * Always renders something: the employee's photo when set, otherwise a generic
-     * silhouette icon — never an empty/missing avatar slot.
+     * Always renders something: employee initials by default and photo when available.
      */
-    function createOperatorAvatarNode(url) {
+    function createOperatorAvatarNode(url, initials) {
       var wrap = document.createElement('div');
       wrap.className = 'avatar avatar--photo';
+      var fallbackInitials = String(initials || STR.operatorInitials || 'О')
+        .trim()
+        .slice(0, 2)
+        .toUpperCase();
+      wrap.textContent = fallbackInitials;
       if (!url) {
-        wrap.innerHTML = OPERATOR_SILHOUETTE_SVG;
         return wrap;
       }
       var img = document.createElement('img');
-      img.src = url;
       img.alt = '';
       img.loading = 'lazy';
       img.decoding = 'async';
-      img.onerror = function () {
-        // Photo URL failed (e.g. no photo set server-side, 404) — fall back to
-        // the silhouette instead of leaving the avatar slot empty.
-        wrap.innerHTML = OPERATOR_SILHOUETTE_SVG;
+      img.onload = function () {
+        wrap.textContent = '';
+        wrap.appendChild(img);
       };
-      wrap.appendChild(img);
+      img.onerror = function () {
+        // Keep initials fallback when photo URL fails (404 / invalid / blocked).
+        wrap.textContent = fallbackInitials;
+      };
+      img.src = url;
       return wrap;
     }
 
@@ -1105,7 +1102,10 @@
         // Bot ("Виртуальный помощник") keeps its current no-avatar look — the
         // silhouette fallback is only for real bank employees (operators/supervisors).
         if (!options.isBot) {
-          var operatorAvatarNode = createOperatorAvatarNode(options.avatarUrl || '');
+          var operatorAvatarNode = createOperatorAvatarNode(
+            options.avatarUrl || '',
+            options.operatorInitials || initialsFromName(options.operatorLabel || state.operatorName),
+          );
           row.insertBefore(operatorAvatarNode, row.firstChild);
         }
       }
@@ -1257,7 +1257,7 @@
       if (nameNode) nameNode.textContent = full;
       var existingAvatar = opStrip.querySelector('.avatar');
       if (existingAvatar) existingAvatar.remove();
-      var avatarNode = createOperatorAvatarNode(avatarUrl);
+      var avatarNode = createOperatorAvatarNode(avatarUrl, state.operatorInitials);
       if (avatarNode) {
         var meta = opStrip.querySelector('.op-meta');
         if (meta) opStrip.insertBefore(avatarNode, meta);
@@ -1347,6 +1347,8 @@
                 message.speaker === 'bot'
                   ? 'Виртуальный помощник'
                   : shortNameFromFull(remoteOperatorName),
+              operatorInitials:
+                message.speaker === 'bot' ? '' : initialsFromName(remoteOperatorName),
             },
             attachmentOptionsFromMessage(message),
           ),
@@ -1617,6 +1619,18 @@
           persistDialogId(state.dialogId);
           if (body.message && body.message.id) rememberMessageId(body.message.id);
           if (state.dialogId) connectDialogSocket(state.dialogId);
+          // The backend may create base/offline bot messages in the same request.
+          // Hydrate them from HTTP response so the client sees them immediately
+          // even if WS subscription starts a moment later.
+          var initialMessages =
+            body &&
+            body.dialog &&
+            Array.isArray(body.dialog.messages)
+              ? body.dialog.messages
+              : [];
+          initialMessages.forEach(function (message) {
+            handleRemoteMessage(message);
+          });
           return body;
         })
         .catch(function (err) {

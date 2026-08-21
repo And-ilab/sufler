@@ -99,6 +99,13 @@ class OnlineChatApiError(ValueError):
     """Invalid online-chat API payload."""
 
 
+def _request_client_ip(request: HttpRequest) -> str:
+    forwarded = (request.META.get("HTTP_X_FORWARDED_FOR") or "").strip()
+    if forwarded:
+        return forwarded.split(",")[0].strip()[:64]
+    return str(request.META.get("REMOTE_ADDR") or "").strip()[:64]
+
+
 def _chat_permissions(*permissions: str):
     """Require one permission in non-DEBUG environments."""
 
@@ -261,6 +268,9 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
             qs = qs.filter(operator_id=request.GET["operator_id"])
         if request.GET.get("operator_name"):
             qs = qs.filter(operator_name=request.GET["operator_name"])
+        client_ip = (request.GET.get("client_ip") or "").strip()
+        if client_ip:
+            qs = qs.filter(client_ip__icontains=client_ip)
         if request.GET.get("department_id"):
             qs = qs.filter(department_id=request.GET["department_id"])
         if request.GET.get("channel"):
@@ -274,6 +284,19 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
             qs = qs.filter(feedback__isnull=False).distinct()
         elif has_feedback in {"0", "false", "no"}:
             qs = qs.filter(feedback__isnull=True)
+        ratings_raw = (request.GET.get("ratings") or "").strip()
+        if ratings_raw:
+            ratings: list[int] = []
+            for chunk in re.split(r"[,\s]+", ratings_raw):
+                if not chunk:
+                    continue
+                if not chunk.isdigit():
+                    continue
+                value = int(chunk)
+                if 1 <= value <= 5 and value not in ratings:
+                    ratings.append(value)
+            if ratings:
+                qs = qs.filter(feedback__rating__in=ratings).distinct()
         date_from = (request.GET.get("date_from") or "").strip()
         date_to = (request.GET.get("date_to") or "").strip()
         if date_from:
@@ -293,6 +316,7 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
                     | Q(close_topic__icontains=token)
                     | Q(preview__icontains=token)
                     | Q(channel__icontains=token)
+                    | Q(client_ip__icontains=token)
                     | Q(id__icontains=token)
                     | Q(messages__text__icontains=token)
                 )
@@ -340,6 +364,7 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
                 channel=_str_field(payload, "channel", "widget") or "widget",
                 initiated_by=initiated_by,
                 operator_name=_str_field(payload, "operator_name"),
+                client_ip=_request_client_ip(request),
                 client_fields=payload.get("fields")
                 if isinstance(payload.get("fields"), list)
                 else None,

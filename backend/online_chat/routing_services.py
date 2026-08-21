@@ -359,10 +359,17 @@ def close_working_day() -> dict[str, int]:
 
 
 def open_working_day() -> dict[str, int]:
-    """Start-of-shift transition: flush the offline backlog into the queue."""
+    """Start-of-shift transition: bring operators online and flush backlog."""
+    now = timezone.now()
+    onlined = OperatorProfile.objects.filter(is_active=True).exclude(
+        presence=OperatorProfile.Presence.ONLINE
+    ).update(
+        presence=OperatorProfile.Presence.ONLINE,
+        last_seen_at=now,
+    )
     release_offline_queue()
     assigned = run_assignments()
-    return {"assigned": len(assigned)}
+    return {"assigned": len(assigned), "operators_onlined": int(onlined)}
 
 
 def sync_schedule_state(obj: "WorkScheduleSettings | None" = None) -> dict[str, Any]:

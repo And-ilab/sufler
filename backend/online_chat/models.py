@@ -378,6 +378,7 @@ class Dialog(models.Model):
     client_last_name = models.CharField(max_length=100, blank=True, default="")
     client_phone = models.CharField(max_length=40, blank=True, default="")
     client_external_id = models.CharField(max_length=160, blank=True, default="", db_index=True)
+    client_ip = models.CharField(max_length=64, blank=True, default="", db_index=True)
     # Data the client filled in the pre-chat / bot onboarding form, as an ordered
     # list of {"label": str, "value": str} for display in the ARM client card.
     client_fields = models.JSONField(default=list, blank=True)

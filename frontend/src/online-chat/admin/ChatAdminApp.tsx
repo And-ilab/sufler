@@ -959,13 +959,12 @@ function parseIsoDate(value: string): Date {
 
 function WorkScheduleTab({ disabled, perform }: TabProps) {
   const today = new Date()
-  const [enabled, setEnabled] = useState(false)
+  const enabled = true
   const [defaultStart, setDefaultStart] = useState('09:00')
   const [defaultEnd, setDefaultEnd] = useState('18:00')
   const [workdays, setWorkdays] = useState<number[]>([0, 1, 2, 3, 4])
   const [dayOverrides, setDayOverrides] = useState<Record<string, WorkDayOverride>>({})
   const [holidays, setHolidays] = useState<string[]>([])
-  const [isOpen, setIsOpen] = useState(true)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
   const [viewYear, setViewYear] = useState(today.getFullYear())
@@ -975,13 +974,11 @@ function WorkScheduleTab({ disabled, perform }: TabProps) {
   useEffect(() => {
     void getWorkScheduleSettings()
       .then((settings) => {
-        setEnabled(settings.enabled)
         setDefaultStart(settings.start_time || '09:00')
         setDefaultEnd(settings.end_time || '18:00')
         setWorkdays(settings.workdays?.length ? settings.workdays : [0, 1, 2, 3, 4])
         setDayOverrides(settings.day_overrides ?? {})
         setHolidays(settings.holidays ?? [])
-        setIsOpen(settings.is_open)
         setLoaded(true)
         setError('')
       })
@@ -1062,22 +1059,11 @@ function WorkScheduleTab({ disabled, perform }: TabProps) {
   return (
     <section className="chat-management__card" aria-labelledby="schedule-heading">
       <h2 id="schedule-heading">Рабочий календарь онлайн-чата</h2>
-      <p className="chat-management__muted">
-        По умолчанию 5/2 с 09:00 до 18:00. Выберите день в календаре, чтобы сделать его
-        выходным/рабочим или задать другое время (переносы).
-      </p>
       {error && <p className="chat-management__error" role="alert">{error}</p>}
       {!loaded ? (
         <p className="chat-management__muted">Загрузка…</p>
       ) : (
         <>
-          <p>
-            Сейчас линия:{' '}
-            <span className={`chat-management__pill ${isOpen ? 'is-online' : 'is-offline'}`}>
-              {isOpen ? 'рабочее время' : 'нерабочее время'}
-            </span>
-          </p>
-
           <div
             style={{
               border: '1px solid #d8dee6',
@@ -1088,15 +1074,6 @@ function WorkScheduleTab({ disabled, perform }: TabProps) {
             }}
           >
             <div className="chat-management__form-grid">
-              <label className="chat-management__check is-wide">
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  disabled={disabled}
-                  onChange={(event) => setEnabled(event.target.checked)}
-                />
-                Учитывать календарь (в проде должно быть включено)
-              </label>
               <label>
                 Время по умолчанию (начало)
                 <input
@@ -1260,14 +1237,11 @@ function WorkScheduleTab({ disabled, perform }: TabProps) {
                 manual_override: 'auto',
               })
               setDayOverrides(saved.day_overrides ?? {})
-              setIsOpen(saved.is_open)
             },
             'Рабочий календарь сохранён.',
             {
               title: 'Сохранить календарь?',
-              description: enabled
-                ? `Шаблон ${defaultStart}–${defaultEnd}, переносов: ${Object.keys(dayOverrides).length}.`
-                : 'Календарь будет выключен — линия считается всегда открытой.',
+              description: `Шаблон ${defaultStart}–${defaultEnd}, переносов: ${Object.keys(dayOverrides).length}.`,
             },
           )}
         >

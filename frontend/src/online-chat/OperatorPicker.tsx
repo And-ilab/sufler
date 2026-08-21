@@ -69,6 +69,15 @@ export function OperatorPicker({
     return `/online-chat/operators?${params.toString()}`
   }
 
+  const historyHrefFor = (name: string) => {
+    const params = new URLSearchParams({
+      mode: 'view',
+      operator: name,
+      historyOperator: name,
+    })
+    return `/online-chat/operators?${params.toString()}`
+  }
+
   return (
     <main className="chat-management">
       <div className="chat-management__inner">
@@ -107,6 +116,9 @@ export function OperatorPicker({
                 <div className="chat-management__actions">
                   <a className="chat-button is-secondary" href={hrefFor(operator.name)}>
                     Смотреть АРМ
+                  </a>
+                  <a className="chat-button is-secondary" href={historyHrefFor(operator.name)}>
+                    История обращений
                   </a>
                 </div>
               </li>

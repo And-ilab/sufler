@@ -4334,6 +4334,7 @@ export function ArmOperatorView({
     (armRole === "supervisor" || isSharedQueuePeek);
   const takeToolbarEnabled =
     showTakeToolbarButton &&
+    lineOpen &&
     !acceptingDialogId &&
     ((canTakeOverDialog) ||
       (isSharedQueuePeek && !atCapacity && !supervisorOwnsActive));
@@ -4745,21 +4746,6 @@ export function ArmOperatorView({
                 ««
               </button>
             </Row>
-            {!lineOpen && !viewOnly ? (
-              <div
-                style={{
-                  marginTop: 8,
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  background: "#FFF7ED",
-                  border: "1px solid #FDBA74",
-                }}
-              >
-                <Text style={{ fontSize: 12, color: "#9A3412", fontWeight: 650 }}>
-                  Сейчас нерабочее время. Новые обращения копятся в очереди и не распределяются.
-                </Text>
-              </div>
-            ) : null}
             </div>
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 12px 12px" }}>
             <Stack style={{ gap: 12 }}>
@@ -5402,15 +5388,13 @@ export function ArmOperatorView({
                   aria-label={takeToolbarLabel}
                   disabled={!takeToolbarEnabled || acceptingDialogId === active?.id}
                   onClick={handleTakeToolbar}
-                  style={
-                    takeToolbarEnabled
-                      ? {
-                          background: scheme.accent,
-                          borderColor: scheme.accent,
-                          color: "#fff",
-                        }
-                      : undefined
-                  }
+                  style={{
+                    background: scheme.accent,
+                    borderColor: scheme.accent,
+                    color: "#fff",
+                    opacity: takeToolbarEnabled ? 1 : 0.5,
+                    filter: takeToolbarEnabled ? undefined : "saturate(0.6)",
+                  }}
                 >
                   <TakeDialogIcon size={18} />
                 </IconButton>

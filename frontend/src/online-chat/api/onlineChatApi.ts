@@ -22,6 +22,7 @@ export type OnlineChatDialog = {
   client_last_name: string
   client_phone: string
   client_external_id?: string
+  client_ip?: string
   client_name: string
   client_fields?: { label: string; value: string }[]
   client_online?: boolean
@@ -45,6 +46,7 @@ export type OnlineChatDialog = {
   /** Simulator / seed client — sufler must stay disabled. */
   is_test_client?: boolean
   has_feedback?: boolean
+  feedback_rating?: number | null
   messages?: OnlineChatMessage[]
 }
 
@@ -207,6 +209,8 @@ export async function listDialogs(
     has_feedback?: boolean
     outcome?: string
     close_topic?: string
+    client_ip?: string
+    ratings?: string
   },
 ): Promise<OnlineChatDialog[]> {
   const params = new URLSearchParams()
@@ -223,6 +227,8 @@ export async function listDialogs(
   if (extras?.has_feedback === false) params.set('has_feedback', 'false')
   if (extras?.outcome) params.set('outcome', extras.outcome)
   if (extras?.close_topic) params.set('close_topic', extras.close_topic)
+  if (extras?.client_ip) params.set('client_ip', extras.client_ip)
+  if (extras?.ratings) params.set('ratings', extras.ratings)
   const query = params.toString() ? `?${params.toString()}` : ''
   const response = await fetch(`/api/v1/online-chat/dialogs/${query}`)
   const body = await parseJson<{ ok: boolean; items: OnlineChatDialog[] }>(response)

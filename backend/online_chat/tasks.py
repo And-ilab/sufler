@@ -7,8 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from online_chat.channel_delivery import deliver_message
-from online_chat.models import DialogMessage
-from online_chat.models import Dialog
+from online_chat.models import BaseMessage, Dialog, DialogMessage, WidgetPlacement
 from online_chat.routing_services import record_event
 
 
@@ -49,6 +48,47 @@ def deliver_channel_message(message_id: str) -> dict[str, str | bool]:
         "external_message_id": result.external_message_id,
         "detail": result.detail,
     }
+
+
+@shared_task(
+    autoretry_for=(OSError, TimeoutError),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def send_hold_base_message(dialog_id: str, base_message_id: str) -> dict[str, str | bool]:
+    """Send one delayed `hold` base message if the dialog still waits."""
+    from online_chat.services import _base_message_matches, _create_bot_message
+
+    dialog = Dialog.objects.filter(pk=dialog_id).first()
+    if dialog is None:
+        return {"sent": False, "reason": "dialog_not_found"}
+    if (
+        dialog.status != Dialog.Status.WAITING
+        or dialog.bot_active
+        or dialog.outcome == Dialog.Outcome.OFFLINE
+    ):
+        return {"sent": False, "reason": "dialog_not_waiting"}
+    message = BaseMessage.objects.filter(
+        pk=base_message_id,
+        is_active=True,
+        send_phase=BaseMessage.SendPhase.HOLD,
+    ).first()
+    if message is None:
+        return {"sent": False, "reason": "base_message_not_found"}
+    placement_config = None
+    if dialog.channel == "widget":
+        placement_config = WidgetPlacement.objects.filter(widget_id=dialog.widget_id).first()
+    if not _base_message_matches(message, dialog, placement_config):
+        return {"sent": False, "reason": "target_mismatch"}
+    already_sent = DialogMessage.objects.filter(
+        dialog=dialog,
+        speaker=DialogMessage.Speaker.BOT,
+        text=message.text,
+    ).exists()
+    if already_sent:
+        return {"sent": False, "reason": "already_sent"}
+    _create_bot_message(dialog, message.text)
+    return {"sent": True, "reason": "ok"}
 
 
 @shared_task
