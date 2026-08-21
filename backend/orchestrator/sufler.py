@@ -15,9 +15,16 @@ import uuid
 from typing import Any, Mapping, Sequence
 
 from core.model_gateway import ModelGateway
+from core.text_language import safe_ru_en_text
 from hub.model_registry_store import get_model_settings
 from hub.models import SuflerPolicy
 from hub.sufler_policy import get_sufler_policy
+from orchestrator.scenario_engine import (
+    NO_HINT_REASON,
+    ScenarioProgress,
+    advance_scenario,
+    classify_turn,
+)
 from qu.service import (
     _tokens,
     complete_sentences,
@@ -41,9 +48,10 @@ SECOND_HINT_RELATIVE_FLOOR = 0.55
 
 SYSTEM_PROMPT = (
     "Ты суфлёр оператора контакт-центра Беларусбанка. "
-    "Пиши ТОЛЬКО на грамотном литературном русском языке: "
-    "без латиницы, без транслита, без смеси языков, без опечаток "
-    "и без грамматических ошибок. "
+    "Пиши ТОЛЬКО на грамотном русском или английском языке. "
+    "По умолчанию отвечай по-русски; английский используй только когда он "
+    "нужен клиенту. Запрещены китайские иероглифы и любые другие алфавиты, "
+    "транслит, смесь языков, опечатки и грамматические ошибки. "
     "Отвечай СТРОГО на основе переданных фрагментов базы знаний. "
     "Не выдумывай факты, цифры, тарифы, сроки и условия, которых нет во фрагментах.\n"
     "Если во фрагментах есть точная цифра или срок — обязательно включи её в ОТВЕТ целиком.\n"
@@ -99,16 +107,29 @@ def _elapsed_ms(started: float) -> float:
 
 
 def _citation(document: Mapping[str, Any]) -> dict[str, Any]:
+    title = _safe_ru_en_text(str(document.get("title") or ""))
     return {
         "article_id": document["article_id"],
         "chunk_index": document["chunk_index"],
-        "title": document["title"],
+        "title": title or "Документ базы знаний",
         "permalink": document["permalink"],
     }
 
 
+def _safe_ru_en_text(text: str) -> str:
+    return safe_ru_en_text(text)
+
+
+def _document_is_ru_en(document: Mapping[str, Any]) -> bool:
+    title = str(document.get("title") or "")
+    body = str(document.get("content") or document.get("snippet") or "")
+    return bool(_safe_ru_en_text(title)) and bool(_safe_ru_en_text(body))
+
+
 def _strip_markup(text: str) -> str:
-    cleaned = (text or "").strip()
+    cleaned = _safe_ru_en_text(text)
+    if not cleaned:
+        return ""
     cleaned = cleaned.replace("**", "").replace("__", "")
     cleaned = re.sub(r"[*_`]+", "", cleaned)
     cleaned = re.sub(
@@ -181,8 +202,10 @@ def _clean_answer_text(text: str) -> str:
 
 def _snippet_as_answer(document: Mapping[str, Any], query: str = "") -> str:
     raw = str(document.get("content") or document.get("snippet") or "")
+    if not _safe_ru_en_text(raw):
+        return ""
     extracted = extractive_answer(raw, query or str(document.get("title") or ""))
-    return _clean_answer_text(extracted) or extracted
+    return _clean_answer_text(extracted)
 
 
 def _llm_misses_source(answer: str, document: Mapping[str, Any]) -> bool:
@@ -219,6 +242,7 @@ def _select_documents(
         document
         for document in documents
         if not is_suz_transfer_commission_doc(document)
+        and _document_is_ru_en(document)
     ]
     if not pool:
         return []
@@ -281,6 +305,8 @@ def _allow_ungrounded() -> bool:
 
 def _document_body(document: Mapping[str, Any]) -> str:
     raw = str(document.get("content") or document.get("snippet") or "")
+    if not _safe_ru_en_text(raw):
+        return ""
     return complete_sentences(_strip_markup(raw), max_chars=6000)
 
 
@@ -457,6 +483,22 @@ def _retrieve_documents(
     return result, ",".join(kb_slugs)
 
 
+def _scenario_payload(progress: ScenarioProgress | None) -> dict[str, Any] | None:
+    if progress is None:
+        return None
+    payload = progress.as_dict()
+    payload["title"] = _safe_ru_en_text(str(payload.get("title") or ""))
+    payload["path"] = [
+        safe
+        for item in payload.get("path") or []
+        if (safe := _safe_ru_en_text(str(item)))
+    ]
+    payload["next_clarify"] = _safe_ru_en_text(
+        str(payload.get("next_clarify") or "")
+    )
+    return payload
+
+
 def suggest(
     text: str,
     *,
@@ -468,6 +510,7 @@ def suggest(
     kb_slugs: Sequence[str] | None = None,
     channel: str = "",
     mode: str = "",
+    session_id: str = "",
 ) -> dict[str, Any]:
     """Run text → QU → RAG → ModelGateway(sufler_cc) → citations."""
     normalized = text.strip() if isinstance(text, str) else ""
@@ -513,6 +556,86 @@ def suggest(
             "min_relevance": min_relevance,
             "latency_ms": latency_ms,
             "request_id": correlation_id,
+            "scenario": None,
+        }
+
+    progress: ScenarioProgress | None = None
+    try:
+        progress = advance_scenario(
+            normalized,
+            session_key=session_id,
+            channel=channel_key,
+        )
+    except Exception:  # noqa: BLE001 — scenario must never break suggest
+        logger.exception("sufler_scenario_failed request_id=%s", correlation_id)
+        progress = None
+
+    if progress is None and classify_turn(normalized):
+        latency_ms["total"] = _elapsed_ms(total_started)
+        _log_latency(
+            request_id=correlation_id,
+            latency_ms=latency_ms,
+            hint_count=0,
+            document_count=0,
+        )
+        return {
+            "query": normalized,
+            "profile": PROFILE,
+            "kb_id": kb_label,
+            "kb_slugs": selected_slugs or [],
+            "hints": [],
+            "citations_enabled": True,
+            "blocked_reason": NO_HINT_REASON,
+            "min_relevance": min_relevance,
+            "latency_ms": latency_ms,
+            "request_id": correlation_id,
+            "scenario": None,
+        }
+
+    scenario_hint = (
+        _safe_ru_en_text(progress.hint_text) if progress is not None else ""
+    )
+    scenario_tip = (
+        _safe_ru_en_text(progress.next_clarify) if progress is not None else ""
+    )
+    if progress and scenario_hint:
+        latency_ms["total"] = _elapsed_ms(total_started)
+        _log_latency(
+            request_id=correlation_id,
+            latency_ms=latency_ms,
+            hint_count=1,
+            document_count=0,
+        )
+        return {
+            "query": normalized,
+            "profile": PROFILE,
+            "kb_id": kb_label,
+            "kb_slugs": selected_slugs or [],
+            "hints": [
+                {
+                    "rank": 1,
+                    "text": scenario_hint,
+                    "operator_tip": scenario_tip,
+                    "source_type": "scenario",
+                    "relevance_score": 0.95,
+                    "relevance_percent": 95,
+                    "citations": [
+                        {
+                            "article_id": 0,
+                            "chunk_index": 0,
+                            "title": _safe_ru_en_text(progress.title)
+                            or "Сценарий контакт-центра",
+                            "permalink": "",
+                        }
+                    ],
+                }
+            ],
+            "citations_enabled": True,
+            "blocked_reason": None,
+            "min_relevance": min_relevance,
+            "latency_ms": latency_ms,
+            "request_id": correlation_id,
+            "scenario": _scenario_payload(progress),
         }
 
     qu_started = time.perf_counter()
@@ -573,6 +696,7 @@ def suggest(
                 "min_relevance": min_relevance,
                 "latency_ms": latency_ms,
                 "request_id": correlation_id,
+                "scenario": _scenario_payload(progress),
             }
 
     llm_started = time.perf_counter()
@@ -595,7 +719,8 @@ def suggest(
         char_limit = max(int(settings.response_chars_max), 400)
         answer_text, operator_tip = _parse_llm_hint(llm_text)
         cleaned = _clean_answer_text(answer_text)
-        answer_text = complete_sentences(cleaned or answer_text, max_chars=char_limit)
+        answer_text = complete_sentences(cleaned, max_chars=char_limit)
+        operator_tip = _safe_ru_en_text(operator_tip)
         if documents and _llm_misses_source(answer_text, documents[0]):
             grounded = _snippet_as_answer(documents[0], normalized)
             if grounded:
@@ -629,6 +754,8 @@ def suggest(
         else:
             hint_text = _snippet_as_answer(document, normalized)
             tip = ""
+        hint_text = _safe_ru_en_text(hint_text)
+        tip = _safe_ru_en_text(tip)
         if not hint_text:
             continue
         hints.append(
@@ -636,11 +763,14 @@ def suggest(
                 "rank": len(hints) + 1,
                 "text": hint_text,
                 "operator_tip": tip,
+                "source_type": "knowledge_base",
                 "relevance_score": document["relevance_score"],
                 "relevance_percent": document["relevance_percent"],
                 "citations": [_citation(document)],
             }
         )
+    answer_text = _safe_ru_en_text(answer_text)
+    operator_tip = _safe_ru_en_text(operator_tip)
     if answer_text and not hints:
         source = documents[0] if documents else None
         source_score = float(source["relevance_score"]) if source else 0.5
@@ -650,6 +780,7 @@ def suggest(
                     "rank": 1,
                     "text": answer_text,
                     "operator_tip": operator_tip,
+                    "source_type": "knowledge_base",
                     "relevance_score": source_score,
                     "relevance_percent": (
                         int(source["relevance_percent"]) if source else 50
@@ -676,6 +807,7 @@ def suggest(
             "min_relevance": min_relevance,
             "latency_ms": latency_ms,
             "request_id": correlation_id,
+            "scenario": _scenario_payload(progress),
         }
 
     latency_ms["total"] = _elapsed_ms(total_started)
@@ -696,5 +828,6 @@ def suggest(
         "min_relevance": min_relevance,
         "latency_ms": latency_ms,
         "request_id": correlation_id,
-        "gateway_model": active_gateway.get_profile(PROFILE).model,
+        "gateway_model": active_gateway.get_runtime_model(PROFILE),
+        "scenario": _scenario_payload(progress),
     }

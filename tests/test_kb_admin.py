@@ -4,6 +4,7 @@ import os
 import sys
 import zipfile
 from pathlib import Path
+from unittest.mock import Mock, patch
 from xml.etree import ElementTree as ET
 
 
@@ -22,6 +23,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile  # noqa: E402
 from django.test import Client, TestCase  # noqa: E402
 
 from auth.roles import ROLES_BY_CODE  # noqa: E402
+from hub.kb_admin import KnowledgeBaseError, extract_document_text  # noqa: E402
 from hub.models import ContactCenterKnowledgeBase  # noqa: E402
 from ingest.models import CCProductionChunk  # noqa: E402
 
@@ -168,6 +170,33 @@ class KnowledgeBaseAdminApiTest(TestCase):
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["knowledge_base"]["status"], "ready")
+
+    @patch("hub.kb_admin.subprocess.run")
+    @patch("hub.kb_admin.shutil.which", return_value="/usr/bin/antiword")
+    def test_legacy_binary_doc_is_parsed_by_antiword(
+        self,
+        _which,
+        run,
+    ):
+        run.return_value = Mock(
+            returncode=0,
+            stdout="Порядок оформления банковской карты".encode(),
+            stderr=b"",
+        )
+        text = extract_document_text(
+            "legacy.doc",
+            b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 100,
+        )
+        self.assertEqual(text, "Порядок оформления банковской карты")
+        command = run.call_args.args[0]
+        self.assertEqual(command[:3], ["/usr/bin/antiword", "-w", "0"])
+
+    def test_foreign_alphabet_is_rejected_before_indexing(self):
+        with self.assertRaisesRegex(KnowledgeBaseError, "алфавитов"):
+            extract_document_text(
+                "broken.txt",
+                "Оформление карты 拆康济沙壅轰".encode(),
+            )
 
     def test_role_without_kb_permission_rejected(self):
         client = Client()

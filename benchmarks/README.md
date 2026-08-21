@@ -58,6 +58,23 @@ CLI integration test:
   .\tests\benchmarks\test_bench_cli.py -v
 ```
 
+## Layered sufler evaluation
+
+`datasets/sufler_eval_100.json` is a frozen, versioned set of exactly 100
+cases: 25 no-hint/phatic and personal-question controls, 35 scenario
+start/branch/off-topic cases, and 40 grounded banking questions.
+
+The standalone runner executes classification, scenario, retrieval, and full
+suggest layers and writes matching JSON and Markdown reports:
+
+```powershell
+.\backend\.venv\Scripts\python.exe .\benchmarks\suites\sufler_eval.py `
+  --output .\reports\sufler-eval
+```
+
+Full suggest uses the network-free stub gateway by default. A live configured
+gateway requires both `--gateway-mode openai` and `--allow-live-llm`.
+
 ## ASR hotword benchmark
 
 Suite `suites/asr_hotword.py` maps to **FR-ASR-09**: specialized dictionaries

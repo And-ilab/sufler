@@ -58,6 +58,15 @@ from hub.sufler_policy import (
     serialize_sufler_policy,
     update_sufler_policy,
 )
+from hub.scenario_service import (
+    ScenarioAdminError,
+    create_scenario,
+    get_scenario,
+    list_scenarios,
+    serialize_scenario,
+    update_scenario,
+)
+from orchestrator.scenario_engine import run_test_dialog
 from qu.admin_service import (
     QuAdminError,
     create_example,
@@ -720,5 +729,78 @@ def assistant_capability_detail(
             return JsonResponse({"error": "not_found"}, status=404)
         return _assistant_validation_error(exc)
     return JsonResponse(updated)
+
+
+@require_http_methods(["GET", "POST"])
+@roles_required(*SUFLER_POLICY_ROLES, api=True)
+def dialog_scenarios(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        return JsonResponse(list_scenarios())
+    try:
+        body = _parse_json_object(request)
+        created = create_scenario(body, username=request.user.get_username())
+    except (AssistantAdminError, ScenarioAdminError, ValueError) as exc:
+        return JsonResponse(
+            {"error": "validation_error", "details": {"request": [str(exc)]}},
+            status=400,
+        )
+    return JsonResponse(created, status=201)
+
+
+@require_http_methods(["GET", "PUT"])
+@roles_required(*SUFLER_POLICY_ROLES, api=True)
+def dialog_scenario_detail(request: HttpRequest, code: str) -> JsonResponse:
+    try:
+        if request.method == "GET":
+            item = get_scenario(code)
+            return JsonResponse(serialize_scenario(item, include_graph=True))
+        body = _parse_json_object(request)
+        publish = bool(body.pop("publish", False)) if isinstance(body, dict) else False
+        updated = update_scenario(
+            code,
+            body,
+            username=request.user.get_username(),
+            publish=publish,
+        )
+    except ScenarioAdminError as exc:
+        message = str(exc)
+        if "not found" in message:
+            return JsonResponse({"error": "not_found"}, status=404)
+        return JsonResponse(
+            {"error": "validation_error", "details": {"request": [message]}},
+            status=400,
+        )
+    except (AssistantAdminError, ValueError) as exc:
+        return JsonResponse(
+            {"error": "validation_error", "details": {"request": [str(exc)]}},
+            status=400,
+        )
+    return JsonResponse(updated)
+
+
+@require_http_methods(["POST"])
+@roles_required(*SUFLER_POLICY_ROLES, api=True)
+def dialog_scenario_test_run(request: HttpRequest, code: str) -> JsonResponse:
+    try:
+        body = _parse_json_object(request)
+        lines = body.get("lines") if isinstance(body, dict) else None
+        if not isinstance(lines, list):
+            raise ScenarioAdminError("lines must be an array of strings")
+        text_lines = [str(item) for item in lines]
+        result = run_test_dialog(code, text_lines)
+    except ScenarioAdminError as exc:
+        message = str(exc)
+        if "not found" in message:
+            return JsonResponse({"error": "not_found"}, status=404)
+        return JsonResponse(
+            {"error": "validation_error", "details": {"request": [message]}},
+            status=400,
+        )
+    except (AssistantAdminError, ValueError) as exc:
+        return JsonResponse(
+            {"error": "validation_error", "details": {"request": [str(exc)]}},
+            status=400,
+        )
+    return JsonResponse(result)
 
 

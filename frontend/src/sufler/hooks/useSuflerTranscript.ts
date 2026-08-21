@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   requestSuflerSuggest,
   type SuflerHint,
+  type SuggestResponse,
 } from '../api/suggest'
+
+export type SuflerScenarioProgress = NonNullable<SuggestResponse['scenario']>
 
 export interface TranscriptLine {
   id: string
@@ -45,6 +48,7 @@ type WsInbound =
       latency_ms?: Record<string, number>
       request_id?: string
       blocked_reason?: string | null
+      scenario?: SuflerScenarioProgress | null
     }
   | { type: 'error'; message: string; turn_id?: string }
   | { type: 'pong' }
@@ -53,6 +57,18 @@ function wsUrl(callId: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
   return `${protocol}//${host}/ws/sufler/${callId}/`
+}
+
+function hintMessageFor(blocked: string | null | undefined, hasHints: boolean): string {
+  if (hasHints) return ''
+  if (blocked === 'no_hint_needed' || blocked === 'service_mode') return ''
+  if (blocked === 'sufler_unavailable') {
+    return 'В выбранных базах нет проиндексированных статей. Проверьте индексацию в Центре настроек.'
+  }
+  if (blocked === 'no_relevant_knowledge') {
+    return 'По этой реплике в выбранных базах нет близкой статьи.'
+  }
+  return 'Подсказок нет: модель не вернула текст по найденным статьям.'
 }
 
 export function useSuflerTranscript({
@@ -66,6 +82,7 @@ export function useSuflerTranscript({
   const [connected, setConnected] = useState(demoMode)
   const [error, setError] = useState('')
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
+  const [scenario, setScenario] = useState<SuflerScenarioProgress | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
   const linesRef = useRef<TranscriptLine[]>(demoMode ? demoLines : [])
 
@@ -88,7 +105,13 @@ export function useSuflerTranscript({
   }, [])
 
   const attachHints = useCallback(
-    (turnId: string, hints: SuflerHint[], hintMessage = '', requestId = '') => {
+    (
+      turnId: string,
+      hints: SuflerHint[],
+      hintMessage = '',
+      requestId = '',
+      suppressEmptyMessage = false,
+    ) => {
       setLines((current) => {
         const next = current.map((line) =>
           line.turnId === turnId && line.speaker === 'client'
@@ -99,7 +122,9 @@ export function useSuflerTranscript({
                 hintStatus: (hints.length ? 'ready' : 'empty') as TranscriptLine['hintStatus'],
                 hintMessage: hints.length
                   ? ''
-                  : hintMessage || 'Подсказок нет: модель не вернула текст.',
+                  : suppressEmptyMessage
+                    ? ''
+                    : hintMessage || 'Подсказок нет: модель не вернула текст.',
               }
             : line,
         )
@@ -158,17 +183,13 @@ export function useSuflerTranscript({
         return
       }
       if (payload.type === 'hints') {
+        setScenario(payload.scenario ?? null)
         attachHints(
           payload.turn_id,
           payload.hints.slice(0, 5),
-          payload.hints.length
-            ? ''
-            : payload.blocked_reason === 'sufler_unavailable'
-              ? 'В выбранных базах нет проиндексированных статей. Проверьте индексацию в Центре настроек.'
-              : payload.blocked_reason === 'no_relevant_knowledge'
-                ? 'По этой реплике в выбранных базах нет близкой статьи.'
-                : 'Подсказок нет: модель не вернула текст по найденным статьям.',
+          hintMessageFor(payload.blocked_reason, payload.hints.length > 0),
           payload.request_id,
+          payload.blocked_reason === 'no_hint_needed',
         )
         if (payload.latency_ms?.total != null) {
           setLatencyMs(payload.latency_ms.total)
@@ -217,24 +238,20 @@ export function useSuflerTranscript({
       void requestSuflerSuggest(message.text, 5, {
         dialogContext,
         channel: 'telephony',
+        sessionId: callId,
         ...(getKbSlugs && getKbSlugs() !== undefined
           ? { kbSlugs: getKbSlugs() }
           : {}),
       })
         .then((result) => {
           const hints = result.hints.slice(0, 5)
-          const blocked = result.blocked_reason
+          setScenario(result.scenario ?? null)
           attachHints(
             message.turn_id,
             hints,
-            hints.length
-              ? ''
-              : blocked === 'sufler_unavailable'
-                ? 'В выбранных базах нет проиндексированных статей. Проверьте индексацию в Центре настроек.'
-                : blocked === 'no_relevant_knowledge'
-                  ? 'По этой реплике в выбранных базах нет близкой статьи.'
-                  : 'Подсказок нет: модель не вернула текст по найденным статьям.',
+            hintMessageFor(result.blocked_reason, hints.length > 0),
             result.request_id,
+            result.blocked_reason === 'no_hint_needed',
           )
           setLatencyMs(result.latency_ms.total)
         })
@@ -247,7 +264,7 @@ export function useSuflerTranscript({
           setError(hintMessage)
         })
     },
-    [attachHints, getKbSlugs, upsertLine],
+    [attachHints, callId, getKbSlugs, upsertLine],
   )
 
   const pushAsr = useCallback(
@@ -287,6 +304,7 @@ export function useSuflerTranscript({
     connected,
     error,
     latencyMs,
+    scenario,
     ingestLive,
     pushAsr,
     setLines: replaceLines,

@@ -33,6 +33,7 @@ export interface SuflerPhoneAppProps {
 }
 
 function hintTitle(hint: SuflerHint): string {
+  if (hint.source_type === 'scenario') return 'Ответ по активному сценарию'
   return hint.citations[0]?.title || `Подсказка ${hint.rank}`
 }
 
@@ -183,18 +184,27 @@ function ClientSummaryCard({
 }
 
 export function SuflerPhoneApp({
-  callId = 'live',
+  callId,
   demoMode = false,
   demoLines = DEFAULT_DEMO,
   operatorName = 'Оператор КЦ',
   embedded = false,
   clientPhone = '',
 }: SuflerPhoneAppProps) {
+  const resolvedCallId = useMemo(
+    () =>
+      callId?.trim()
+      || `dev-call-${
+        globalThis.crypto?.randomUUID?.()
+        || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      }`,
+    [callId],
+  )
   const { theme: colorTheme } = useAiHubColorTheme()
   const kb = useKnowledgeBaseSelection()
   const clientHistory = useClientSummary(clientPhone)
-  const { lines, connected, error, latencyMs, ingestLive, pushAsr, setLines } = useSuflerTranscript({
-    callId,
+  const { lines, connected, error, latencyMs, scenario, ingestLive, pushAsr, setLines } = useSuflerTranscript({
+    callId: resolvedCallId,
     demoMode,
     demoLines,
     getKbSlugs: kb.getKbSlugs,
@@ -251,7 +261,7 @@ export function SuflerPhoneApp({
       citation_title: hint.citations[0]?.title,
       request_id: line.requestId,
       source: 'telephony',
-      call_id: callId,
+      call_id: resolvedCallId,
     }).catch(() => {})
   }
 
@@ -286,6 +296,20 @@ export function SuflerPhoneApp({
           <span>{operatorName}</span>
         </div>
       </header>
+      {scenario?.path?.length ? (
+        <div className="sufler-phone__scenario" data-testid="sufler-scenario-path">
+          <span className="sufler-phone__scenario-label">Активный сценарий</span>
+          <strong>{scenario.code}</strong>
+          <span className="sufler-phone__scenario-path">
+            {scenario.path.map((part, index) => (
+              <span key={`${part}-${index}`}>
+                {index > 0 ? <i>→</i> : null}
+                {part}
+              </span>
+            ))}
+          </span>
+        </div>
+      ) : null}
 
       {(error || live.error) && (
         <Card className="sufler-phone__error" role="alert">
@@ -326,11 +350,23 @@ export function SuflerPhoneApp({
                 </Card>
 
                 {hints.length > 0 && (
-                  <div className="sufler-phone__hints" data-testid={`hints-${line.turnId}`}>
-                    <div className="sufler-phone__hints-title">Подсказки суфлёра</div>
+                  <div
+                    className={`sufler-phone__hints${
+                      hints.some((hint) => hint.source_type === 'scenario')
+                        ? ' sufler-phone__hints--scenario'
+                        : ''
+                    }`}
+                    data-testid={`hints-${line.turnId}`}
+                  >
+                    <div className="sufler-phone__hints-title">
+                      {hints.some((hint) => hint.source_type === 'scenario')
+                        ? 'Сценарий ведёт оператора'
+                        : 'Подсказки по базе знаний'}
+                    </div>
                     {hints.map((hint, index) => (
                       <HintCard
                         key={`${line.turnId}-${hint.rank}`}
+                        className={hint.source_type === 'scenario' ? 'sufler-phone__scenario-hint' : ''}
                         title={hintTitle(hint)}
                         relevance={`${hint.relevance_percent}%`}
                         relevancePercent={hint.relevance_percent}
@@ -349,7 +385,7 @@ export function SuflerPhoneApp({
                     ))}
                   </div>
                 )}
-                {line.speaker === 'client' && line.isFinal && hints.length === 0 && (
+                {line.speaker === 'client' && line.isFinal && hints.length === 0 && (line.hintStatus === 'loading' || line.hintMessage) && (
                   <div className="sufler-phone__hints-empty" role="status">
                     {line.hintStatus === 'loading'
                       ? (line.hintMessage || 'Подсказки загружаются…')

@@ -87,38 +87,6 @@ function encodeWav(float32: Float32Array, sampleRate: number): Blob {
   return new Blob([buffer], { type: 'audio/wav' })
 }
 
-function attachMicLevelMeter(
-  context: AudioContext,
-  stream: MediaStream,
-  recordingRef: { current: boolean },
-  onLevel: (level: number) => void,
-): { stop: () => void } {
-  const source = context.createMediaStreamSource(stream)
-  const analyser = context.createAnalyser()
-  analyser.fftSize = 512
-  source.connect(analyser)
-  const samples = new Uint8Array(analyser.fftSize)
-  let frame = 0
-  const tick = () => {
-    if (!recordingRef.current) return
-    analyser.getByteTimeDomainData(samples)
-    let sum = 0
-    for (let index = 0; index < samples.length; index += 1) {
-      const value = (samples[index] - 128) / 128
-      sum += value * value
-    }
-    onLevel(Math.sqrt(sum / Math.max(1, samples.length)))
-    frame = window.requestAnimationFrame(tick)
-  }
-  frame = window.requestAnimationFrame(tick)
-  return {
-    stop: () => {
-      window.cancelAnimationFrame(frame)
-      source.disconnect()
-    },
-  }
-}
-
 function mixMono(buffer: AudioBuffer): Float32Array {
   const left = buffer.getChannelData(0)
   if (buffer.numberOfChannels < 2) return new Float32Array(left)
@@ -231,6 +199,7 @@ export function useLiveDualAsr(
   const systemCleanupRef = useRef<(() => void) | null>(null)
   const finalizeTimerRef = useRef<number | null>(null)
   const lastInterimRef = useRef('')
+  const lastBrowserSpeechAtRef = useRef(0)
   const levelPulseRef = useRef(0)
   const hearingRef = useRef(false)
 
@@ -290,6 +259,7 @@ export function useLiveDualAsr(
       recognition.continuous = true
       recognition.interimResults = true
       recognition.onresult = (event) => {
+        lastBrowserSpeechAtRef.current = Date.now()
         let finalChunk = ''
         let interim = ''
         for (let index = event.resultIndex; index < event.results.length; index += 1) {
@@ -359,7 +329,7 @@ export function useLiveDualAsr(
 
       let micStream: MediaStream | null = null
       let micContext: AudioContext | null = null
-      let micMeter: { stop: () => void } | null = null
+      let micCapture: { stop: () => void } | null = null
       void navigator.mediaDevices
         .getUserMedia({ audio: true, video: false })
         .then((stream) => {
@@ -370,11 +340,30 @@ export function useLiveDualAsr(
           micStream = stream
           micContext = new AudioContext()
           void micContext.resume()
-          micMeter = attachMicLevelMeter(
+          micCapture = attachPcmUtterances(
             micContext,
             stream,
             recordingRef,
             (level) => setState((current) => ({ ...current, micLevel: level })),
+            (wav) => {
+              // Chrome may expose SpeechRecognition but never return text
+              // (common in local/Docker HTTP environments). In that case,
+              // use the backend STT for the same microphone utterance.
+              if (Date.now() - lastBrowserSpeechAtRef.current < 2000) return
+              const speaker = micSpeakerRef.current
+              void transcribeUtterance(wav, speaker)
+                .then((text) => {
+                  const cleaned = text.trim()
+                  if (!cleaned) return
+                  setPartial({ caption: cleaned })
+                  onUtteranceRef.current(speaker, cleaned, true)
+                })
+                .catch(() => {
+                  setPartial({
+                    status: 'Не удалось распознать реплику. Повторите её или введите текст вручную.',
+                  })
+                })
+            },
           )
         })
         .catch(() => {
@@ -390,7 +379,7 @@ export function useLiveDualAsr(
         } catch {
           /* already stopped */
         }
-        micMeter?.stop()
+        micCapture?.stop()
         micStream?.getTracks().forEach((track) => track.stop())
         void micContext?.close()
         systemCleanupRef.current?.()

@@ -23,6 +23,9 @@ from hub.views import (
     qu_policy,
     qu_preview,
     sufler_policies,
+    dialog_scenarios,
+    dialog_scenario_detail,
+    dialog_scenario_test_run,
 )
 
 
@@ -33,6 +36,13 @@ urlpatterns = [
         name="model_registry_model_params",
     ),
     path("sufler/policies/", sufler_policies, name="sufler_policies"),
+    path("scenarios/", dialog_scenarios, name="dialog_scenarios"),
+    path("scenarios/<str:code>/", dialog_scenario_detail, name="dialog_scenario_detail"),
+    path(
+        "scenarios/<str:code>/test-run/",
+        dialog_scenario_test_run,
+        name="dialog_scenario_test_run",
+    ),
     path("qu/preview/", qu_preview, name="qu_preview"),
     path("qu/examples/", qu_examples, name="qu_examples"),
     path("qu/examples/<int:example_id>/", qu_example_detail, name="qu_example_detail"),

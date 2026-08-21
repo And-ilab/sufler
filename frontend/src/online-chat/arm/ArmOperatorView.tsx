@@ -1388,7 +1388,9 @@ type SuflerHintData = {
 
 function mapApiHintToCard(hint: SuflerHint, index: number): SuflerHintData {
   const citation = hint.citations?.[0];
-  const title = citation?.title?.trim() || `Подсказка ${hint.rank || index + 1}`;
+  const title = hint.source_type === "scenario"
+    ? "Ответ по активному сценарию"
+    : citation?.title?.trim() || `Подсказка ${hint.rank || index + 1}`;
   const answerText = (hint.text || "").trim();
   const preview = answerText.length > 120 ? `${answerText.slice(0, 117)}…` : answerText;
   const percent = Math.round(hint.relevance_percent ?? hint.relevance_score * 100);
@@ -2985,6 +2987,7 @@ export function ArmOperatorView({
   const [suflerQuery, setSuflerQuery] = useState("");
   const [suflerLoading, setSuflerLoading] = useState(false);
   const [suflerError, setSuflerError] = useState("");
+  const [suflerScenarioPath, setSuflerScenarioPath] = useState("");
   const kb = useKnowledgeBaseSelection();
   const kbSlugsKey = kb.slugs.join("|");
   const [assignmentGraceUntil, setAssignmentGraceUntil] = useState<number | null>(null);
@@ -3466,6 +3469,7 @@ export function ArmOperatorView({
       setLiveSuflerHints([]);
       setLiveSuflerRaw([]);
       setSuflerError("");
+      setSuflerScenarioPath("");
       setSuflerLoading(false);
       return;
     }
@@ -3474,6 +3478,7 @@ export function ArmOperatorView({
       setLiveSuflerHints([]);
       setLiveSuflerRaw([]);
       setSuflerLoading(false);
+      setSuflerScenarioPath("");
       setSuflerError("Ошибка суфлёра. Повторите попытку позже.");
       return;
     }
@@ -3482,6 +3487,7 @@ export function ArmOperatorView({
       setLiveSuflerHints([]);
       setLiveSuflerRaw([]);
       setSuflerError("");
+      setSuflerScenarioPath("");
       setSuflerLoading(false);
       return;
     }
@@ -3506,6 +3512,7 @@ export function ArmOperatorView({
       clientHistory: historyContext,
       dialogContext: dialogContextForSufler,
       channel: 'online_chat',
+      sessionId: `chat:${active.id}`,
       ...(kb.status === "ready" ? { kbSlugs: kb.slugs } : {}),
     })
       .then((result) => {
@@ -3515,14 +3522,25 @@ export function ArmOperatorView({
         const usable = result.hints || [];
         setLiveSuflerRaw(usable);
         setLiveSuflerHints(usable.map(mapApiHintToCard));
+        if (result.scenario?.path?.length) {
+          setSuflerScenarioPath(
+            `${result.scenario.code} · ${result.scenario.path.join(" → ")}`,
+          );
+        } else {
+          setSuflerScenarioPath("");
+        }
         if (!usable.length) {
-          setSuflerError(
-            result.blocked_reason === "no_relevant_knowledge"
-              ? "По этой реплике в выбранных базах нет близкой статьи."
-              : result.blocked_reason === "sufler_unavailable"
-                ? "В выбранных базах нет проиндексированных статей."
-                : "Ошибка суфлёра. Повторите попытку позже.",
-          )
+          if (result.blocked_reason === "no_hint_needed" || result.blocked_reason === "service_mode") {
+            setSuflerError("");
+          } else {
+            setSuflerError(
+              result.blocked_reason === "no_relevant_knowledge"
+                ? "По этой реплике в выбранных базах нет близкой статьи."
+                : result.blocked_reason === "sufler_unavailable"
+                  ? "В выбранных базах нет проиндексированных статей."
+                  : "Ошибка суфлёра. Повторите попытку позже.",
+            );
+          }
         } else {
           setSuflerError("");
         }
@@ -5148,6 +5166,27 @@ export function ArmOperatorView({
               {suflerLoading ? "загрузка…" : suflerError ? "недоступен" : "активен"}
             </Pill>
           </Row>
+          {suflerScenarioPath ? (
+            <div
+              data-testid="arm-scenario-path"
+              style={{
+                display: "grid",
+                gap: 3,
+                marginTop: 7,
+                padding: "8px 10px",
+                border: `1px solid ${scheme.accent}`,
+                borderRadius: 9,
+                background: `color-mix(in srgb, ${scheme.accent} 10%, ${t.fill.secondary})`,
+              }}
+            >
+              <Text style={{ fontSize: 10, color: scheme.accent, fontWeight: 700, textTransform: "uppercase" }}>
+                Активный сценарий
+              </Text>
+              <Text style={{ fontSize: 12, color: t.text.primary }}>
+                {suflerScenarioPath}
+              </Text>
+            </div>
+          ) : null}
           <div style={{ marginTop: 8 }}>
             <KbPicker
               catalog={kb.catalog}

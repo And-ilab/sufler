@@ -414,3 +414,97 @@ class SuflerPolicy(models.Model):
 
     def __str__(self) -> str:
         return f"sufler-policy max={self.max_hints}"
+
+
+class DialogScenario(models.Model):
+    """CC dialog scenario registry (FR-SCR-01…12 / §4.5.2)."""
+
+    STATUS_DRAFT = "draft"
+    STATUS_PRODUCTION = "production"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Черновик"),
+        (STATUS_PRODUCTION, "Опубликован"),
+    )
+    CHANNEL_BOTH = "both"
+    CHANNEL_TELEPHONY = "telephony"
+    CHANNEL_CHAT = "online_chat"
+    CHANNEL_CHOICES = (
+        (CHANNEL_BOTH, "Телефония и чат"),
+        (CHANNEL_TELEPHONY, "Телефония"),
+        (CHANNEL_CHAT, "Онлайн-чат"),
+    )
+
+    code = models.CharField(max_length=32, unique=True)
+    title = models.CharField(max_length=200)
+    root_question = models.CharField(max_length=500, blank=True, default="")
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+        db_index=True,
+    )
+    channels = models.CharField(
+        max_length=32,
+        choices=CHANNEL_CHOICES,
+        default=CHANNEL_BOTH,
+    )
+    current_version = models.ForeignKey(
+        "DialogScenarioVersion",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=150, blank=True, default="")
+
+    class Meta:
+        ordering = ("code",)
+
+    def __str__(self) -> str:
+        return self.code
+
+
+class DialogScenarioVersion(models.Model):
+    """Published or draft graph/prompt snapshot (FR-SCR-03)."""
+
+    scenario = models.ForeignKey(
+        DialogScenario,
+        on_delete=models.CASCADE,
+        related_name="versions",
+    )
+    version_number = models.PositiveIntegerField(default=1)
+    graph = models.JSONField(default=dict)
+    system_prompt = models.TextField(blank=True, default="")
+    is_published = models.BooleanField(default=False)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=150, blank=True, default="")
+
+    class Meta:
+        ordering = ("-version_number",)
+        unique_together = ("scenario", "version_number")
+
+    def __str__(self) -> str:
+        return f"{self.scenario_id} v{self.version_number}"
+
+
+class DialogScenarioSession(models.Model):
+    """Live walk through a scenario for one call/chat."""
+
+    session_key = models.CharField(max_length=160, unique=True)
+    scenario = models.ForeignKey(
+        DialogScenario,
+        on_delete=models.CASCADE,
+        related_name="sessions",
+    )
+    node_id = models.CharField(max_length=64)
+    path = models.JSONField(default=list)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+
+    def __str__(self) -> str:
+        return f"{self.session_key} → {self.node_id}"

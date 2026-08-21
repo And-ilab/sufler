@@ -30,7 +30,7 @@ def _optional_string(payload: Mapping[str, Any], field: str) -> str:
 
 def _parse_suggest_body(
     body: bytes,
-) -> tuple[str, int, str, str, list[str] | None, str, str]:
+) -> tuple[str, int, str, str, list[str] | None, str, str, str]:
     try:
         payload = json.loads(body or b"{}")
     except json.JSONDecodeError as exc:
@@ -74,7 +74,8 @@ def _parse_suggest_body(
                 kb_slugs.append(slug.strip())
     channel = _optional_string(payload, "channel")
     mode = _optional_string(payload, "mode")
-    return text, limit, history, dialog_context, kb_slugs, channel, mode
+    session_id = _optional_string(payload, "session_id")
+    return text, limit, history, dialog_context, kb_slugs, channel, mode, session_id
 
 
 @require_http_methods(["POST"])
@@ -95,6 +96,7 @@ def sufler_suggest(request: HttpRequest) -> JsonResponse:
             kb_slugs,
             channel,
             mode,
+            session_id,
         ) = _parse_suggest_body(request.body)
         result = suggest(
             text,
@@ -105,6 +107,7 @@ def sufler_suggest(request: HttpRequest) -> JsonResponse:
             kb_slugs=kb_slugs,
             channel=channel,
             mode=mode,
+            session_id=session_id,
         )
     except SuflerOrchestratorError as exc:
         return JsonResponse(

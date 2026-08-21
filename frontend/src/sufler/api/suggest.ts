@@ -9,6 +9,7 @@ export interface SuflerHint {
   rank: number
   text: string
   operator_tip?: string
+  source_type?: 'scenario' | 'knowledge_base'
   relevance_score: number
   relevance_percent: number
   citations: SuflerHintCitation[]
@@ -31,6 +32,13 @@ export interface SuggestResponse {
   }
   request_id: string
   gateway_model?: string
+  scenario?: {
+    code: string
+    title: string
+    path: string[]
+    node_id: string
+    next_clarify: string
+  } | null
 }
 
 function csrfToken(): string {
@@ -66,6 +74,7 @@ export async function requestSuflerSuggest(
     kbSlugs?: string[]
     channel?: 'telephony' | 'online_chat'
     mode?: 'consultation' | 'service'
+    sessionId?: string
   },
 ): Promise<SuggestResponse> {
   // Online-chat ARM is often opened without a prior admin/login bootstrap.
@@ -91,6 +100,7 @@ export async function requestSuflerSuggest(
       ...(options && 'kbSlugs' in options ? { kb_slugs: options.kbSlugs ?? [] } : {}),
       ...(options?.channel ? { channel: options.channel } : {}),
       ...(options?.mode ? { mode: options.mode } : {}),
+      ...(options?.sessionId ? { session_id: options.sessionId } : {}),
     }),
   })
   const body = await response.json().catch(() => ({} as { error?: string; details?: { request?: string[] } }))

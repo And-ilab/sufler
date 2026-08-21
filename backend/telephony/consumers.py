@@ -24,6 +24,7 @@ from auth.roles import (
     PERM_SUFLER_TELEPHONY,
     has_permission,
 )
+from orchestrator.scenario_engine import clear_scenario_session
 from orchestrator.sufler import SuflerOrchestratorError, suggest
 
 
@@ -58,6 +59,11 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
                 "asr": "active",
             }
         )
+
+    async def disconnect(self, close_code: int) -> None:
+        call_id = str(getattr(self, "call_id", "") or "")
+        if call_id:
+            await sync_to_async(clear_scenario_session, thread_sensitive=True)(call_id)
 
     async def receive(self, text_data: str | None = None, bytes_data=None) -> None:
         if not text_data:
@@ -133,6 +139,8 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
                 text,
                 limit=5,
                 kb_slugs=slugs,
+                session_id=str(getattr(self, "call_id", "") or ""),
+                channel="telephony",
             )
         except SuflerOrchestratorError as exc:
             await self.send_json(
@@ -162,6 +170,7 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
                 "latency_ms": result["latency_ms"],
                 "request_id": result["request_id"],
                 "blocked_reason": result.get("blocked_reason"),
+                "scenario": result.get("scenario"),
             }
         )
 

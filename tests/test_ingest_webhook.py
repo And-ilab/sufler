@@ -127,6 +127,24 @@ class SuzIngestWebhookTest(TestCase):
         )
         self.assertEqual(KnowledgeIngestEvent.objects.count(), 2)
 
+    def test_foreign_alphabet_payload_is_quarantined_before_indexing(self):
+        body = "Порядок оформления карты 拆康济沙壅轰"
+        payload = self.payload(
+            body_plain=body,
+            body_html=f"<p>{body}</p>",
+            checksum=checksum_for_text(normalize_text(body)),
+        )
+        response = self.post(payload)
+        self.assertEqual(response.status_code, 202)
+        event = KnowledgeIngestEvent.objects.get(event_id=payload["event_id"])
+        self.assertEqual(event.outcome, "language_quarantined")
+        self.assertFalse(
+            CCProductionChunk.objects.filter(
+                article_id=payload["article_id"],
+                is_active=True,
+            ).exists()
+        )
+
     def test_fake_article_runs_reindex_before_qu_retrain(self):
         payload = self.payload()
         original_run = qu_retrain.run

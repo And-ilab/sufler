@@ -24,6 +24,9 @@ import { DocTypesScreen } from './DocTypesScreen'
 import { OcrDocumentsPanel } from '../ocr/OcrDocumentsPanel'
 import { CcReportsScreen } from '../reports/CcReportsScreen'
 import { AsrQaScreen } from '../reports/AsrQaScreen'
+import { ScenarioEditorScreen } from './ScenarioEditorScreen'
+import { ScenarioTestScreen } from './ScenarioTestScreen'
+import { ScenarioBindingsScreen } from './ScenarioBindingsScreen'
 import '../reports/ReportsTheme.css'
 import type { ModelParamsData } from './api/modelRegistry'
 import {
@@ -263,6 +266,7 @@ export function AiHubAdminApp({
     : resolved.screen
   const [screen, setScreen] = useState(initialScreen ?? fallbackScreen)
   const [profile, setProfile] = useState(initialProfile ?? resolved.profile)
+  const [testScenarioCode, setTestScenarioCode] = useState('')
   const [demoRole, setDemoRole] = useState<DemoAdminRole>(() => demoRoleFromAuth(roles))
   const [saved, setSaved] = useState(false)
   const emptyFormState = {
@@ -491,7 +495,7 @@ export function AiHubAdminApp({
 
         <main
           className={`admin-main${
-            screen === 'sufler_stats' || screen === 'cc_reports' || screen === 'asr_qa' || screen === 'qu_admin' || screen === 'sufler_training'
+            screen === 'sufler_stats' || screen === 'cc_reports' || screen === 'asr_qa' || screen === 'qu_admin' || screen === 'sufler_training' || screen === 'scenario_editor' || screen === 'scenario_test'
               ? ' admin-main--wide'
               : ''
           }`}
@@ -561,6 +565,19 @@ export function AiHubAdminApp({
             <div className="rpt-app admin-reports-embed">
               <AsrQaScreen />
             </div>
+          ) : screen === 'scenario_editor' ? (
+            <ScenarioEditorScreen
+              canEdit={canEdit}
+              onOpenTest={(code) => {
+                setTestScenarioCode(code)
+                setScreen('scenario_test')
+                window.history.pushState({}, '', '/ai-hub/admin/scenario_test')
+              }}
+            />
+          ) : screen === 'scenario_test' ? (
+            <ScenarioTestScreen canEdit={canEdit} initialCode={testScenarioCode} />
+          ) : screen === 'scenario_bindings' ? (
+            <ScenarioBindingsScreen />
           ) : (
             <>
               <section className="admin-stats" aria-label={`Сводка экрана ${copy.title}`}>
@@ -604,7 +621,7 @@ export function AiHubAdminApp({
           )}
         </main>
 
-        {screen !== 'qu_admin' && screen !== 'sufler_training' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && screen !== 'doc_types' && screen !== 'ocr' && screen !== 'sufler_stats' && screen !== 'cc_reports' && screen !== 'asr_qa' && (
+        {screen !== 'qu_admin' && screen !== 'sufler_training' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && screen !== 'doc_types' && screen !== 'ocr' && screen !== 'sufler_stats' && screen !== 'cc_reports' && screen !== 'asr_qa' && screen !== 'scenario_editor' && screen !== 'scenario_test' && screen !== 'scenario_bindings' && (
         <footer className="admin-save-footer" data-testid="admin-save-footer">
           <span>
             {screen === 'model_params'

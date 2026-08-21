@@ -168,7 +168,7 @@ def _rank_chunks_hybrid(
     limit: int,
 ) -> list[tuple[float, Any]]:
     """Blend vector similarity with keyword overlap so short RU questions still hit."""
-    if backend == "http-fallback":
+    if backend in {"http-fallback", "lexical"}:
         scored = []
         for chunk in chunk_query:
             score = _lexical_score(query_text, chunk.title, chunk.content)

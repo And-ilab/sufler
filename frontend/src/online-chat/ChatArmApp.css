@@ -72,3 +72,28 @@ body,
 .arm-theme-toggle:hover {
   filter: brightness(0.96);
 }
+
+.chat-arm__scenario-path {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 35%, var(--color-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--color-text-muted, #5b6577);
+}
+
+.chat-arm__scenario-path strong {
+  color: var(--color-primary);
+  font-size: 10px;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.chat-arm__scenario-hint {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+}

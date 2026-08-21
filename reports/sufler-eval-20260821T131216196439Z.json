@@ -1,0 +1,6387 @@
+{
+  "schema_version": "1.0",
+  "report_id": "sufler-eval-20260821T131216196439Z",
+  "suite": "sufler_eval",
+  "generated_at": "2026-08-21T13:12:16.196439+00:00",
+  "dataset": {
+    "id": "sufler-eval-100",
+    "version": "1.0.0",
+    "path": "/workspace/benchmarks/datasets/sufler_eval_100.json",
+    "case_count": 100
+  },
+  "layers": [
+    "full_suggest"
+  ],
+  "metrics": {
+    "layers": {
+      "full_suggest": {
+        "cases": 100,
+        "passed": 92,
+        "failed": 8,
+        "pass_rate_percent": 92.0,
+        "latency_ms": {
+          "p50": 36.031,
+          "p95": 2249.88
+        }
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "NH-001",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "алло",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.greeting"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 3.064
+        },
+        "request_id": "d12b665b-7f60-4c2f-b2b6-debe791e2fac"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 127.818
+    },
+    {
+      "id": "NH-002",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "алло здравствуйте",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.greeting"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 4.185
+        },
+        "request_id": "2d9f1b1c-302e-4199-bad2-d601b8a2f75e"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 25.577
+    },
+    {
+      "id": "NH-003",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "здравствуйте",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.greeting"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.359
+        },
+        "request_id": "a5f2b948-45bf-4e1b-9bcf-4a74bba8108c"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 26.31
+    },
+    {
+      "id": "NH-004",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "добрый день",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.greeting"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.489
+        },
+        "request_id": "9e0165f8-275b-4ae7-bde9-a1faed96894b"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 23.529
+    },
+    {
+      "id": "NH-005",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "добрый вечер",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.greeting"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.49
+        },
+        "request_id": "dc1eed32-4a13-4f58-9660-792499713f1a"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 21.939
+    },
+    {
+      "id": "NH-006",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "доброе утро",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.greeting"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.233
+        },
+        "request_id": "f2934695-2c88-465e-bd8c-ab19a0925442"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 22.723
+    },
+    {
+      "id": "NH-007",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "привет",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.greeting"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.638
+        },
+        "request_id": "eee8f5c0-b1f5-4c5e-905d-4a9449d97a12"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 19.133
+    },
+    {
+      "id": "NH-008",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "слушаю вас",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.greeting"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.639
+        },
+        "request_id": "0d3bdaba-527a-4c16-957a-441832de503c"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 19.297
+    },
+    {
+      "id": "NH-009",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "спасибо",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.thanks"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.375
+        },
+        "request_id": "b23c5748-0235-48f7-9cd3-2d472dfc2c51"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 18.931
+    },
+    {
+      "id": "NH-010",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "большое спасибо",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.thanks"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.341
+        },
+        "request_id": "9ec22ed7-a98c-4aed-b41e-d5a3165f8fb7"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 21.168
+    },
+    {
+      "id": "NH-011",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "благодарю",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.thanks"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.25
+        },
+        "request_id": "9d72e93f-05ef-48c5-9fd3-d4f155b76025"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 21.41
+    },
+    {
+      "id": "NH-012",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "всё понятно спасибо",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.thanks"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.464
+        },
+        "request_id": "ed3d8b1f-7921-4bc9-a2f0-04814e610d71"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 19.057
+    },
+    {
+      "id": "NH-013",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "секунду",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.hold"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.83
+        },
+        "request_id": "d5733f39-d745-485d-8166-b74062208dc7"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 18.436
+    },
+    {
+      "id": "NH-014",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "подождите пожалуйста",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.hold"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.603
+        },
+        "request_id": "5c003cd7-bc2e-41d4-baa4-e4c86d7a46a8"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 18.552
+    },
+    {
+      "id": "NH-015",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "не кладите трубку",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.hold"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.432
+        },
+        "request_id": "037e3d74-e1b2-4047-92e0-b39bbb6d39da"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 53.693
+    },
+    {
+      "id": "NH-016",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "до свидания",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.farewell"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.288
+        },
+        "request_id": "56694244-0c04-480e-8ee8-f8f9a0f13e66"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 20.087
+    },
+    {
+      "id": "NH-017",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "всего доброго",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.farewell"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.356
+        },
+        "request_id": "eae42467-cab8-4f75-ac48-ae7562ba9c4e"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 19.868
+    },
+    {
+      "id": "NH-018",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "угу",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.ack"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.508
+        },
+        "request_id": "3e865402-d233-442a-bf73-1148a1f093e3"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 18.804
+    },
+    {
+      "id": "NH-019",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "понятно",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.ack"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.396
+        },
+        "request_id": "e383601d-907c-4011-81b0-9b8f9e7169ad"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 19.626
+    },
+    {
+      "id": "NH-020",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "phatic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "окей",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint",
+        "classification": "no_hint.ack"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.271
+        },
+        "request_id": "1bfd39f6-7375-48cf-826a-5db42a87127d"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 18.547
+    },
+    {
+      "id": "NH-021",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "personal_question_control",
+      "layer": "full_suggest",
+      "input": {
+        "text": "как оформить карту на моё имя",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "classification": null
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-005",
+          "title": "Перевод в РФ",
+          "path": [
+            "Перевод в РФ"
+          ],
+          "node_id": "start",
+          "next_clarify": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?",
+            "operator_tip": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Перевод в РФ",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Перевод в РФ",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 15.204
+        },
+        "request_id": "0809a9cb-b5d8-4474-b931-3ec364434d73"
+      },
+      "checks": {
+        "routing": false
+      },
+      "passed": false,
+      "latency_ms": 31.379
+    },
+    {
+      "id": "NH-022",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "personal_question_control",
+      "layer": "full_suggest",
+      "input": {
+        "text": "здравствуйте, я потерял свою карту",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "classification": null
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Для блокировки карты при утрате или краже вы можете воспользоваться мобильным приложением, интернет-банком или позвонить в контакт-центр по номеру 147. После блокировки операции по карте станут недоступны. Для выпуска новой карты необходимо обратиться в отделение банка с паспортом.",
+            "operator_tip": "Уточните у клиента, каким способом ему удобнее заблокировать карту, и напомните номер 147 для экстренной блокировки.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.24,
+            "relevance_percent": 24,
+            "citations": [
+              {
+                "article_id": 91004,
+                "chunk_index": 0,
+                "title": "Блокировка карты",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/uslugi_globalnoy_podderzhki_derzhateley_kartochek/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91004,
+            "chunk_index": 0,
+            "title": "Блокировка карты",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/uslugi_globalnoy_podderzhki_derzhateley_kartochek/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 32.543,
+          "rag": 18.056,
+          "llm": 1975.834,
+          "total": 2031.792
+        },
+        "request_id": "369853b4-0ab4-45ba-b18e-372d93d0741d"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 2048.371
+    },
+    {
+      "id": "NH-023",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "personal_question_control",
+      "layer": "full_suggest",
+      "input": {
+        "text": "спасибо, а где скачать мою выписку",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "classification": null
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Выписку по счету можно скачать в интернет-банкинге или мобильном приложении в разделе выписок и справок. Точный порядок действий зависит от типа вашей карты и подключенных услуг.",
+            "operator_tip": "Перед озвучиванием сверьте формулировку со статьей базы знаний о способах получения выписки, так как фрагменты сейчас недоступны.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.5,
+            "relevance_percent": 50,
+            "citations": []
+          }
+        ],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 32.726,
+          "rag": 15.775,
+          "llm": 2140.101,
+          "total": 2193.903
+        },
+        "request_id": "8c79d60e-5610-4a1d-accc-96bdcf0be877"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 2211.814
+    },
+    {
+      "id": "NH-024",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "personal_question_control",
+      "layer": "full_suggest",
+      "input": {
+        "text": "меня зовут Анна, хочу открыть вклад",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "classification": null
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Для открытия вклада в Беларусбанке вам понадобятся паспорт и текущий счёт. Оформить вклад можно в отделении банка или дистанционно, например, через интернет-банк. Доступны вклады в белорусских рублях и в валюте, а условия по процентной ставке зависят от выбранного срока и конкретного продукта.",
+            "operator_tip": "Уточните у Анны, в какой валюте и на какой срок она планирует открыть вклад, чтобы предложить подходящий продукт.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.5143,
+            "relevance_percent": 51,
+            "citations": [
+              {
+                "article_id": 91003,
+                "chunk_index": 0,
+                "title": "Открытие вклада",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/vklady/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91003,
+            "chunk_index": 0,
+            "title": "Открытие вклада",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/vklady/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 37.348,
+          "rag": 16.476,
+          "llm": 2087.2,
+          "total": 2147.457
+        },
+        "request_id": "3bbefeeb-6e53-40e0-89c1-ec91ffe94f53"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 2169.829
+    },
+    {
+      "id": "NH-025",
+      "version": "1.0.0",
+      "bucket": "no_hint",
+      "case_type": "personal_question_control",
+      "layer": "full_suggest",
+      "input": {
+        "text": "хорошо, как поменять мой ПИН-код",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "classification": null
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Сменить ПИН-код можно в банкомате Беларусбанка при наличии карты. Если ПИН-код забыт, необходимо оформить перевыпуск карты в отделении банка. Не сообщайте ПИН-код третьим лицам и оператору чата.",
+            "operator_tip": "Уточните у клиента, есть ли у него карта на руках, чтобы предложить подходящий вариант действий.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.4,
+            "relevance_percent": 40,
+            "citations": [
+              {
+                "article_id": 91005,
+                "chunk_index": 0,
+                "title": "Пин-код карты",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/pravila_polzovaniya_kartochkoy_1/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91005,
+            "chunk_index": 0,
+            "title": "Пин-код карты",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/pravila_polzovaniya_kartochkoy_1/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 29.068,
+          "rag": 16.763,
+          "llm": 1930.781,
+          "total": 1982.723
+        },
+        "request_id": "6a73ecf4-2163-4b25-b72a-096838c3c019"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 2030.959
+    },
+    {
+      "id": "SC-001",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "full_suggest",
+      "input": {
+        "text": "мне четырнадцать, хочу открыть счёт",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-001",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-001",
+          "title": "14-летний хочет открыть счёт",
+          "path": [
+            "Несовершеннолетний хочет открыть счёт"
+          ],
+          "node_id": "start",
+          "next_clarify": "С карточкой или без карточки?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "С карточкой или без карточки?",
+            "operator_tip": "С карточкой или без карточки?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "14-летний хочет открыть счёт",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "14-летний хочет открыть счёт",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 9.422
+        },
+        "request_id": "cde5c546-1877-462e-89ca-07f3ec6fdb15"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 27.369
+    },
+    {
+      "id": "SC-002",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "full_suggest",
+      "input": {
+        "text": "хочу открыть счёт внуку, ему 6 лет",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-002",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-002",
+          "title": "Счёт внуку, 6 лет",
+          "path": [
+            "Открытие счетов на несовершеннолетних"
+          ],
+          "node_id": "start",
+          "next_clarify": "Кто открывает счёт — вы законный представитель или иное лицо? Ребёнку уже есть 14?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Кто открывает счёт — вы законный представитель или иное лицо? Ребёнку уже есть 14?",
+            "operator_tip": "Кто открывает счёт — вы законный представитель или иное лицо? Ребёнку уже есть 14?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Счёт внуку, 6 лет",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Счёт внуку, 6 лет",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 9.143
+        },
+        "request_id": "4f96f5f1-4be1-4eac-abfc-816236873be2"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 28.568
+    },
+    {
+      "id": "SC-003",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "full_suggest",
+      "input": {
+        "text": "как подключить оплату телефоном",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-003",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-003",
+          "title": "Оплата телефоном (NFC)",
+          "path": [
+            "Оплата телефоном · NFC"
+          ],
+          "node_id": "start",
+          "next_clarify": "Какая операционная система телефона — iOS или Android?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Какая операционная система телефона — iOS или Android?",
+            "operator_tip": "Какая операционная система телефона — iOS или Android?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Оплата телефоном (NFC)",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Оплата телефоном (NFC)",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 8.42
+        },
+        "request_id": "7cb0cc6c-513c-4629-a66f-ef8fbc60169e"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 25.494
+    },
+    {
+      "id": "SC-004",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "full_suggest",
+      "input": {
+        "text": "хочу кредит на машину",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-004",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-004",
+          "title": "Автокредит",
+          "path": [
+            "Кредит на автомобиль"
+          ],
+          "node_id": "start",
+          "next_clarify": "Автомобиль новый или с пробегом? Обычный или электро? Где покупаете — у партнёра банка?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Автомобиль новый или с пробегом? Обычный или электро? Где покупаете — у партнёра банка?",
+            "operator_tip": "Автомобиль новый или с пробегом? Обычный или электро? Где покупаете — у партнёра банка?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Автокредит",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Автокредит",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 9.804
+        },
+        "request_id": "337375a4-cd71-4ef1-be3b-857aca467719"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 28.629
+    },
+    {
+      "id": "SC-005",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "full_suggest",
+      "input": {
+        "text": "надо отправить деньги в россию",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-005",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-005",
+          "title": "Перевод в РФ",
+          "path": [
+            "Перевод в РФ"
+          ],
+          "node_id": "start",
+          "next_clarify": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?",
+            "operator_tip": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Перевод в РФ",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Перевод в РФ",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 8.607
+        },
+        "request_id": "229d3e91-13e7-40d3-98c2-324b79bdb4bc"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 27.719
+    },
+    {
+      "id": "SC-006",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "full_suggest",
+      "input": {
+        "text": "не помню пин от карты",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-006",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-006",
+          "title": "PIN-код карты",
+          "path": [
+            "PIN-код карты"
+          ],
+          "node_id": "start",
+          "next_clarify": "Пин-код по этой карте уже выдавали раньше?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Пин-код по этой карте уже выдавали раньше?",
+            "operator_tip": "Пин-код по этой карте уже выдавали раньше?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "PIN-код карты",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "PIN-код карты",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 9.073
+        },
+        "request_id": "76225dc2-bef0-430b-9638-7c92d543a1e9"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 29.372
+    },
+    {
+      "id": "SC-007",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "full_suggest",
+      "input": {
+        "text": "нужна выписка со счёта для визы",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-007",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-007",
+          "title": "Выписка для визы",
+          "path": [
+            "Выписка для визы"
+          ],
+          "node_id": "start",
+          "next_clarify": "За какой период и на каком языке — русском или английском? Нужна выписка, мини-выписка или справка?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "За какой период и на каком языке — русском или английском? Нужна выписка, мини-выписка или справка?",
+            "operator_tip": "За какой период и на каком языке — русском или английском? Нужна выписка, мини-выписка или справка?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Выписка для визы",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Выписка для визы",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 8.528
+        },
+        "request_id": "41de47e5-73c0-4ebe-9422-2bf3c8a7a683"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 30.569
+    },
+    {
+      "id": "SC-008",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "full_suggest",
+      "input": {
+        "text": "заканчивается срок вклада по стройсбережениям",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-008",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-008",
+          "title": "Стройсбережения — срок вклада",
+          "path": [
+            "Стройсбережения · срок вклада"
+          ],
+          "node_id": "start",
+          "next_clarify": "Сумму по плану уже накопили?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Сумму по плану уже накопили?",
+            "operator_tip": "Сумму по плану уже накопили?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Стройсбережения — срок вклада",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Стройсбережения — срок вклада",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 9.157
+        },
+        "request_id": "06d48ce0-731d-42b6-9451-a4cb70dc3426"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 27.035
+    },
+    {
+      "id": "SC-009",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "full_suggest",
+      "input": {
+        "text": "перечислить деньги на криптобиржу",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-009",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-009",
+          "title": "Перевод на криптобиржу",
+          "path": [
+            "Перевод на криптобиржу"
+          ],
+          "node_id": "start",
+          "next_clarify": "Клиент физлицо или юрлицо? Есть карта Visa?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Клиент физлицо или юрлицо? Есть карта Visa?",
+            "operator_tip": "Клиент физлицо или юрлицо? Есть карта Visa?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Перевод на криптобиржу",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Перевод на криптобиржу",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 7.819
+        },
+        "request_id": "1ca35b7e-0efc-4491-ab59-83a81246c6d0"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 25.251
+    },
+    {
+      "id": "SC-010",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "full_suggest",
+      "input": {
+        "text": "проверить российские рубли",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-010",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-010",
+          "title": "Проверка российских рублей",
+          "path": [
+            "Проверка российских рублей"
+          ],
+          "node_id": "start",
+          "next_clarify": "Купюры или монеты?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Купюры или монеты?",
+            "operator_tip": "Купюры или монеты?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Проверка российских рублей",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Проверка российских рублей",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 8.401
+        },
+        "request_id": "f08cf588-cab9-45ec-a97d-0b0d257fb29a"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 26.587
+    },
+    {
+      "id": "SC-011",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "мне четырнадцать, хочу открыть счёт"
+        ],
+        "text": "с карточкой",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-001",
+        "node_id": "with_card"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-001",
+          "title": "14-летний хочет открыть счёт",
+          "path": [
+            "Несовершеннолетний хочет открыть счёт",
+            "С карточкой"
+          ],
+          "node_id": "with_card",
+          "next_clarify": "Базовый счёт откроете в отделении или через интернет-банк / мобильное приложение?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Для несовершеннолетнего с карточкой оформляется текущий счёт с базовыми условиями обслуживания. Открытие — в отделении или через ДБО при наличии доступа.",
+            "operator_tip": "Базовый счёт откроете в отделении или через интернет-банк / мобильное приложение?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "14-летний хочет открыть счёт",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "14-летний хочет открыть счёт",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 6.148
+        },
+        "request_id": "e9a3af85-5c8e-4ac1-8580-07c14299673e"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 32.773
+    },
+    {
+      "id": "SC-012",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "мне четырнадцать, хочу открыть счёт"
+        ],
+        "text": "без карточки",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-001",
+        "node_id": "without_card"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-001",
+          "title": "14-летний хочет открыть счёт",
+          "path": [
+            "Несовершеннолетний хочет открыть счёт",
+            "Без карточки"
+          ],
+          "node_id": "without_card",
+          "next_clarify": "Нужен текущий счёт или вклад?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Без карточки можно открыть текущий счёт или депозит.",
+            "operator_tip": "Нужен текущий счёт или вклад?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "14-летний хочет открыть счёт",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "14-летний хочет открыть счёт",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 5.487
+        },
+        "request_id": "0f280094-be41-4151-b2f2-84e4629e9bd1"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 34.116
+    },
+    {
+      "id": "SC-013",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "хочу открыть счёт внуку, ему 6 лет"
+        ],
+        "text": "я бабушка, не законный представитель",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-002",
+        "node_id": "under14_other"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-002",
+          "title": "Счёт внуку, 6 лет",
+          "path": [
+            "Открытие счетов на несовершеннолетних",
+            "До 14 лет · иные лица"
+          ],
+          "node_id": "under14_other",
+          "next_clarify": "Есть документ ребёнка?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Иные лица (не законный представитель) открывают счёт «на имя» ребёнка. Подойдут любые вкладные счета в любой валюте и текущий с базовыми условиями, если у ребёнка есть документ, удостоверяющий личность.",
+            "operator_tip": "Есть документ ребёнка?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Счёт внуку, 6 лет",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Счёт внуку, 6 лет",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 5.639
+        },
+        "request_id": "d44ba409-887c-4733-992f-599c3fb6e5df"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 77.825
+    },
+    {
+      "id": "SC-014",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "хочу открыть счёт внуку, ему 6 лет"
+        ],
+        "text": "я его мама",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-002",
+        "node_id": "legal_rep"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-002",
+          "title": "Счёт внуку, 6 лет",
+          "path": [
+            "Открытие счетов на несовершеннолетних",
+            "Законные представители"
+          ],
+          "node_id": "legal_rep",
+          "next_clarify": "Какой продукт нужен — «Растём вместе» или базовый текущий?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Законные представители (родители, опекуны, попечители) открывают счёт «от имени». Доступны текущий в белорусских рублях, текущий с базовыми условиями и вклад «Растём вместе» в рамках продукта «Детский».",
+            "operator_tip": "Какой продукт нужен — «Растём вместе» или базовый текущий?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Счёт внуку, 6 лет",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Счёт внуку, 6 лет",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 10.944
+        },
+        "request_id": "85d0ae98-3ca6-43b8-92dd-69399ec317a4"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 88.294
+    },
+    {
+      "id": "SC-015",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "как подключить оплату телефоном"
+        ],
+        "text": "у меня айфон",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-003",
+        "node_id": "ios"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-003",
+          "title": "Оплата телефоном (NFC)",
+          "path": [
+            "Оплата телефоном · NFC",
+            "iOS · Apple Pay"
+          ],
+          "node_id": "ios",
+          "next_clarify": ""
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "На iPhone оплата — через Apple Pay, если карта поддерживается. Добавьте карту в Wallet. Visa, Mastercard и Белкарт — по условиям банка; UnionPay уточните по статье СУЗ.",
+            "operator_tip": "",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Оплата телефоном (NFC)",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Оплата телефоном (NFC)",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 4.228
+        },
+        "request_id": "6234b9b1-0b70-4fc6-b095-7e1ae441408f"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 55.214
+    },
+    {
+      "id": "SC-016",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "как подключить оплату телефоном"
+        ],
+        "text": "телефон на андроид",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-003",
+        "node_id": "android"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-003",
+          "title": "Оплата телефоном (NFC)",
+          "path": [
+            "Оплата телефоном · NFC",
+            "Android"
+          ],
+          "node_id": "android",
+          "next_clarify": "Какое приложение и какая карта — Visa, Mastercard, Maestro, Белкарт или UnionPay?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "На Android доступны Belkart Pay, Samsung Pay, Garmin Pay, Swoo Pay, Huawei, Xiaomi Pay.",
+            "operator_tip": "Какое приложение и какая карта — Visa, Mastercard, Maestro, Белкарт или UnionPay?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Оплата телефоном (NFC)",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Оплата телефоном (NFC)",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 4.63
+        },
+        "request_id": "9bea268f-bdc6-4d7b-aa05-f08914bdbcd7"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 37.168
+    },
+    {
+      "id": "SC-017",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "хочу кредит на машину"
+        ],
+        "text": "автомобиль с пробегом",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-004",
+        "node_id": "used_auto"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-004",
+          "title": "Автокредит",
+          "path": [
+            "Кредит на автомобиль",
+            "Бывший в эксплуатации"
+          ],
+          "node_id": "used_auto",
+          "next_clarify": ""
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Кредит возможен на автомобиль с пробегом, если с момента выпуска не прошло 10 лет. Условия и пакет документов — по продукту «Кредит на приобретение автомобиля».",
+            "operator_tip": "",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Автокредит",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Автокредит",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 3.946
+        },
+        "request_id": "0bfd1b9e-5737-4199-9a57-6d99f5dc8cd1"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 30.333
+    },
+    {
+      "id": "SC-018",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "хочу кредит на машину"
+        ],
+        "text": "новая машина из салона",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-004",
+        "node_id": "new_auto"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-004",
+          "title": "Автокредит",
+          "path": [
+            "Кредит на автомобиль",
+            "Новый автомобиль"
+          ],
+          "node_id": "new_auto",
+          "next_clarify": "Покупаете у организации-партнёра банка?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "На новый автомобиль оформляют кредит на приобретение либо программу партнёра.",
+            "operator_tip": "Покупаете у организации-партнёра банка?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Автокредит",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Автокредит",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 4.533
+        },
+        "request_id": "24454634-4dc2-4cff-bbde-495020260170"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 32.75
+    },
+    {
+      "id": "SC-019",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "надо отправить деньги в россию"
+        ],
+        "text": "по номеру телефона через СБП",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-005",
+        "node_id": "phone_sbp"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-005",
+          "title": "Перевод в РФ",
+          "path": [
+            "Перевод в РФ",
+            "Телефон СБП"
+          ],
+          "node_id": "phone_sbp",
+          "next_clarify": ""
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "По номеру телефона РФ перевод идёт через СБП / мгновенный платёж, если канал это позволяет. Уточните комиссию и лимит в статье СУЗ перед ответом.",
+            "operator_tip": "",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Перевод в РФ",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Перевод в РФ",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 4.179
+        },
+        "request_id": "b5d1b9a7-aa7b-4467-a229-75071c5063f3"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 32.84
+    },
+    {
+      "id": "SC-020",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "надо отправить деньги в россию"
+        ],
+        "text": "есть SWIFT реквизиты",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-005",
+        "node_id": "swift"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-005",
+          "title": "Перевод в РФ",
+          "path": [
+            "Перевод в РФ",
+            "SWIFT-реквизиты"
+          ],
+          "node_id": "swift",
+          "next_clarify": ""
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Нужны: наименование банка, 9-значный БИК, корсчёт при наличии, счёт из 20 знаков, ИНН, ФИО получателя и код валютной операции Банка России (5 цифр) для рублей.",
+            "operator_tip": "",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Перевод в РФ",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Перевод в РФ",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 4.174
+        },
+        "request_id": "70a5ce8c-0ea7-4b3e-924d-928c618f0f06"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 34.297
+    },
+    {
+      "id": "SC-021",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "не помню пин от карты"
+        ],
+        "text": "да, пин раньше был",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-006",
+        "node_id": "had_pin"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-006",
+          "title": "PIN-код карты",
+          "path": [
+            "PIN-код карты",
+            "Пин был ранее"
+          ],
+          "node_id": "had_pin",
+          "next_clarify": "Клиент забыл пин? Где удобнее сменить — ИБ, МБ, инфокиоск или отделение?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Если пин уже выдавали, это смена или повторная генерация, а не первичное получение.",
+            "operator_tip": "Клиент забыл пин? Где удобнее сменить — ИБ, МБ, инфокиоск или отделение?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "PIN-код карты",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "PIN-код карты",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 5.163
+        },
+        "request_id": "7956c416-bdf4-4910-86db-1adefd24824e"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 36.871
+    },
+    {
+      "id": "SC-022",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "не помню пин от карты"
+        ],
+        "text": "нет, пин ещё не получал",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-006",
+        "node_id": "no_pin"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-006",
+          "title": "PIN-код карты",
+          "path": [
+            "PIN-код карты",
+            "Первичное получение PIN"
+          ],
+          "node_id": "no_pin",
+          "next_clarify": ""
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Первичный пин получают по инструкции банка (e-PIN / конверт — см. статью СУЗ). После выдачи смену делают в ИБ, МБ, инфокиоске или отделении.",
+            "operator_tip": "",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "PIN-код карты",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "PIN-код карты",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 3.538
+        },
+        "request_id": "d37da198-bd04-4625-bd59-656caf315f21"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 31.077
+    },
+    {
+      "id": "SC-023",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "нужна выписка со счёта для визы"
+        ],
+        "text": "на английском языке",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-007",
+        "node_id": "en"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-007",
+          "title": "Выписка для визы",
+          "path": [
+            "Выписка для визы",
+            "На английском"
+          ],
+          "node_id": "en",
+          "next_clarify": ""
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Документ на английском для визы чаще оформляют в отделении. Онлайн доступна обычная выписка; заверенный перевод / англоязычная справка — уточните в СУЗ.",
+            "operator_tip": "",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Выписка для визы",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Выписка для визы",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 3.785
+        },
+        "request_id": "4a666627-c895-4b24-bc0c-6147941d8484"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 35.017
+    },
+    {
+      "id": "SC-024",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "нужна выписка со счёта для визы"
+        ],
+        "text": "нужна мини-выписка",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-007",
+        "node_id": "mini"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-007",
+          "title": "Выписка для визы",
+          "path": [
+            "Выписка для визы",
+            "Мини-выписка"
+          ],
+          "node_id": "mini",
+          "next_clarify": ""
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Мини-выписку клиент печатает в инфокиоске или смотрит в мобильном / интернет-банке. Для визы посольство часто просит полную выписку или справку.",
+            "operator_tip": "",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Выписка для визы",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Выписка для визы",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 4.141
+        },
+        "request_id": "01d1c550-a295-4476-9dcb-1b38f06c7c42"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 43.454
+    },
+    {
+      "id": "SC-025",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "заканчивается срок вклада по стройсбережениям"
+        ],
+        "text": "нет, сумму не накопил",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-008",
+        "node_id": "not_enough"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-008",
+          "title": "Стройсбережения — срок вклада",
+          "path": [
+            "Стройсбережения · срок вклада",
+            "Сумму не накопил"
+          ],
+          "node_id": "not_enough",
+          "next_clarify": "Продолжаем копить или меняем план?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Если сумма не накоплена, можно продолжать копить или перейти на другой план накопления.",
+            "operator_tip": "Продолжаем копить или меняем план?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Стройсбережения — срок вклада",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Стройсбережения — срок вклада",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 4.728
+        },
+        "request_id": "cb20fe1a-7da3-4c6c-8e0c-5fb8a2840e36"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 32.611
+    },
+    {
+      "id": "SC-026",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "заканчивается срок вклада по стройсбережениям"
+        ],
+        "text": "да, сумму накопил",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-008",
+        "node_id": "enough"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-008",
+          "title": "Стройсбережения — срок вклада",
+          "path": [
+            "Стройсбережения · срок вклада",
+            "Сумму накопил"
+          ],
+          "node_id": "enough",
+          "next_clarify": "Жильё уже нашли?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Если сумма накоплена, следующий шаг — подобрать жильё и собрать пакет документов на кредит.",
+            "operator_tip": "Жильё уже нашли?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Стройсбережения — срок вклада",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Стройсбережения — срок вклада",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 5.702
+        },
+        "request_id": "4c38f477-d5c4-4ead-b0b4-fb0b7911f0ed"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 31.86
+    },
+    {
+      "id": "SC-027",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "перечислить деньги на криптобиржу"
+        ],
+        "text": "я физлицо, есть карта Visa",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-009",
+        "node_id": "fl"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-009",
+          "title": "Перевод на криптобиржу",
+          "path": [
+            "Перевод на криптобиржу",
+            "Физлицо"
+          ],
+          "node_id": "fl",
+          "next_clarify": "Какой вид карточки? Visa — WhiteBird / BYNEX?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Банк не консультирует по покупке и выводу цифровой валюты — направьте по месту обслуживания. Обычный перевод на счёт юрлица-биржи возможен как платёж на общих условиях.",
+            "operator_tip": "Какой вид карточки? Visa — WhiteBird / BYNEX?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Перевод на криптобиржу",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Перевод на криптобиржу",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 5.965
+        },
+        "request_id": "a40bc640-3d6a-42aa-8c28-5ee7dfc1fdfa"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 32.305
+    },
+    {
+      "id": "SC-028",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "перечислить деньги на криптобиржу"
+        ],
+        "text": "карты нет",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-009",
+        "node_id": "no_card"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-009",
+          "title": "Перевод на криптобиржу",
+          "path": [
+            "Перевод на криптобиржу",
+            "Нет карты"
+          ],
+          "node_id": "no_card",
+          "next_clarify": ""
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Без карты перевод на криптобиржу оформляют в отделении как обычный платёж на счёт юрлица, если это допустимо.",
+            "operator_tip": "",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Перевод на криптобиржу",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Перевод на криптобиржу",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 4.086
+        },
+        "request_id": "0bdcca16-ca55-4548-8b05-d80ec074ce82"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 31.095
+    },
+    {
+      "id": "SC-029",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "проверить российские рубли"
+        ],
+        "text": "это монеты",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-010",
+        "node_id": "coins"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-010",
+          "title": "Проверка российских рублей",
+          "path": [
+            "Проверка российских рублей",
+            "Монеты"
+          ],
+          "node_id": "coins",
+          "next_clarify": ""
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Монеты российские рубли в кассе на проверку/инкассо не принимают таким же порядком, как купюры. Направьте в отделение уточнить возможность приёма.",
+            "operator_tip": "",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Проверка российских рублей",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Проверка российских рублей",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 3.162
+        },
+        "request_id": "e9c647e7-8321-440f-913f-f08888c61dfb"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 29.126
+    },
+    {
+      "id": "SC-030",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "full_suggest",
+      "input": {
+        "prior_turns": [
+          "проверить российские рубли"
+        ],
+        "text": "бумажные купюры",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-010",
+        "node_id": "notes"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-010",
+          "title": "Проверка российских рублей",
+          "path": [
+            "Проверка российских рублей",
+            "Купюры"
+          ],
+          "node_id": "notes",
+          "next_clarify": "Нужна проверка подлинности или инкассо?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Купюры принимают на проверку подлинности или инкассо. Срок — в момент обращения либо по регламенту отделения. Комиссия — по СУЗ.",
+            "operator_tip": "Нужна проверка подлинности или инкассо?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Проверка российских рублей",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Проверка российских рублей",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 3.822
+        },
+        "request_id": "5c923826-65c4-4ae5-b90d-f3d3959379b4"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 29.142
+    },
+    {
+      "id": "SC-031",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "off_topic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "какая погода завтра в Минске",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.198
+        },
+        "request_id": "ea8452cd-bccc-4281-af17-550f8057a580"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 17.535
+    },
+    {
+      "id": "SC-032",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "off_topic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "посоветуйте фильм на вечер",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.199
+        },
+        "request_id": "99314196-8bee-4e21-a492-ca17f85d44bd"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 17.141
+    },
+    {
+      "id": "SC-033",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "off_topic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "кто выиграл вчера футбольный матч",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.272
+        },
+        "request_id": "15037b62-8f7c-4763-8076-40cf4d59f02b"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 24.383
+    },
+    {
+      "id": "SC-034",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "off_topic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "как приготовить борщ",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.23
+        },
+        "request_id": "bab3625a-3ff9-48fa-b684-2fdd99c82da6"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 21.711
+    },
+    {
+      "id": "SC-035",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "off_topic",
+      "layer": "full_suggest",
+      "input": {
+        "text": "расскажите гороскоп на сегодня",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": "no_hint_needed",
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 1.203
+        },
+        "request_id": "2563195a-1d24-4edb-8dff-8e1923c0bbe0"
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 20.955
+    },
+    {
+      "id": "KB-001",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Какой суточный лимит снятия наличных по дебетовой карте?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Лимиты снятия наличных"
+        ],
+        "required_concepts": [
+          "2 000 BYN"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Суточный лимит снятия наличных в банкоматах Беларусбанка для дебетовых карт составляет 2 000 BYN. Лимит обнуляется в 00:00 по минскому времени, при его превышении операция будет отклонена. Для снятия большей суммы можно воспользоваться кассой отделения или безналичным переводом.",
+            "operator_tip": "Клиент не уточнил тип карты, поэтому в ответе указан лимит именно для дебетовых карт. Если клиент уточнит, что карта кредитная, необходимо сообщить, что лимит зависит от доступного кредитного лимита.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.9429,
+            "relevance_percent": 94,
+            "citations": [
+              {
+                "article_id": 91001,
+                "chunk_index": 0,
+                "title": "Лимиты снятия наличных",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/otmena_ogranicheniy_po_karte/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91001,
+            "chunk_index": 0,
+            "title": "Лимиты снятия наличных",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/otmena_ogranicheniy_po_karte/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 37.544,
+          "rag": 18.791,
+          "llm": 2160.204,
+          "total": 2225.057
+        },
+        "request_id": "e891fe85-a3df-4f5f-84a9-852b5928e66e"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2243.961
+    },
+    {
+      "id": "KB-002",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Когда обновляется лимит снятия в банкомате?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Лимиты снятия наличных"
+        ],
+        "required_concepts": [
+          "00:00"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Лимит снятия наличных в банкоматах Беларусбанка обновляется ежедневно в 00:00 по минскому времени. Для дебетовых карт суточный лимит составляет 2 000 BYN, для кредитных карт он зависит от доступного кредитного лимита. При превышении лимита операция будет отклонена.",
+            "operator_tip": "Уточните у клиента тип карты, если это необходимо для более точного ответа.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.5667,
+            "relevance_percent": 57,
+            "citations": [
+              {
+                "article_id": 91001,
+                "chunk_index": 0,
+                "title": "Лимиты снятия наличных",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/otmena_ogranicheniy_po_karte/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91001,
+            "chunk_index": 0,
+            "title": "Лимиты снятия наличных",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/otmena_ogranicheniy_po_karte/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 31.189,
+          "rag": 19.655,
+          "llm": 1876.662,
+          "total": 1932.843
+        },
+        "request_id": "a43f545b-4190-43cf-b88b-5a6066567701"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 1953.861
+    },
+    {
+      "id": "KB-003",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Что произойдёт при превышении лимита банкомата?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Лимиты снятия наличных"
+        ],
+        "required_concepts": [
+          "отклон"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "При превышении суточного лимита снятия наличных операция в банкомате будет отклонена. Для дебетовых карт суточный лимит составляет 2 000 BYN, для кредитных карт лимит зависит от доступного кредитного лимита. Лимит обнуляется в 00:00 по минскому времени. В качестве альтернативы можно воспользоваться кассой отделения или безналичным переводом.",
+            "operator_tip": "Уточните у клиента тип карты, чтобы дать более точную информацию о лимите.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.64,
+            "relevance_percent": 64,
+            "citations": [
+              {
+                "article_id": 91001,
+                "chunk_index": 0,
+                "title": "Лимиты снятия наличных",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/otmena_ogranicheniy_po_karte/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91001,
+            "chunk_index": 0,
+            "title": "Лимиты снятия наличных",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/otmena_ogranicheniy_po_karte/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 31.112,
+          "rag": 17.792,
+          "llm": 2106.521,
+          "total": 2160.718
+        },
+        "request_id": "91874f6c-cdca-4ef0-a23f-28542e5641a5"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2178.077
+    },
+    {
+      "id": "KB-004",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Где снять сумму больше суточного лимита карты?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Лимиты снятия наличных"
+        ],
+        "required_concepts": [
+          "касса"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Для снятия суммы, превышающей суточный лимит карты, можно обратиться в кассу отделения Беларусбанка или воспользоваться безналичным переводом. Суточный лимит снятия наличных в банкоматах для дебетовых карт составляет 2 000 BYN, для кредитных карт лимит зависит от доступного кредитного лимита. Лимит обнуляется в 00:00 по минскому времени, при его превышении операция будет отклонена.",
+            "operator_tip": "Уточните у клиента тип карты (дебетовая или кредитная), чтобы при необходимости скорректировать информацию о лимите.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.6286,
+            "relevance_percent": 63,
+            "citations": [
+              {
+                "article_id": 91001,
+                "chunk_index": 0,
+                "title": "Лимиты снятия наличных",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/otmena_ogranicheniy_po_karte/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91001,
+            "chunk_index": 0,
+            "title": "Лимиты снятия наличных",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/otmena_ogranicheniy_po_karte/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 31.547,
+          "rag": 18.811,
+          "llm": 2144.611,
+          "total": 2201.263
+        },
+        "request_id": "7bf7c446-d9a2-46fe-9d43-ffee9d5b7190"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": false
+      },
+      "passed": false,
+      "latency_ms": 2224.592
+    },
+    {
+      "id": "KB-005",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Есть ли комиссия в банкомате Беларусбанка?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Комиссии банкоматов"
+        ],
+        "required_concepts": [
+          "не взимается"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Комиссия за снятие наличных в банкоматах Беларусбанка для карт банка не взимается в пределах тарифа. При снятии в банкоматах других банков комиссия составит от 1,5% от суммы, минимум 3 BYN, в зависимости от типа карты и банка-эмитента.",
+            "operator_tip": "Уточните у клиента тип карты, если это необходимо для более точного ответа о тарифе.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.85,
+            "relevance_percent": 85,
+            "citations": [
+              {
+                "article_id": 91002,
+                "chunk_index": 0,
+                "title": "Комиссии банкоматов",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91002,
+            "chunk_index": 0,
+            "title": "Комиссии банкоматов",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 55.97,
+          "rag": 29.399,
+          "llm": 1949.774,
+          "total": 2047.498
+        },
+        "request_id": "91d47829-6af8-4403-8b69-e016554e7815"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2067.6
+    },
+    {
+      "id": "KB-006",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Сколько стоит снять наличные в банкомате другого банка?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Комиссии банкоматов"
+        ],
+        "required_concepts": [
+          "1,5%",
+          "3 BYN"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Комиссия за снятие наличных в банкоматах других банков составляет от 1,5% от суммы, минимум 3 BYN. Точный размер зависит от типа вашей карты и банка-эмитента.",
+            "operator_tip": "Если клиент уточнит тип карты, можно проверить индивидуальный тариф по конкретному продукту.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.7,
+            "relevance_percent": 70,
+            "citations": [
+              {
+                "article_id": 91002,
+                "chunk_index": 0,
+                "title": "Комиссии банкоматов",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91002,
+            "chunk_index": 0,
+            "title": "Комиссии банкоматов",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 31.793,
+          "rag": 19.444,
+          "llm": 1906.094,
+          "total": 1962.824
+        },
+        "request_id": "db342559-68e6-4e8b-89db-2e1b068b66b4"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 1986.661
+    },
+    {
+      "id": "KB-007",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "От чего зависит комиссия другого банкомата?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Комиссии банкоматов"
+        ],
+        "required_concepts": [
+          "тип"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Комиссия за снятие наличных в банкоматах других банков составляет от 1,5% от суммы, минимум 3 BYN. Точный размер комиссии зависит от типа вашей карты и банка-эмитента. При снятии в банкоматах Беларусбанка комиссия не взимается в пределах тарифа.",
+            "operator_tip": "Если клиент уточнит тип карты, можно дополнительно проверить тариф по конкретному продукту.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.9,
+            "relevance_percent": 90,
+            "citations": [
+              {
+                "article_id": 91002,
+                "chunk_index": 0,
+                "title": "Комиссии банкоматов",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91002,
+            "chunk_index": 0,
+            "title": "Комиссии банкоматов",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 29.71,
+          "rag": 19.394,
+          "llm": 1820.673,
+          "total": 1875.253
+        },
+        "request_id": "aadff5dd-69ca-4542-ba06-4b718d85bdbd"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 1896.019
+    },
+    {
+      "id": "KB-008",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Как открыть вклад в Беларусбанке?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Открытие вклада"
+        ],
+        "required_concepts": [
+          "отделен"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Открыть вклад в Беларусбанке можно в отделении или дистанционно. Для этого понадобятся паспорт и текущий счёт. Вклады доступны в белорусских рублях и в валюте, а условия по ставке зависят от срока и выбранного продукта. Оформить вклад можно в отделении банка или через интернет-банк.",
+            "operator_tip": "Уточните у клиента, какой тип вклада его интересует, чтобы дать более подробную информацию о ставках и условиях.",
+            "source_type": "knowledge_base",
+            "relevance_score": 1.0,
+            "relevance_percent": 100,
+            "citations": [
+              {
+                "article_id": 91003,
+                "chunk_index": 0,
+                "title": "Открытие вклада",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/vklady/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91003,
+            "chunk_index": 0,
+            "title": "Открытие вклада",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/vklady/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 30.4,
+          "rag": 19.088,
+          "llm": 2258.705,
+          "total": 2314.545
+        },
+        "request_id": "bd49df68-b8e6-4d9e-8d40-d2515a88a011"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2332.251
+    },
+    {
+      "id": "KB-009",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Какие документы нужны для открытия вклада?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Открытие вклада"
+        ],
+        "required_concepts": [
+          "паспорт"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Для открытия вклада в Беларусбанке потребуются паспорт и текущий счёт. Оформить вклад можно в отделении банка или дистанционно через интернет-банк. Доступны вклады в белорусских рублях и иностранной валюте, а условия по процентной ставке зависят от выбранного срока и продукта.",
+            "operator_tip": "Уточните у клиента, планирует ли он открывать вклад в отделении или дистанционно, чтобы дать более детальную инструкцию.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.7667,
+            "relevance_percent": 77,
+            "citations": [
+              {
+                "article_id": 91003,
+                "chunk_index": 0,
+                "title": "Открытие вклада",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/vklady/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91003,
+            "chunk_index": 0,
+            "title": "Открытие вклада",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/vklady/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 30.472,
+          "rag": 20.497,
+          "llm": 2178.307,
+          "total": 2235.143
+        },
+        "request_id": "2f7e337c-4ad7-45db-b4aa-891bc65e48a0"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2255.717
+    },
+    {
+      "id": "KB-010",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Можно ли открыть вклад дистанционно?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Открытие вклада"
+        ],
+        "required_concepts": [
+          "интернет-банк"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Да, открыть вклад можно дистанционно, например, через интернет-банк. Для этого понадобятся паспорт и текущий счёт. Вклады доступны в белорусских рублях и иностранной валюте, а условия по ставке зависят от срока и выбранного продукта.",
+            "operator_tip": "Уточните у клиента, каким именно дистанционным каналом он планирует воспользоваться, если это потребуется для дальнейшей консультации.",
+            "source_type": "knowledge_base",
+            "relevance_score": 1.0,
+            "relevance_percent": 100,
+            "citations": [
+              {
+                "article_id": 91003,
+                "chunk_index": 0,
+                "title": "Открытие вклада",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/vklady/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91003,
+            "chunk_index": 0,
+            "title": "Открытие вклада",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/vklady/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 30.634,
+          "rag": 17.961,
+          "llm": 2155.278,
+          "total": 2210.12
+        },
+        "request_id": "d3c93035-9ce5-4cc8-a103-a1b9dc0c878b"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2227.646
+    },
+    {
+      "id": "KB-011",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Как срочно заблокировать потерянную карту?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Блокировка карты"
+        ],
+        "required_concepts": [
+          "147"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Карту можно срочно заблокировать в мобильном приложении, интернет-банке или по телефону контакт-центра 147. После блокировки операции по карте станут недоступны. Для выпуска новой карты необходимо обратиться в отделение банка с паспортом.",
+            "operator_tip": "Уточните у клиента, каким способом ему удобнее заблокировать карту, и напомните про номер 147 для экстренной блокировки.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.5667,
+            "relevance_percent": 57,
+            "citations": [
+              {
+                "article_id": 91004,
+                "chunk_index": 0,
+                "title": "Блокировка карты",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/uslugi_globalnoy_podderzhki_derzhateley_kartochek/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91004,
+            "chunk_index": 0,
+            "title": "Блокировка карты",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/uslugi_globalnoy_podderzhki_derzhateley_kartochek/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 36.345,
+          "rag": 21.602,
+          "llm": 2064.756,
+          "total": 2128.585
+        },
+        "request_id": "391dd6f3-acd5-4c29-a243-452e18b1ebf5"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2154.339
+    },
+    {
+      "id": "KB-012",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Можно ли заблокировать карту в приложении?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Блокировка карты"
+        ],
+        "required_concepts": [
+          "мобильн"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Да, карту можно заблокировать в мобильном приложении. Также это можно сделать в интернет-банке или по телефону контакт-центра 147. После блокировки операции по карте станут недоступны. Для выпуска новой карты необходимо обратиться в отделение банка с паспортом.",
+            "operator_tip": "",
+            "source_type": "knowledge_base",
+            "relevance_score": 1.0,
+            "relevance_percent": 100,
+            "citations": [
+              {
+                "article_id": 91004,
+                "chunk_index": 0,
+                "title": "Блокировка карты",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/uslugi_globalnoy_podderzhki_derzhateley_kartochek/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91004,
+            "chunk_index": 0,
+            "title": "Блокировка карты",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/uslugi_globalnoy_podderzhki_derzhateley_kartochek/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 39.346,
+          "rag": 18.123,
+          "llm": 1610.93,
+          "total": 1674.251
+        },
+        "request_id": "22d6f9e3-fdbf-46cd-9b93-7f345aac9bc7"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 1693.7
+    },
+    {
+      "id": "KB-013",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Что делать после блокировки украденной карты?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Блокировка карты"
+        ],
+        "required_concepts": [
+          "нов"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "После блокировки карты операции по ней становятся недоступны. Для выпуска новой карты необходимо обратиться в отделение банка с паспортом.",
+            "operator_tip": "Уточните у клиента, была ли карта заблокирована через мобильное приложение, интернет-банк или по телефону 147, чтобы подтвердить корректность процедуры.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.68,
+            "relevance_percent": 68,
+            "citations": [
+              {
+                "article_id": 91004,
+                "chunk_index": 0,
+                "title": "Блокировка карты",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/uslugi_globalnoy_podderzhki_derzhateley_kartochek/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91004,
+            "chunk_index": 0,
+            "title": "Блокировка карты",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/uslugi_globalnoy_podderzhki_derzhateley_kartochek/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 37.62,
+          "rag": 21.463,
+          "llm": 1953.236,
+          "total": 2019.073
+        },
+        "request_id": "146fd68e-0cbc-4297-b501-421ff46ce26b"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2046.376
+    },
+    {
+      "id": "KB-014",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Где изменить ПИН-код карты?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Пин-код карты"
+        ],
+        "required_concepts": [
+          "банкомат"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Сменить ПИН-код карты можно в банкомате Беларусбанка при наличии самой карты. Если ПИН-код забыт, для его восстановления необходимо оформить перевыпуск карты в отделении банка. Не сообщайте ПИН-код третьим лицам и оператору чата.",
+            "operator_tip": "Уточните у клиента, доступна ли ему карта для смены ПИН-кода в банкомате, чтобы предложить соответствующий вариант действий.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.9333,
+            "relevance_percent": 93,
+            "citations": [
+              {
+                "article_id": 91005,
+                "chunk_index": 0,
+                "title": "Пин-код карты",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/pravila_polzovaniya_kartochkoy_1/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91005,
+            "chunk_index": 0,
+            "title": "Пин-код карты",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/pravila_polzovaniya_kartochkoy_1/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 46.053,
+          "rag": 21.457,
+          "llm": 2092.308,
+          "total": 2173.037
+        },
+        "request_id": "06002176-db4b-4cb4-9ae2-1b797c6eb524"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2223.454
+    },
+    {
+      "id": "KB-015",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Что делать, если я забыл ПИН?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Пин-код карты"
+        ],
+        "required_concepts": [
+          "перевыпуск"
+        ]
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-006",
+          "title": "PIN-код карты",
+          "path": [
+            "PIN-код карты"
+          ],
+          "node_id": "start",
+          "next_clarify": "Пин-код по этой карте уже выдавали раньше?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Пин-код по этой карте уже выдавали раньше?",
+            "operator_tip": "Пин-код по этой карте уже выдавали раньше?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "PIN-код карты",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "PIN-код карты",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 11.505
+        },
+        "request_id": "fe3a4bc7-31c8-4cd4-9af4-3a0ff12c8595"
+      },
+      "checks": {
+        "routing": false,
+        "source_title": false,
+        "required_concepts": false
+      },
+      "passed": false,
+      "latency_ms": 35.855
+    },
+    {
+      "id": "KB-016",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Можно ли сообщать ПИН оператору?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Пин-код карты"
+        ],
+        "required_concepts": [
+          "не сообщ"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Сообщать ПИН-код оператору нельзя. ПИН-код не сообщается третьим лицам и оператору чата. Если вы забыли ПИН, оформите перевыпуск карты в отделении банка.",
+            "operator_tip": "Уточните у клиента, нужна ли дополнительная информация о процедуре перевыпуска карты.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.8,
+            "relevance_percent": 80,
+            "citations": [
+              {
+                "article_id": 91005,
+                "chunk_index": 0,
+                "title": "Пин-код карты",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/cards/pravila_polzovaniya_kartochkoy_1/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91005,
+            "chunk_index": 0,
+            "title": "Пин-код карты",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/cards/pravila_polzovaniya_kartochkoy_1/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 36.412,
+          "rag": 20.165,
+          "llm": 1967.205,
+          "total": 2029.848
+        },
+        "request_id": "83612b67-7ec8-4a7b-aa2d-990d7d605022"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2046.287
+    },
+    {
+      "id": "KB-017",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Как подключить интернет-банк?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Интернет-банк"
+        ],
+        "required_concepts": [
+          "отделен"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Подключение интернет-банка выполняется в отделении банка или через мобильное приложение при наличии карты. Для входа в систему потребуется логин и пароль. Если доступ утерян, восстановить пароль можно на сайте или в отделении банка.",
+            "operator_tip": "Уточните у клиента, есть ли у него карта Беларусбанка, чтобы предложить наиболее удобный способ подключения.",
+            "source_type": "knowledge_base",
+            "relevance_score": 1.0,
+            "relevance_percent": 100,
+            "citations": [
+              {
+                "article_id": 91006,
+                "chunk_index": 0,
+                "title": "Интернет-банк",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91006,
+            "chunk_index": 0,
+            "title": "Интернет-банк",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 29.808,
+          "rag": 18.009,
+          "llm": 1872.443,
+          "total": 1925.714
+        },
+        "request_id": "c3104eb7-5a13-4d85-9774-632378e11b35"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 1944.628
+    },
+    {
+      "id": "KB-018",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Что нужно для входа в интернет-банк?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Интернет-банк"
+        ],
+        "required_concepts": [
+          "логин",
+          "пароль"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Для входа в интернет-банк Беларусбанка нужны логин и пароль. Подключение выполняется в отделении банка или через мобильное приложение при наличии карты. Если доступ утерян, восстановите пароль на сайте или в отделении.",
+            "operator_tip": "Уточните у клиента, есть ли у него карта Беларусбанка, чтобы подсказать более конкретный способ подключения.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.85,
+            "relevance_percent": 85,
+            "citations": [
+              {
+                "article_id": 91006,
+                "chunk_index": 0,
+                "title": "Интернет-банк",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91006,
+            "chunk_index": 0,
+            "title": "Интернет-банк",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 36.058,
+          "rag": 22.623,
+          "llm": 1720.121,
+          "total": 1786.175
+        },
+        "request_id": "4d8ead14-4af1-4d39-bc29-e6374fd7e326"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 1816.092
+    },
+    {
+      "id": "KB-019",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Как восстановить доступ к интернет-банку?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Интернет-банк"
+        ],
+        "required_concepts": [
+          "восстанов"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Для восстановления доступа к интернет-банку необходимо восстановить пароль. Это можно сделать на сайте банка или в отделении Беларусбанка. При обращении в отделение при себе нужно иметь документ, удостоверяющий личность.",
+            "operator_tip": "Уточните у клиента, есть ли у него доступ к мобильному приложению, чтобы предложить наиболее удобный способ восстановления.",
+            "source_type": "knowledge_base",
+            "relevance_score": 1.0,
+            "relevance_percent": 100,
+            "citations": [
+              {
+                "article_id": 91006,
+                "chunk_index": 0,
+                "title": "Интернет-банк",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91006,
+            "chunk_index": 0,
+            "title": "Интернет-банк",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 30.718,
+          "rag": 23.449,
+          "llm": 1903.956,
+          "total": 1964.614
+        },
+        "request_id": "be6b8ed2-cb3b-4be1-a4bc-0acda2d550b8"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 1991.971
+    },
+    {
+      "id": "KB-020",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Как перевести деньги по номеру телефона?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Перевод по номеру телефона"
+        ],
+        "required_concepts": [
+          "приложен"
+        ]
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-005",
+          "title": "Перевод в РФ",
+          "path": [
+            "Перевод в РФ"
+          ],
+          "node_id": "start",
+          "next_clarify": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?",
+            "operator_tip": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Перевод в РФ",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Перевод в РФ",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 11.183
+        },
+        "request_id": "85c3af96-0c50-4c56-8e37-f318e07eb934"
+      },
+      "checks": {
+        "routing": false,
+        "source_title": false,
+        "required_concepts": false
+      },
+      "passed": false,
+      "latency_ms": 36.207
+    },
+    {
+      "id": "KB-021",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Когда видна комиссия перевода по номеру телефона?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Перевод по номеру телефона"
+        ],
+        "required_concepts": [
+          "до подтверждения"
+        ]
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-005",
+          "title": "Перевод в РФ",
+          "path": [
+            "Перевод в РФ"
+          ],
+          "node_id": "start",
+          "next_clarify": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?",
+            "operator_tip": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Перевод в РФ",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Перевод в РФ",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 8.844
+        },
+        "request_id": "2815fcf3-afd1-428a-a323-4279324b687f"
+      },
+      "checks": {
+        "routing": false,
+        "source_title": false,
+        "required_concepts": false
+      },
+      "passed": false,
+      "latency_ms": 29.455
+    },
+    {
+      "id": "KB-022",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "От чего зависит лимит перевода по телефону?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Перевод по номеру телефона"
+        ],
+        "required_concepts": [
+          "тариф"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Лимит перевода по телефону зависит от установленного суточного лимита на международные операции и статуса вашей карты. Для оформления перевода в Россию через мобильный банк необходимо, чтобы действующий лимит на международные операции был активен. Комиссия за перевод рассчитывается в зависимости от суммы и валюты перевода.",
+            "operator_tip": "Уточните у клиента тип карты и валюту перевода, чтобы проверить актуальный суточный лимит.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.7429,
+            "relevance_percent": 74,
+            "citations": [
+              {
+                "article_id": 91013,
+                "chunk_index": 0,
+                "title": "Переводы в РФ",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/m-banking/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91013,
+            "chunk_index": 0,
+            "title": "Переводы в РФ",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/m-banking/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 31.12,
+          "rag": 21.133,
+          "llm": 2091.349,
+          "total": 2149.953
+        },
+        "request_id": "4dcc1eb8-d1d3-41cc-b08e-9e412f99be35"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": false,
+        "required_concepts": false
+      },
+      "passed": false,
+      "latency_ms": 2168.26
+    },
+    {
+      "id": "KB-023",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Как оформить кредитную карту?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Кредитная карта"
+        ],
+        "required_concepts": [
+          "заявк"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Для оформления кредитной карты Беларусбанка подайте заявку в отделении банка или онлайн. Потребуются паспорт и сведения о доходах. Решение принимается после проверки, а льготный период и ставка зависят от выбранного продукта.",
+            "operator_tip": "Уточните у клиента, какой именно продукт он рассматривает, чтобы дать более детальную информацию.",
+            "source_type": "knowledge_base",
+            "relevance_score": 1.0,
+            "relevance_percent": 100,
+            "citations": [
+              {
+                "article_id": 91008,
+                "chunk_index": 0,
+                "title": "Кредитная карта",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/kredit/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91008,
+            "chunk_index": 0,
+            "title": "Кредитная карта",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/kredit/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 30.164,
+          "rag": 19.497,
+          "llm": 1979.25,
+          "total": 2035.361
+        },
+        "request_id": "981d3c5c-774b-4cfd-9d17-2cf112758617"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2054.376
+    },
+    {
+      "id": "KB-024",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Какие документы нужны для кредитной карты?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Кредитная карта"
+        ],
+        "required_concepts": [
+          "доход"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Для оформления кредитной карты Беларусбанка потребуются паспорт и сведения о доходах. Заявку можно подать в отделении банка или онлайн. Решение о выдаче карты принимается после проверки предоставленных данных.",
+            "operator_tip": "Уточните у клиента, какой именно продукт он рассматривает, так как льготный период и ставка зависят от выбранного варианта.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.48,
+            "relevance_percent": 48,
+            "citations": [
+              {
+                "article_id": 91008,
+                "chunk_index": 0,
+                "title": "Кредитная карта",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/kredit/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91008,
+            "chunk_index": 0,
+            "title": "Кредитная карта",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/kredit/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 30.137,
+          "rag": 18.264,
+          "llm": 1799.075,
+          "total": 1853.337
+        },
+        "request_id": "28e88654-f78f-43c8-ba0e-58eb15a9ae63"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 1872.437
+    },
+    {
+      "id": "KB-025",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "От чего зависит льготный период кредитной карты?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Кредитная карта"
+        ],
+        "required_concepts": [
+          "продукт"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Льготный период кредитной карты зависит от выбранного продукта. Для получения точной информации по конкретной карте необходимо уточнить условия выбранного тарифного плана.",
+            "operator_tip": "Уточните у клиента, какой именно продукт или тип карты его интересует, чтобы предоставить более детальную информацию.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.7714,
+            "relevance_percent": 77,
+            "citations": [
+              {
+                "article_id": 91008,
+                "chunk_index": 0,
+                "title": "Кредитная карта",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/kredit/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91008,
+            "chunk_index": 0,
+            "title": "Кредитная карта",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/kredit/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 36.773,
+          "rag": 25.758,
+          "llm": 2142.047,
+          "total": 2213.37
+        },
+        "request_id": "0598ff0d-6214-4cab-af95-cdf557c24d11"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2237.914
+    },
+    {
+      "id": "KB-026",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Где посмотреть реквизиты счёта?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Реквизиты для перевода"
+        ],
+        "required_concepts": [
+          "интернет-банк"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Реквизиты счёта Беларусбанка доступны в интернет-банке, мобильном приложении и в отделении банка. Для перевода из другого банка потребуются IBAN, БИК и назначение платежа. Перед переводом уточните валюту счёта.",
+            "operator_tip": "Если клиент уточнит, для какой валюты нужны реквизиты, уточните это в ответе.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.64,
+            "relevance_percent": 64,
+            "citations": [
+              {
+                "article_id": 91009,
+                "chunk_index": 0,
+                "title": "Реквизиты для перевода",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91009,
+            "chunk_index": 0,
+            "title": "Реквизиты для перевода",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 52.526,
+          "rag": 17.505,
+          "llm": 1961.65,
+          "total": 2037.74
+        },
+        "request_id": "6fd1cc7a-3cf4-4057-bfee-704d886aa1b1"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2069.357
+    },
+    {
+      "id": "KB-027",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Какие реквизиты нужны для перевода из другого банка?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Реквизиты для перевода"
+        ],
+        "required_concepts": [
+          "IBAN",
+          "БИК"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Для перевода из другого банка на счёт в Беларусбанке необходимы IBAN, БИК и назначение платежа. Реквизиты доступны в интернет-банке, мобильном приложении и в отделении банка. Перед переводом уточните валюту счёта.",
+            "operator_tip": "Уточните у клиента валюту счёта, если она не была указана ранее, чтобы дать более точную инструкцию.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.9429,
+            "relevance_percent": 94,
+            "citations": [
+              {
+                "article_id": 91009,
+                "chunk_index": 0,
+                "title": "Реквизиты для перевода",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91009,
+            "chunk_index": 0,
+            "title": "Реквизиты для перевода",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 54.301,
+          "rag": 21.396,
+          "llm": 2133.272,
+          "total": 2217.846
+        },
+        "request_id": "eca37583-db38-4317-a41d-f87c3a2271a0"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2249.573
+    },
+    {
+      "id": "KB-028",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Нужно ли уточнять валюту счёта для перевода?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Реквизиты для перевода"
+        ],
+        "required_concepts": [
+          "валют"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Да, валюту счёта необходимо уточнить перед переводом. Реквизиты счёта Беларусбанка доступны в интернет-банке, мобильном приложении и в отделении. Для перевода из другого банка потребуются IBAN, БИК и назначение платежа.",
+            "operator_tip": "Уточните у клиента, из какого банка и в какой валюте планируется перевод, чтобы дать более точную инструкцию.",
+            "source_type": "knowledge_base",
+            "relevance_score": 1.0,
+            "relevance_percent": 100,
+            "citations": [
+              {
+                "article_id": 91009,
+                "chunk_index": 0,
+                "title": "Реквизиты для перевода",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91009,
+            "chunk_index": 0,
+            "title": "Реквизиты для перевода",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 33.694,
+          "rag": 20.143,
+          "llm": 1936.015,
+          "total": 1996.767
+        },
+        "request_id": "7e6e1398-33cc-431b-a4ac-99534d172535"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2015.882
+    },
+    {
+      "id": "KB-029",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "До скольких работают отделения в будни?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "График работы отделений"
+        ],
+        "required_concepts": [
+          "19:00"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Большинство отделений Беларусбанка в будние дни работают с 09:00 до 19:00, в субботу — сокращённый день. Точный график зависит от конкретного отделения, поэтому актуальные часы работы можно уточнить на сайте банка в разделе отделений.",
+            "operator_tip": "Если клиент назовёт конкретное отделение, можно предложить уточнить его график на сайте.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.92,
+            "relevance_percent": 92,
+            "citations": [
+              {
+                "article_id": 91010,
+                "chunk_index": 0,
+                "title": "График работы отделений",
+                "permalink": "https://belarusbank.by/map/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91010,
+            "chunk_index": 0,
+            "title": "График работы отделений",
+            "permalink": "https://belarusbank.by/map/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 33.352,
+          "rag": 18.866,
+          "llm": 2181.541,
+          "total": 2239.904
+        },
+        "request_id": "95d9c233-0601-4aa1-a7db-46eb26233393"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2260.601
+    },
+    {
+      "id": "KB-030",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Как работают отделения в субботу?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "График работы отделений"
+        ],
+        "required_concepts": [
+          "сокращ"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Большинство отделений Беларусбанка работают в субботу по сокращённому графику. Точное время работы зависит от конкретного отделения, поэтому актуальные часы можно уточнить на сайте банка в разделе отделений.",
+            "operator_tip": "Если клиент назовёт конкретное отделение, можно предложить уточнить его график на сайте.",
+            "source_type": "knowledge_base",
+            "relevance_score": 1.0,
+            "relevance_percent": 100,
+            "citations": [
+              {
+                "article_id": 91010,
+                "chunk_index": 0,
+                "title": "График работы отделений",
+                "permalink": "https://belarusbank.by/map/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91010,
+            "chunk_index": 0,
+            "title": "График работы отделений",
+            "permalink": "https://belarusbank.by/map/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 31.064,
+          "rag": 19.32,
+          "llm": 2035.919,
+          "total": 2093.489
+        },
+        "request_id": "7fd49cf4-4c6c-4c4b-9515-54bc075719cf"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2114.173
+    },
+    {
+      "id": "KB-031",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Где проверить точный график отделения?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "График работы отделений"
+        ],
+        "required_concepts": [
+          "сайт"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Точный график работы конкретного отделения можно проверить на официальном сайте Беларусбанка в разделе отделений по адресу belarusbank.by/map. Большинство отделений работают в будни с 09:00 до 19:00, в субботу — сокращённый день, но актуальные часы зависят от конкретного отделения.",
+            "operator_tip": "Если клиент назовёт город или адрес, можно уточнить, что информацию нужно смотреть именно по этому отделению на карте сайта.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.6571,
+            "relevance_percent": 66,
+            "citations": [
+              {
+                "article_id": 91010,
+                "chunk_index": 0,
+                "title": "График работы отделений",
+                "permalink": "https://belarusbank.by/map/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91010,
+            "chunk_index": 0,
+            "title": "График работы отделений",
+            "permalink": "https://belarusbank.by/map/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 35.302,
+          "rag": 19.418,
+          "llm": 2063.028,
+          "total": 2123.802
+        },
+        "request_id": "7c849a83-e994-47ca-9789-f9e79e46f2b8"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2142.319
+    },
+    {
+      "id": "KB-032",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Как подключить SMS-оповещения по карте?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "SMS-оповещения"
+        ],
+        "required_concepts": [
+          "приложен"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Услуга SMS-оповещений по операциям с картой подключается в интернет-банке, мобильном приложении или в отделении банка. Оповещения будут приходить на номер телефона, который привязан к вашей карте. Тариф за услугу зависит от вашего пакета обслуживания.",
+            "operator_tip": "Уточните у клиента, каким способом ему удобнее подключить услугу, и при необходимости напомните про зависимость тарифа от пакета обслуживания.",
+            "source_type": "knowledge_base",
+            "relevance_score": 1.0,
+            "relevance_percent": 100,
+            "citations": [
+              {
+                "article_id": 91011,
+                "chunk_index": 0,
+                "title": "SMS-оповещения",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/razblokirovka_po_sms/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91011,
+            "chunk_index": 0,
+            "title": "SMS-оповещения",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/razblokirovka_po_sms/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 38.1,
+          "rag": 33.637,
+          "llm": 2079.051,
+          "total": 2157.03
+        },
+        "request_id": "79382df8-884a-49db-9f70-34b77f746c0f"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2180.955
+    },
+    {
+      "id": "KB-033",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "На какой номер приходят SMS по операциям?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "SMS-оповещения"
+        ],
+        "required_concepts": [
+          "привязан"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "SMS-оповещения по операциям с картой приходят на номер мобильного телефона, который привязан к вашей карте. Услуга подключается в интернет-банке, мобильном приложении или в отделении банка. Тариф услуги зависит от вашего пакета обслуживания.",
+            "operator_tip": "Уточните у клиента, если он хочет изменить номер для оповещений, чтобы предложить порядок действий.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.8667,
+            "relevance_percent": 87,
+            "citations": [
+              {
+                "article_id": 91011,
+                "chunk_index": 0,
+                "title": "SMS-оповещения",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/razblokirovka_po_sms/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91011,
+            "chunk_index": 0,
+            "title": "SMS-оповещения",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/razblokirovka_po_sms/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 30.076,
+          "rag": 19.067,
+          "llm": 2188.15,
+          "total": 2242.728
+        },
+        "request_id": "554f0931-bd87-4f69-86d8-6a9292cecd80"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2260.3
+    },
+    {
+      "id": "KB-034",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "От чего зависит цена SMS-оповещений?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "SMS-оповещения"
+        ],
+        "required_concepts": [
+          "пакет"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Стоимость SMS-оповещений зависит от пакета обслуживания вашей карты. Услуга подключается в интернет-банке, мобильном приложении или в отделении банка, а оповещения приходят на номер телефона, привязанный к карте.",
+            "operator_tip": "Уточните у клиента, какой у него пакет обслуживания, чтобы дать более точную информацию о тарифе.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.7333,
+            "relevance_percent": 73,
+            "citations": [
+              {
+                "article_id": 91011,
+                "chunk_index": 0,
+                "title": "SMS-оповещения",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/razblokirovka_po_sms/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91011,
+            "chunk_index": 0,
+            "title": "SMS-оповещения",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/razblokirovka_po_sms/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 32.694,
+          "rag": 17.855,
+          "llm": 1908.785,
+          "total": 1966.471
+        },
+        "request_id": "13a0a7e2-e894-4dcf-9f77-a6b3a4df95b0"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 1989.514
+    },
+    {
+      "id": "KB-035",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Как закрыть текущий счёт?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Закрытие счёта"
+        ],
+        "required_concepts": [
+          "паспорт"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Для закрытия текущего счёта обратитесь в отделение Беларусбанка с паспортом. Перед закрытием необходимо погасить все задолженности и перевести остаток средств. Карты, привязанные к счёту, будут заблокированы.",
+            "operator_tip": "Уточните у клиента, есть ли у него привязанные карты, чтобы предупредить о блокировке.",
+            "source_type": "knowledge_base",
+            "relevance_score": 1.0,
+            "relevance_percent": 100,
+            "citations": [
+              {
+                "article_id": 91012,
+                "chunk_index": 0,
+                "title": "Закрытие счёта",
+                "permalink": "https://belarusbank.by/o-banke/press/kontakt-centr/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91012,
+            "chunk_index": 0,
+            "title": "Закрытие счёта",
+            "permalink": "https://belarusbank.by/o-banke/press/kontakt-centr/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 32.344,
+          "rag": 26.754,
+          "llm": 1991.957,
+          "total": 2058.102
+        },
+        "request_id": "2dde6541-78d2-4eda-a33b-65bc9f69d6c3"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2078.14
+    },
+    {
+      "id": "KB-036",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Что сделать с остатком перед закрытием счёта?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Закрытие счёта"
+        ],
+        "required_concepts": [
+          "остаток"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Перед закрытием счёта необходимо погасить все задолженности и перевести остаток средств на другой счёт или снять его. После этого обратитесь в отделение банка с паспортом для оформления закрытия. Карты, привязанные к счёту, будут заблокированы.",
+            "operator_tip": "Уточните у клиента, есть ли у него задолженности по счёту, чтобы предупредить о необходимости их погашения.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.9333,
+            "relevance_percent": 93,
+            "citations": [
+              {
+                "article_id": 91012,
+                "chunk_index": 0,
+                "title": "Закрытие счёта",
+                "permalink": "https://belarusbank.by/o-banke/press/kontakt-centr/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91012,
+            "chunk_index": 0,
+            "title": "Закрытие счёта",
+            "permalink": "https://belarusbank.by/o-banke/press/kontakt-centr/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 32.492,
+          "rag": 19.401,
+          "llm": 2022.495,
+          "total": 2080.114
+        },
+        "request_id": "f20931a6-8a2a-4b11-8c23-15ead1b596c5"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2098.89
+    },
+    {
+      "id": "KB-037",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Что будет с картами после закрытия счёта?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Закрытие счёта"
+        ],
+        "required_concepts": [
+          "заблок"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "После закрытия счёта все карты, привязанные к нему, будут заблокированы. Для закрытия счёта необходимо обратиться в отделение банка с паспортом, предварительно погасив задолженности и переведя остаток средств.",
+            "operator_tip": "Уточните у клиента, есть ли у него задолженность или остаток на счёте, чтобы напомнить о необходимости их урегулирования до визита в отделение.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.7667,
+            "relevance_percent": 77,
+            "citations": [
+              {
+                "article_id": 91012,
+                "chunk_index": 0,
+                "title": "Закрытие счёта",
+                "permalink": "https://belarusbank.by/o-banke/press/kontakt-centr/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91012,
+            "chunk_index": 0,
+            "title": "Закрытие счёта",
+            "permalink": "https://belarusbank.by/o-banke/press/kontakt-centr/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 30.918,
+          "rag": 18.761,
+          "llm": 2088.37,
+          "total": 2143.481
+        },
+        "request_id": "bfdfd645-49bc-4b33-beaf-17e772b3ecd4"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2179.066
+    },
+    {
+      "id": "KB-038",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Как сделать перевод в Россию через мобильный банк?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Переводы в РФ"
+        ],
+        "required_concepts": [
+          "Платежи"
+        ]
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-005",
+          "title": "Перевод в РФ",
+          "path": [
+            "Перевод в РФ"
+          ],
+          "node_id": "start",
+          "next_clarify": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?",
+            "operator_tip": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?",
+            "source_type": "scenario",
+            "relevance_score": 0.95,
+            "relevance_percent": 95,
+            "citations": [
+              {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": "Перевод в РФ",
+                "permalink": ""
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 0,
+            "chunk_index": 0,
+            "title": "Перевод в РФ",
+            "permalink": ""
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 0.0,
+          "rag": 0.0,
+          "llm": 0.0,
+          "total": 15.603
+        },
+        "request_id": "d35c71a1-acfa-481e-8ba7-c4b2e800709e"
+      },
+      "checks": {
+        "routing": false,
+        "source_title": false,
+        "required_concepts": false
+      },
+      "passed": false,
+      "latency_ms": 49.689
+    },
+    {
+      "id": "KB-039",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "Что проверить перед переводом в РФ?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Переводы в РФ"
+        ],
+        "required_concepts": [
+          "лимит",
+          "статус"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Перед переводом в Российскую Федерацию уточните валюту счёта, на который будут зачисляться средства. Реквизиты счёта Беларусбанка доступны в интернет-банке, мобильном приложении или в отделении банка. Для перевода из другого банка потребуются IBAN, БИК и назначение платежа.",
+            "operator_tip": "Уточните у клиента, в какой валюте он планирует перевод, чтобы проверить корректность реквизитов.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.55,
+            "relevance_percent": 55,
+            "citations": [
+              {
+                "article_id": 91009,
+                "chunk_index": 0,
+                "title": "Реквизиты для перевода",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91009,
+            "chunk_index": 0,
+            "title": "Реквизиты для перевода",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/internet-banking/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 45.043,
+          "rag": 20.044,
+          "llm": 2265.627,
+          "total": 2336.033
+        },
+        "request_id": "78ce8036-fa2b-4770-9631-474e7d217bff"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": false,
+        "required_concepts": false
+      },
+      "passed": false,
+      "latency_ms": 2362.209
+    },
+    {
+      "id": "KB-040",
+      "version": "1.0.0",
+      "bucket": "kb",
+      "case_type": "indexed_document",
+      "layer": "full_suggest",
+      "input": {
+        "text": "От чего зависит комиссия перевода в Россию?",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "knowledge_base",
+        "source_titles": [
+          "Переводы в РФ"
+        ],
+        "required_concepts": [
+          "сумм",
+          "валют"
+        ]
+      },
+      "actual": {
+        "routing": "knowledge_base",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [
+          {
+            "rank": 1,
+            "text": "Комиссия за перевод в Россию зависит от суммы перевода и его валюты. Для оформления перевода через мобильный банк необходимо, чтобы у вас был действующий суточный лимит на международные операции и активный статус карты. Перевод доступен в разделе «Платежи» → «За рубеж».",
+            "operator_tip": "Уточните у клиента сумму и валюту перевода, чтобы проверить точный размер комиссии по действующим тарифам.",
+            "source_type": "knowledge_base",
+            "relevance_score": 0.8857,
+            "relevance_percent": 89,
+            "citations": [
+              {
+                "article_id": 91013,
+                "chunk_index": 0,
+                "title": "Переводы в РФ",
+                "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/m-banking/"
+              }
+            ]
+          }
+        ],
+        "citations": [
+          {
+            "article_id": 91013,
+            "chunk_index": 0,
+            "title": "Переводы в РФ",
+            "permalink": "https://belarusbank.by/fizicheskim_licam/online_services/m-banking/"
+          }
+        ],
+        "blocked_reason": null,
+        "error": null,
+        "pipeline_latency_ms": {
+          "qu": 31.296,
+          "rag": 20.184,
+          "llm": 2032.449,
+          "total": 2089.083
+        },
+        "request_id": "92794f79-0199-4427-a19d-c9d4a53d7cb7"
+      },
+      "checks": {
+        "routing": true,
+        "source_title": true,
+        "required_concepts": true
+      },
+      "passed": true,
+      "latency_ms": 2107.165
+    }
+  ]
+}

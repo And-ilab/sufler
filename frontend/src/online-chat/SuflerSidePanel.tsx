@@ -15,6 +15,7 @@ export interface SuflerSidePanelProps {
   loading?: boolean
   error?: string
   latencyMs?: number | null
+  scenarioPath?: string
   clientPreview?: string
   onInsert?: (text: string) => void
   disabled?: boolean
@@ -26,6 +27,7 @@ export interface SuflerSidePanelProps {
 }
 
 function hintTitle(hint: SuflerHint): string {
+  if (hint.source_type === 'scenario') return 'Ответ по активному сценарию'
   return hint.citations[0]?.title || `Подсказка ${hint.rank}`
 }
 
@@ -40,6 +42,7 @@ export function SuflerSidePanel({
   loading = false,
   error = '',
   latencyMs = null,
+  scenarioPath = '',
   onInsert,
   disabled = false,
   client = ACTIVE_CLIENT,
@@ -151,6 +154,12 @@ export function SuflerSidePanel({
             {loading ? 'запрос…' : 'активен'}
           </StatusBadge>
         </header>
+        {scenarioPath ? (
+          <div className="chat-arm__scenario-path" data-testid="chat-scenario-path">
+            <strong>Активный сценарий</strong>
+            <span>{scenarioPath}</span>
+          </div>
+        ) : null}
 
         {error ? (
           <Card className="chat-arm__error" role="alert">
@@ -165,6 +174,7 @@ export function SuflerSidePanel({
           {hints.map((hint, index) => (
             <HintCard
               key={hint.rank}
+              className={hint.source_type === 'scenario' ? 'chat-arm__scenario-hint' : ''}
               title={hintTitle(hint)}
               relevance={`${hint.relevance_percent}%`}
               relevancePercent={hint.relevance_percent}

@@ -260,6 +260,10 @@ class ModelGateway:
             self._registry.get_slot(slot_name),
         )
 
+    def get_runtime_model(self, profile: str) -> str:
+        """Return the model identifier actually sent to the active provider."""
+        return self._resolve_model(self.get_profile(profile))
+
     def _mode_for(self, profile: GatewayProfile) -> str:
         if profile.profile == SUFLER_PROFILE:
             if (os.environ.get("SUFLER_LLM_BASE_URL") or "").strip() or _is_deepseek_url(

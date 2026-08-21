@@ -9,6 +9,7 @@ from django.db import transaction
 
 from core.embeddings import deterministic_embedding, embed_passage
 from core.model_registry import ModelRegistry
+from core.text_language import safe_ru_en_text
 from ingest.models import CCProductionChunk, KnowledgeIngestEvent
 from ingest.schema import SuzPayload, SuzPayloadError
 
@@ -113,6 +114,13 @@ def ingest_payload(payload: SuzPayload) -> IngestResult:
     normalized = normalize_text(payload.body_plain, payload.body_html)
     if checksum_for_text(normalized) != payload.checksum:
         raise SuzPayloadError(["checksum"])
+    if not safe_ru_en_text(payload.title) or not safe_ru_en_text(normalized):
+        CCProductionChunk.objects.filter(article_id=payload.article_id).update(
+            is_active=False
+        )
+        event.outcome = "language_quarantined"
+        event.save(update_fields=("outcome",))
+        return IngestResult(status="accepted", outcome=event.outcome)
 
     existing = CCProductionChunk.objects.filter(
         article_id=payload.article_id,

@@ -451,7 +451,7 @@ def preview_query(
             "embedding",
         )
     )
-    if backend == "http-fallback":
+    if backend in {"http-fallback", "lexical"}:
         scored_chunks = _score_lexical(chunk_query, normalized_query)[: limit * 20]
     elif connection.vendor == "postgresql":
         chunks = list(
@@ -533,7 +533,7 @@ def preview_query(
         )
         if pinned and training_example_score(normalized_query, pinned) >= EXAMPLE_MATCH_FLOOR:
             matched_example_id, matched_example = pinned.pk, pinned.question
-        elif backend == "http-fallback":
+        elif backend in {"http-fallback", "lexical"}:
             matched_example_id, matched_example = None, chunk.title
         else:
             matched_example_id, matched_example = _best_example(

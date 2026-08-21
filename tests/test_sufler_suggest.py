@@ -27,6 +27,7 @@ from ingest.models import CCProductionChunk  # noqa: E402
 from ingest.pipeline import deterministic_embedding  # noqa: E402
 from orchestrator.sufler import (  # noqa: E402
     SuflerOrchestratorError,
+    _safe_ru_en_text,
     suggest,
 )
 from qu.service import _lexical_score  # noqa: E402
@@ -105,6 +106,24 @@ class SuflerSuggestPipelineTest(TestCase):
         with self.assertRaises(SuflerOrchestratorError) as raised:
             suggest(query, limit=6, gateway=ModelGateway.from_registry())
         self.assertIn("between 1 and 5", str(raised.exception))
+
+    def test_only_russian_and_english_letters_are_allowed_in_hints(self):
+        self.assertEqual(
+            _safe_ru_en_text("Карта Visa работает. Card is active."),
+            "Карта Visa работает. Card is active.",
+        )
+        self.assertEqual(_safe_ru_en_text("Карта 拆康济沙"), "")
+
+    def test_corrupted_cjk_source_never_reaches_hint(self):
+        query = "как оформить банковскую карту"
+        self.add_chunk(
+            77,
+            "Оформление карты",
+            f"{query}. 拆康济沙壅轰合淋游玲漫蜒甄。",
+        )
+        result = suggest(query, limit=1, gateway=ModelGateway.from_registry())
+        for hint in result["hints"]:
+            self.assertNotRegex(hint["text"], r"[\u3400-\u9fff]")
 
     def test_no_relevant_documents_skip_llm(self):
         # Empty index → unavailable. Irrelevant seeded docs → no_relevant_knowledge.

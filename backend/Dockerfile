@@ -12,6 +12,7 @@ RUN apt-get update \
         tesseract-ocr \
         tesseract-ocr-rus \
         tesseract-ocr-eng \
+        antiword \
         libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
