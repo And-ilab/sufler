@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   baseMessagesApi,
   channelsApi,
   botsApi,
   departmentsApi,
+  dialogTopicsApi,
   getAdPendingOperators,
   getAnalytics,
   getSlaSettings,
@@ -19,12 +20,14 @@ import {
   type BotConfiguration,
   type ChatOperator,
   type Department,
+  type DialogTopicNode,
   type EntityId,
   type RoutingRule,
   type WidgetFormField,
   type WidgetPlacement,
   type WorkDayOverride,
 } from '../api/managementApi'
+import { TopicGroupIcon, TopicLeafIcon, TrashIcon } from '../arm/topicIcons'
 import '../shell/Management.css'
 
 type Tab =
@@ -35,6 +38,7 @@ type Tab =
   | 'routing'
   | 'bots'
   | 'messages'
+  | 'dialog_topics'
   | 'analytics'
   | 'sla'
   | 'schedule'
@@ -58,6 +62,7 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'routing', label: 'Маршрутизация' },
   { id: 'bots', label: 'Боты' },
   { id: 'messages', label: 'Базовые сообщения' },
+  { id: 'dialog_topics', label: 'Темы диалогов' },
   { id: 'sla', label: 'SLA' },
   { id: 'schedule', label: 'Рабочий календарь' },
   { id: 'analytics', label: 'Аналитика' },
@@ -263,6 +268,7 @@ export function ChatAdminApp() {
   const [rules, setRules] = useState<RoutingRule[]>([])
   const [bots, setBots] = useState<BotConfiguration[]>([])
   const [baseMessages, setBaseMessages] = useState<BaseMessage[]>([])
+  const [dialogTopics, setDialogTopics] = useState<DialogTopicNode[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -285,6 +291,7 @@ export function ChatAdminApp() {
         routingRulesApi.list(),
         botsApi.list(),
         baseMessagesApi.list(),
+        dialogTopicsApi.list(false),
       ])
       const [
         departmentResult,
@@ -294,6 +301,7 @@ export function ChatAdminApp() {
         ruleResult,
         botResult,
         messageResult,
+        topicsResult,
       ] = results
 
       if (departmentResult.status === 'fulfilled') setDepartments(departmentResult.value)
@@ -303,6 +311,7 @@ export function ChatAdminApp() {
       if (ruleResult.status === 'fulfilled') setRules(ruleResult.value)
       if (botResult.status === 'fulfilled') setBots(botResult.value)
       if (messageResult.status === 'fulfilled') setBaseMessages(messageResult.value)
+      if (topicsResult.status === 'fulfilled') setDialogTopics(topicsResult.value)
 
       const failed = results.find((item) => item.status === 'rejected') as PromiseRejectedResult | undefined
       if (failed) {
@@ -471,11 +480,305 @@ export function ChatAdminApp() {
             perform={perform}
           />
         )}
+        {tab === 'dialog_topics' && (
+          <DialogTopicsTab
+            items={dialogTopics}
+            disabled={saving}
+            perform={perform}
+          />
+        )}
         {tab === 'sla' && <SlaTab disabled={saving} perform={perform} />}
         {tab === 'schedule' && <WorkScheduleTab disabled={saving} perform={perform} />}
         {tab === 'analytics' && <AnalyticsTab />}
       </div>
     </main>
+  )
+}
+
+function DialogTopicsTab({
+  items,
+  disabled,
+  perform,
+}: {
+  items: DialogTopicNode[]
+  disabled: boolean
+  perform: PerformFn
+}) {
+  const [trailIds, setTrailIds] = useState<string[]>([])
+  const [deleteMode, setDeleteMode] = useState(false)
+  const [draftKind, setDraftKind] = useState<'group' | 'leaf' | null>(null)
+  const [draftName, setDraftName] = useState('')
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+
+  const findNode = (nodes: DialogTopicNode[], id: string): DialogTopicNode | null => {
+    for (const node of nodes) {
+      if (String(node.id) === id) return node
+      if (node.children?.length) {
+        const found = findNode(node.children, id)
+        if (found) return found
+      }
+    }
+    return null
+  }
+
+  const trail = useMemo(() => {
+    const resolved: DialogTopicNode[] = []
+    for (const id of trailIds) {
+      const found = findNode(items, id)
+      if (!found) break
+      resolved.push(found)
+    }
+    return resolved
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, trailIds])
+
+  useEffect(() => {
+    if (trail.length !== trailIds.length) {
+      setTrailIds(trail.map((node) => String(node.id)))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trail])
+
+  const currentParent = trail.at(-1) ?? null
+  const levelNodes = currentParent ? (currentParent.children ?? []) : items
+
+  const openNode = (node: DialogTopicNode) => {
+    if (node.is_selectable) return
+    setDeleteMode(false)
+    setTrailIds((prev) => [...prev, String(node.id)])
+  }
+
+  const goToDepth = (depth: number) => setTrailIds((prev) => prev.slice(0, depth))
+
+  const openDraft = (kind: 'group' | 'leaf') => {
+    setDraftKind(kind)
+    setDraftName('')
+  }
+
+  const closeDraft = () => {
+    setDraftKind(null)
+    setDraftName('')
+  }
+
+  const submitDraft = async () => {
+    if (!draftKind) return
+    const label = draftName.trim()
+    if (!label) return
+    const nextSortOrder = levelNodes.length
+      ? Math.max(...levelNodes.map((node) => node.sort_order)) + 10
+      : 10
+    const ok = await perform(
+      () => dialogTopicsApi.create({
+        label,
+        parent_id: currentParent ? currentParent.id : null,
+        sort_order: nextSortOrder,
+        is_selectable: draftKind === 'leaf',
+      }),
+      draftKind === 'leaf' ? 'Тема добавлена.' : 'Вложение добавлено.',
+    )
+    if (ok) closeDraft()
+  }
+
+  const removeNode = (node: DialogTopicNode) => {
+    void perform(
+      () => dialogTopicsApi.remove(node.id),
+      'Удалено.',
+      {
+        title: node.is_selectable ? 'Удалить тему?' : 'Удалить вложение?',
+        description: node.is_selectable
+          ? 'Это действие нельзя отменить.'
+          : 'Это действие нельзя отменить. Все темы и вложения внутри также будут удалены.',
+      },
+    )
+  }
+
+  const handleDrop = (targetId: string) => {
+    const sourceId = dragId
+    setDragId(null)
+    setDragOverId(null)
+    if (!sourceId || sourceId === targetId) return
+    const ids = levelNodes.map((node) => String(node.id))
+    const fromIndex = ids.indexOf(sourceId)
+    const toIndex = ids.indexOf(targetId)
+    if (fromIndex === -1 || toIndex === -1) return
+    const next = [...ids]
+    next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, sourceId)
+    const parentId = currentParent ? currentParent.id : null
+    void perform(
+      () => Promise.all(
+        next.map((id, index) => dialogTopicsApi.reorder({ id, parent_id: parentId, sort_order: (index + 1) * 10 })),
+      ),
+      'Порядок обновлён.',
+    )
+  }
+
+  return (
+    <div className="chat-management__card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <h2 style={{ margin: 0 }}>Темы диалогов</h2>
+        <div className="chat-management__actions">
+          <button
+            type="button"
+            className="is-secondary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            onClick={() => openDraft('group')}
+            disabled={disabled}
+            title="Добавить вложение"
+          >
+            <TopicGroupIcon size={15} />
+            Вложение
+          </button>
+          <button
+            type="button"
+            className="is-secondary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            onClick={() => openDraft('leaf')}
+            disabled={disabled}
+            title="Добавить тему"
+          >
+            <TopicLeafIcon size={15} />
+            Тема
+          </button>
+          <button
+            type="button"
+            className={deleteMode ? 'is-danger' : 'is-secondary'}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            onClick={() => setDeleteMode((prev) => !prev)}
+            disabled={disabled}
+            title="Удалить"
+          >
+            <TrashIcon size={15} />
+            Удалить
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 16, marginBottom: 12 }}>
+        <button
+          type="button"
+          className="is-secondary"
+          style={{ padding: '4px 10px', minHeight: 30, fontWeight: trailIds.length === 0 ? 700 : 500 }}
+          onClick={() => goToDepth(0)}
+          disabled={trailIds.length === 0}
+        >
+          Все темы
+        </button>
+        {trail.map((node, index) => (
+          <span key={String(node.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span aria-hidden style={{ color: 'var(--arm-t-tertiary)' }}>/</span>
+            <button
+              type="button"
+              className="is-secondary"
+              style={{ padding: '4px 10px', minHeight: 30, fontWeight: index === trail.length - 1 ? 700 : 500 }}
+              onClick={() => goToDepth(index + 1)}
+              disabled={index === trail.length - 1}
+            >
+              {node.label}
+            </button>
+          </span>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {levelNodes.length === 0 ? (
+          <p className="chat-management__muted">Список пуст. Добавьте вложение или тему.</p>
+        ) : (
+          levelNodes.map((node) => {
+            const nodeId = String(node.id)
+            const isGroup = !node.is_selectable
+            return (
+              <div
+                key={nodeId}
+                draggable={!disabled}
+                onDragStart={() => setDragId(nodeId)}
+                onDragOver={(event) => {
+                  event.preventDefault()
+                  if (dragOverId !== nodeId) setDragOverId(nodeId)
+                }}
+                onDragLeave={() => setDragOverId((prev) => (prev === nodeId ? null : prev))}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  handleDrop(nodeId)
+                }}
+                onDragEnd={() => {
+                  setDragId(null)
+                  setDragOverId(null)
+                }}
+                onClick={() => openNode(node)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  border: `1px solid ${dragOverId === nodeId ? 'var(--arm-accent-control)' : 'var(--arm-stroke-tertiary)'}`,
+                  background: dragId === nodeId ? 'var(--arm-fill-tertiary)' : 'var(--arm-bg-elevated)',
+                  cursor: isGroup ? 'pointer' : 'default',
+                }}
+              >
+                <span aria-hidden style={{ cursor: 'grab', color: 'var(--arm-t-tertiary)', lineHeight: 1, fontSize: 14 }}>⠿⠿</span>
+                {isGroup ? (
+                  <TopicGroupIcon size={16} color="var(--arm-accent-control)" style={{ flexShrink: 0 }} />
+                ) : (
+                  <TopicLeafIcon size={16} color="var(--arm-t-secondary)" style={{ flexShrink: 0 }} />
+                )}
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {node.label}
+                </span>
+                {isGroup ? <span aria-hidden style={{ color: 'var(--arm-t-tertiary)', flexShrink: 0 }}>›</span> : null}
+                {deleteMode ? (
+                  <button
+                    type="button"
+                    className="is-danger"
+                    style={{ padding: '2px 9px', minHeight: 26, flexShrink: 0 }}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      removeNode(node)
+                    }}
+                    aria-label={`Удалить «${node.label}»`}
+                    disabled={disabled}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      {draftKind ? (
+        <div className="chat-management__confirm" role="dialog" aria-modal="true" aria-labelledby="dialog-topic-draft-title">
+          <div className="chat-management__confirm-card">
+            <h2 id="dialog-topic-draft-title">{draftKind === 'leaf' ? 'Новая тема' : 'Новое вложение'}</h2>
+            <label>
+              Название
+              <input
+                autoFocus
+                value={draftName}
+                onChange={(event) => setDraftName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    void submitDraft()
+                  }
+                }}
+              />
+            </label>
+            <div className="chat-management__actions">
+              <button type="button" onClick={() => void submitDraft()} disabled={disabled || !draftName.trim()}>
+                Добавить
+              </button>
+              <button type="button" className="is-secondary" onClick={closeDraft} disabled={disabled}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -656,13 +959,12 @@ function parseIsoDate(value: string): Date {
 
 function WorkScheduleTab({ disabled, perform }: TabProps) {
   const today = new Date()
-  const [enabled, setEnabled] = useState(false)
+  const enabled = true
   const [defaultStart, setDefaultStart] = useState('09:00')
   const [defaultEnd, setDefaultEnd] = useState('18:00')
   const [workdays, setWorkdays] = useState<number[]>([0, 1, 2, 3, 4])
   const [dayOverrides, setDayOverrides] = useState<Record<string, WorkDayOverride>>({})
   const [holidays, setHolidays] = useState<string[]>([])
-  const [isOpen, setIsOpen] = useState(true)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
   const [viewYear, setViewYear] = useState(today.getFullYear())
@@ -672,13 +974,11 @@ function WorkScheduleTab({ disabled, perform }: TabProps) {
   useEffect(() => {
     void getWorkScheduleSettings()
       .then((settings) => {
-        setEnabled(settings.enabled)
         setDefaultStart(settings.start_time || '09:00')
         setDefaultEnd(settings.end_time || '18:00')
         setWorkdays(settings.workdays?.length ? settings.workdays : [0, 1, 2, 3, 4])
         setDayOverrides(settings.day_overrides ?? {})
         setHolidays(settings.holidays ?? [])
-        setIsOpen(settings.is_open)
         setLoaded(true)
         setError('')
       })
@@ -759,22 +1059,11 @@ function WorkScheduleTab({ disabled, perform }: TabProps) {
   return (
     <section className="chat-management__card" aria-labelledby="schedule-heading">
       <h2 id="schedule-heading">Рабочий календарь онлайн-чата</h2>
-      <p className="chat-management__muted">
-        По умолчанию 5/2 с 09:00 до 18:00. Выберите день в календаре, чтобы сделать его
-        выходным/рабочим или задать другое время (переносы).
-      </p>
       {error && <p className="chat-management__error" role="alert">{error}</p>}
       {!loaded ? (
         <p className="chat-management__muted">Загрузка…</p>
       ) : (
         <>
-          <p>
-            Сейчас линия:{' '}
-            <span className={`chat-management__pill ${isOpen ? 'is-online' : 'is-offline'}`}>
-              {isOpen ? 'рабочее время' : 'нерабочее время'}
-            </span>
-          </p>
-
           <div
             style={{
               border: '1px solid #d8dee6',
@@ -785,15 +1074,6 @@ function WorkScheduleTab({ disabled, perform }: TabProps) {
             }}
           >
             <div className="chat-management__form-grid">
-              <label className="chat-management__check is-wide">
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  disabled={disabled}
-                  onChange={(event) => setEnabled(event.target.checked)}
-                />
-                Учитывать календарь (в проде должно быть включено)
-              </label>
               <label>
                 Время по умолчанию (начало)
                 <input
@@ -957,14 +1237,11 @@ function WorkScheduleTab({ disabled, perform }: TabProps) {
                 manual_override: 'auto',
               })
               setDayOverrides(saved.day_overrides ?? {})
-              setIsOpen(saved.is_open)
             },
             'Рабочий календарь сохранён.',
             {
               title: 'Сохранить календарь?',
-              description: enabled
-                ? `Шаблон ${defaultStart}–${defaultEnd}, переносов: ${Object.keys(dayOverrides).length}.`
-                : 'Календарь будет выключен — линия считается всегда открытой.',
+              description: `Шаблон ${defaultStart}–${defaultEnd}, переносов: ${Object.keys(dayOverrides).length}.`,
             },
           )}
         >

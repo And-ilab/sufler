@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
@@ -30,7 +31,7 @@ from online_chat.services import (
     create_dialog_with_message,
     set_client_presence,
 )
-from online_chat.tasks import classify_stale_dialogs
+from online_chat.tasks import classify_stale_dialogs, send_hold_base_message
 
 
 class RoutingTests(TestCase):
@@ -373,6 +374,145 @@ class ApiTests(TestCase):
         self.assertTrue(dialog.messages.filter(text="Базовое приветствие").exists())
         self.assertFalse(dialog.messages.filter(text="Чужое приветствие").exists())
 
+    def test_dialog_create_response_contains_base_messages_for_widget(self) -> None:
+        BaseMessage.objects.create(
+            title="Welcome",
+            text="Базовое приветствие",
+            channels=["widget"],
+            send_phase=BaseMessage.SendPhase.BEFORE_BOT,
+            sort_order=1,
+        )
+        response = self.client.post(
+            reverse("online_chat_dialogs"),
+            data=json.dumps(
+                {
+                    "text": "Здравствуйте",
+                    "widget_id": "public-widget",
+                    "placement": "website",
+                    "channel": "widget",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()["dialog"]["messages"]
+        texts = [item["text"] for item in payload]
+        self.assertIn("Базовое приветствие", texts)
+
+    def test_offline_base_messages_only_sent_when_line_closed(self) -> None:
+        from online_chat.models import WorkScheduleSettings
+
+        BaseMessage.objects.create(
+            title="Online only",
+            text="Онлайн-приветствие",
+            channels=["widget"],
+            send_phase=BaseMessage.SendPhase.BEFORE_BOT,
+            sort_order=1,
+        )
+        BaseMessage.objects.create(
+            title="Offline notice",
+            text="Сейчас мы вне графика",
+            channels=["widget"],
+            send_phase=BaseMessage.SendPhase.OFFLINE,
+            sort_order=2,
+        )
+        schedule = WorkScheduleSettings.get_solo()
+        schedule.manual_override = WorkScheduleSettings.Override.CLOSED
+        schedule.save(update_fields=["manual_override"])
+
+        dialog, _ = create_dialog_with_message(text="Есть вопрос", widget_id="public-widget")
+        texts = list(dialog.messages.values_list("text", flat=True))
+        self.assertIn("Сейчас мы вне графика", texts)
+        self.assertNotIn("Онлайн-приветствие", texts)
+
+    def test_base_message_before_bot_sent_for_telegram_channel(self) -> None:
+        BaseMessage.objects.create(
+            title="TG welcome",
+            text="Приветствие Telegram",
+            channels=["telegram"],
+            send_phase=BaseMessage.SendPhase.BEFORE_BOT,
+            sort_order=1,
+        )
+        dialog, _ = create_dialog_with_message(
+            text="Привет из TG",
+            channel="telegram",
+            widget_id="",
+            placement="telegram",
+            client_external_id="tg-1",
+        )
+        self.assertTrue(dialog.messages.filter(text="Приветствие Telegram").exists())
+
+    def test_hold_base_message_is_scheduled_with_delay(self) -> None:
+        message = BaseMessage.objects.create(
+            title="Ожидание оператора",
+            text="Ожидайте ответа оператора",
+            channels=["widget"],
+            send_phase=BaseMessage.SendPhase.HOLD,
+            delay_seconds=7,
+            sort_order=1,
+        )
+        with patch(
+            "online_chat.tasks.send_hold_base_message.apply_async"
+        ) as mocked_async:
+            dialog, _ = create_dialog_with_message(
+                text="Здравствуйте",
+                widget_id="public-widget",
+                channel="widget",
+            )
+        self.assertFalse(dialog.messages.filter(text=message.text).exists())
+        mocked_async.assert_called_once()
+        self.assertEqual(mocked_async.call_args.kwargs.get("countdown"), 7)
+
+    def test_hold_base_message_delivered_while_waiting(self) -> None:
+        base = BaseMessage.objects.create(
+            title="Ожидание оператора",
+            text="Ожидайте ответа оператора",
+            channels=["widget"],
+            send_phase=BaseMessage.SendPhase.HOLD,
+            delay_seconds=0,
+            sort_order=1,
+        )
+        dialog, _ = create_dialog_with_message(
+            text="Первое сообщение",
+            widget_id="public-widget",
+            channel="widget",
+            skip_auto_assign=True,
+        )
+        self.assertEqual(dialog.status, Dialog.Status.WAITING)
+        result = send_hold_base_message(str(dialog.id), str(base.id))
+        self.assertTrue(result["sent"])
+        self.assertTrue(dialog.messages.filter(text=base.text, speaker=DialogMessage.Speaker.BOT).exists())
+
+    def test_dialogs_collection_filters_by_client_ip_and_rating(self) -> None:
+        first, _ = create_dialog_with_message(
+            text="Первый диалог",
+            widget_id="public-widget",
+            channel="widget",
+            client_ip="10.10.10.1",
+            skip_auto_assign=True,
+        )
+        second, _ = create_dialog_with_message(
+            text="Второй диалог",
+            widget_id="public-widget",
+            channel="widget",
+            client_ip="10.10.10.2",
+            skip_auto_assign=True,
+        )
+        from online_chat.services import save_feedback
+
+        save_feedback(first, rating=5, comment="")
+        save_feedback(second, rating=3, comment="")
+        response = self.client.get(
+            reverse("online_chat_dialogs"),
+            {"status": Dialog.Status.WAITING, "client_ip": "10.10.10.1", "ratings": "5"},
+        )
+        self.assertEqual(response.status_code, 200)
+        items = response.json()["items"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["id"], str(first.id))
+        self.assertEqual(items[0].get("client_ip"), "10.10.10.1")
+        self.assertEqual(items[0].get("feedback_rating"), 5)
+
     def test_global_bot_sends_after_bot_message_before_handoff(self) -> None:
         BotConfiguration.objects.create(
             name="Global FAQ",
@@ -557,7 +697,7 @@ class WorkScheduleTests(TestCase):
         )
         self.assertEqual(dialog.status, Dialog.Status.WAITING)
         self.assertEqual(dialog.outcome, Dialog.Outcome.OFFLINE)
-        self.assertIn("offline_demo", dialog.routing_reason)
+        self.assertIn("offline_hours", dialog.routing_reason)
         self.assertIsNone(auto_assign_dialog(dialog))
 
     def test_calendar_closed_on_weekend(self) -> None:
@@ -607,3 +747,125 @@ class WorkScheduleTests(TestCase):
         self.assertTrue(schedule.is_open(sunday_noon))
         sunday_evening = dj_tz.make_aware(datetime(2026, 8, 16, 15, 0))
         self.assertFalse(schedule.is_open(sunday_evening))
+
+
+class ShiftTransitionTests(TestCase):
+    """End-of-shift close/open: dialogs return to the queue, operators go offline."""
+
+    def setUp(self) -> None:
+        self.department = Department.objects.create(code="support", name="Support")
+        self.placement = WidgetPlacement.objects.create(
+            widget_id="site-main", name="Main", department=self.department
+        )
+        self.operator = OperatorProfile.objects.create(
+            external_id="op-1",
+            display_name="Иванов И.И.",
+            presence=OperatorProfile.Presence.ONLINE,
+            max_active_dialogs=3,
+        )
+        self.operator.departments.set([self.department])
+        self.supervisor = OperatorProfile.objects.create(
+            external_id="sup-1",
+            display_name="Козлова Е.В.",
+            role=OperatorProfile.Role.SUPERVISOR,
+            presence=OperatorProfile.Presence.ONLINE,
+            max_active_dialogs=99,
+        )
+        self.supervisor.departments.set([self.department])
+
+    def test_close_working_day_returns_active_dialogs_and_offlines_operators(self) -> None:
+        dialog, _ = create_dialog_with_message(
+            text="Нужна консультация",
+            widget_id="site-main",
+            client_external_id="client-1",
+        )
+        # Only eligible online operator — auto-assigned immediately on create.
+        dialog.refresh_from_db()
+        self.assertEqual(dialog.status, Dialog.Status.ACTIVE)
+        self.assertEqual(dialog.operator_id, self.operator.id)
+        original_created_at = dialog.created_at
+
+        from online_chat.routing_services import close_working_day
+
+        result = close_working_day()
+        self.assertEqual(result["returned_to_queue"], 1)
+
+        dialog.refresh_from_db()
+        self.assertEqual(dialog.status, Dialog.Status.WAITING)
+        self.assertIsNone(dialog.operator)
+        self.assertEqual(dialog.operator_name, "")
+        # Priority (created_at) is preserved so it re-enters the queue where it was.
+        self.assertEqual(dialog.created_at, original_created_at)
+
+        self.operator.refresh_from_db()
+        self.assertEqual(self.operator.presence, OperatorProfile.Presence.OFFLINE)
+
+    def test_offline_operator_cannot_be_auto_assigned_after_close(self) -> None:
+        from online_chat.routing_services import close_working_day, run_assignments
+
+        close_working_day()
+        dialog, _ = create_dialog_with_message(
+            text="Ночной вопрос",
+            widget_id="site-main",
+            client_external_id="client-2",
+            force_offline=True,
+        )
+        self.assertEqual(dialog.outcome, Dialog.Outcome.OFFLINE)
+        assigned = run_assignments()
+        self.assertEqual(assigned, [])
+        dialog.refresh_from_db()
+        self.assertEqual(dialog.status, Dialog.Status.WAITING)
+
+    def test_open_working_day_flushes_offline_backlog(self) -> None:
+        from online_chat.routing_services import close_working_day, open_working_day
+
+        close_working_day()
+        dialog, _ = create_dialog_with_message(
+            text="Ночной вопрос",
+            widget_id="site-main",
+            client_external_id="client-3",
+            force_offline=True,
+        )
+        result = open_working_day()
+        dialog.refresh_from_db()
+        self.operator.refresh_from_db()
+        self.assertEqual(dialog.outcome, "")
+        self.assertEqual(dialog.status, Dialog.Status.ACTIVE)
+        self.assertEqual(result["assigned"], 1)
+        self.assertGreaterEqual(result["operators_onlined"], 1)
+        self.assertEqual(self.operator.presence, OperatorProfile.Presence.ONLINE)
+
+    def test_sync_schedule_state_is_idempotent_and_transition_driven(self) -> None:
+        from online_chat.models import WorkScheduleSettings
+        from online_chat.routing_services import sync_schedule_state
+
+        schedule = WorkScheduleSettings.get_solo()
+        schedule.manual_override = WorkScheduleSettings.Override.OPEN
+        schedule.save(update_fields=["manual_override"])
+
+        # First observation ever — records state, no side effects triggered.
+        first = sync_schedule_state(schedule)
+        self.assertFalse(first["changed"])
+        schedule.refresh_from_db()
+        self.assertTrue(schedule.last_open_state)
+
+        # No actual change → still a no-op.
+        second = sync_schedule_state(schedule)
+        self.assertFalse(second["changed"])
+
+        dialog, _ = create_dialog_with_message(
+            text="Вопрос",
+            widget_id="site-main",
+            client_external_id="client-4",
+        )
+        # Only eligible online operator — auto-assigned immediately on create.
+        dialog.refresh_from_db()
+        self.assertEqual(dialog.status, Dialog.Status.ACTIVE)
+
+        schedule.manual_override = WorkScheduleSettings.Override.CLOSED
+        schedule.save(update_fields=["manual_override"])
+        closed = sync_schedule_state(schedule)
+        self.assertTrue(closed["changed"])
+        self.assertEqual(closed["returned_to_queue"], 1)
+        dialog.refresh_from_db()
+        self.assertEqual(dialog.status, Dialog.Status.WAITING)

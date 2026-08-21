@@ -9,6 +9,7 @@ import {
   dialogRefCode,
   downloadAttachment,
   editMessageRemote,
+  fetchDialogTopics,
   fetchClientHistory,
   formatWaitMmSs,
   getDialog,
@@ -21,10 +22,12 @@ import {
   reportSuflerOutage,
   sendOperatorMessage,
   slaToneFromSeconds,
+  suggestDialogTopic,
   submitSuflerHintFeedback,
   transferDialogRemote,
   uploadOperatorAttachment,
   type OnlineChatDialog,
+  type DialogTopicNode,
   type OnlineChatMessage,
   type ReceiptStatus,
   type SlaTone,
@@ -37,7 +40,6 @@ import {
   getInternalUnreadCount,
   operatorsApi,
   getWorkScheduleStatus,
-  controlWorkDay,
   type ChatOperator,
 } from '../api/managementApi'
 import {
@@ -367,18 +369,6 @@ const ARM_LEFT_WIDTH_DEFAULT = 220;
 const ARM_RIGHT_WIDTH_MIN = 220;
 const ARM_RIGHT_WIDTH_MAX = 420;
 const ARM_RIGHT_WIDTH_DEFAULT = 260;
-export const CLOSE_TOPICS = [
-  "Карты и счета",
-  "Платежи и переводы",
-  "Мобильный банк",
-  "Кредиты",
-  "Ипотека",
-  "Вклады",
-  "Юрлица",
-  "Блокировка / безопасность",
-  "Техническая поддержка",
-  "Прочее",
-];
 
 /** Fallback roster if operators API is unavailable. */
 export const TRANSFER_OPERATORS = [
@@ -388,6 +378,24 @@ export const TRANSFER_OPERATORS = [
   "Морозова Е.И.",
   "Васильев Н.П.",
 ];
+
+function flattenTopicLeaves(nodes: DialogTopicNode[]): Array<{ id: string; path: string }> {
+  const rows: Array<{ id: string; path: string }> = []
+  const walk = (items: DialogTopicNode[]) => {
+    for (const item of items) {
+      if (item.is_selectable) rows.push({ id: item.id, path: item.full_path || item.label })
+      if (Array.isArray(item.children) && item.children.length > 0) walk(item.children)
+    }
+  }
+  walk(nodes)
+  return rows
+}
+
+function topicPathById(nodes: DialogTopicNode[], topicId: string): string {
+  if (!topicId) return ""
+  const leaf = flattenTopicLeaves(nodes).find((item) => item.id === topicId)
+  return leaf?.path || ""
+}
 
 export type SchemePalette = {
   label: string;
@@ -1377,40 +1385,6 @@ const DEMO_SUFLER_OUTAGE_CLIENT_NUMBER = 2;
  * without noticeably delaying the hint for normal single-message questions.
  */
 const SUFLER_FRAGMENT_DEBOUNCE_MS = 1400;
-
-const SHOW_WORKDAY_DEMO = import.meta.env.DEV || import.meta.env.VITE_SUFLER_DEMO === '1';
-
-function isSheipaOperator(name: string): boolean {
-  return name.trim().startsWith('Шейпа');
-}
-
-/** Demo leftovers / offline-widget clients reserved for Sheipa ARM. */
-function isSheipaReservedDialog(dialog: {
-  routing_reason?: string;
-  outcome?: string;
-}): boolean {
-  const reason = dialog.routing_reason || "";
-  return reason.includes("offline_demo") || reason.includes("sheipa_demo");
-}
-
-function isSheipaReservedQueueItem(item: {
-  routingReason?: string;
-  outcome?: string;
-  result?: string;
-}): boolean {
-  const reason = item.routingReason || "";
-  return reason.includes("offline_demo") || reason.includes("sheipa_demo");
-}
-
-function sheipaDemoQueueSort(
-  a: { routingReason?: string; outcome?: string },
-  b: { routingReason?: string; outcome?: string },
-): number {
-  const aOff = (a.routingReason || "").includes("offline_demo") || a.outcome === "offline";
-  const bOff = (b.routingReason || "").includes("offline_demo") || b.outcome === "offline";
-  if (aOff === bOff) return 0;
-  return aOff ? 1 : -1;
-}
 
 function testClientNumber(item: { lastName?: string; name?: string } | null | undefined): number | null {
   if (!item) return null;
@@ -3120,9 +3094,6 @@ export function ArmOperatorView({
   const [liveClosed, setLiveClosed] = useState<QueueItem[]>([]);
   const [liveInitiated, setLiveInitiated] = useState<QueueItem[]>([]);
   const [lineOpen, setLineOpen] = useState(true);
-  const [workDayStarted, setWorkDayStarted] = useState(false);
-  const sheipaDemo = SHOW_WORKDAY_DEMO && !viewOnly && isSheipaOperator(operatorName);
-  const demoOfflineArm = sheipaDemo && !workDayStarted;
   const [liveMessages, setLiveMessages] = useState<OnlineChatMessage[]>([]);
   const [clientDraft, setClientDraft] = useState("");
   const [quoteMessage, setQuoteMessage] = useState<OnlineChatMessage | null>(null);
@@ -3132,6 +3103,10 @@ export function ArmOperatorView({
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [transferTargetKind, setTransferTargetKind] = useState<"operator" | "supervisor">("operator");
   const [transferOperatorName, setTransferOperatorName] = useState("");
+  const [dialogTopics, setDialogTopics] = useState<DialogTopicNode[]>([]);
+  const [selectedCloseTopicId, setSelectedCloseTopicId] = useState("");
+  const [recommendedTopicId, setRecommendedTopicId] = useState("");
+  const [recommendedTopicPath, setRecommendedTopicPath] = useState("");
   const [liveSuflerHints, setLiveSuflerHints] = useState<SuflerHintData[]>([]);
   const [liveSuflerRaw, setLiveSuflerRaw] = useState<SuflerHint[]>([]);
   const [suflerRequestId, setSuflerRequestId] = useState("");
@@ -3149,6 +3124,7 @@ export function ArmOperatorView({
   const [unreadByDialog, setUnreadByDialog] = useState<Record<string, number>>({});
   const [acceptingDialogId, setAcceptingDialogId] = useState<string | null>(null);
   const [operatorCapacity, setOperatorCapacity] = useState(3);
+  const topicScoreByDialogRef = useRef<Record<string, Record<string, number>>>({});
   const suflerTurnKeyRef = useRef<string>("");
   /** Snapshot summary once per dialog — must not change mid-conversation. */
   const summaryByDialogRef = useRef<Record<string, SummaryHistoryData>>({});
@@ -3174,6 +3150,30 @@ export function ArmOperatorView({
     const timer = window.setInterval(() => setNowMs(Date.now()), 250);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchDialogTopics(true)
+      .then((items) => {
+        if (!cancelled) setDialogTopics(items)
+      })
+      .catch(() => {
+        if (!cancelled) setDialogTopics([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!closeTopic) {
+      setSelectedCloseTopicId("")
+      return
+    }
+    const leaves = flattenTopicLeaves(dialogTopics)
+    const found = leaves.find((item) => item.path === closeTopic)
+    setSelectedCloseTopicId(found?.id || "")
+  }, [closeTopic, dialogTopics])
 
   const scrollMessagesToEnd = useCallback((behavior: ScrollBehavior = "smooth") => {
     const scroller = messagesScrollRef.current;
@@ -3214,12 +3214,8 @@ export function ArmOperatorView({
       ]);
 
       // Общая очередь — все неназначенные (waiting), и для оператора, и в режиме просмотра.
-      // Офлайн/демо-заглушки Шейпы не показываем обычным операторам.
-      const sharedSource = sheipaDemo
-        ? waiting
-        : waiting.filter((dialog) => !isSheipaReservedDialog(dialog));
       setLiveShared(
-        sharedSource.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
+        waiting.map((dialog, index) => dialogToQueueItem(dialog, { active: index === 0 })),
       );
 
       if (viewOnly) {
@@ -3268,7 +3264,7 @@ export function ArmOperatorView({
       const offlineMerged = [...offlineWaiting, ...offlineActive];
       const offlineUnique = Array.from(
         new Map(offlineMerged.map((dialog) => [dialog.id, dialog])).values(),
-      ).filter((dialog) => sheipaDemo || !isSheipaReservedDialog(dialog));
+      );
       setLiveOffline(
         offlineUnique.map((dialog) => ({
           ...dialogToQueueItem(dialog),
@@ -3306,7 +3302,7 @@ export function ArmOperatorView({
     } finally {
       setQueuesReady(true);
     }
-  }, [operatorName, viewOnly, armRole, sheipaDemo]);
+  }, [operatorName, viewOnly, armRole]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3315,7 +3311,6 @@ export function ArmOperatorView({
         .then((status) => {
           if (cancelled) return;
           setLineOpen(status.is_open);
-          if (status.manual_override === "open") setWorkDayStarted(true);
         })
         .catch(() => undefined);
     };
@@ -3480,26 +3475,6 @@ export function ArmOperatorView({
         ...liveWaiting,
         ...liveMine.filter((item) => !liveWaiting.some((wait) => wait.id === item.id)),
       ]);
-      const offlineShared = withUnread(
-        liveShared
-          .filter((item) => isSheipaReservedQueueItem(item))
-          .sort(sheipaDemoQueueSort),
-      );
-      if (demoOfflineArm) {
-        // До старта смены: 2 обычных заглушки + 2 офлайн (обычные выше).
-        const preStartQueue = withUnread(
-          [...liveShared].sort(sheipaDemoQueueSort),
-        );
-        return {
-          waiting: [],
-          mine: [],
-          colleagues: [],
-          offline: [],
-          closed: [],
-          shared: preStartQueue.length ? preStartQueue : offlineShared,
-          initiated: [],
-        };
-      }
       return {
         waiting: [],
         mine: mineMerged,
@@ -3519,14 +3494,11 @@ export function ArmOperatorView({
       liveClosed,
       liveInitiated,
       unreadByDialog,
-      demoOfflineArm,
     ],
   );
 
   const visibleSections = useMemo(() => {
-    const sections = queueSectionsForRole(armRole).filter((section) => (
-      !demoOfflineArm || section.id === "shared" || section.id === "offline"
-    ));
+    const sections = queueSectionsForRole(armRole);
     return sections.map((section) => {
       const items = liveMode ? (liveSectionItems[section.id] ?? []) : [];
       return {
@@ -3536,7 +3508,7 @@ export function ArmOperatorView({
         defaultExpanded: items.length > 0,
       };
     });
-  }, [armRole, liveMode, liveSectionItems, demoOfflineArm]);
+  }, [armRole, liveMode, liveSectionItems]);
 
   const remainingDialogs = visibleSections
     .flatMap((section) => section.items)
@@ -3574,6 +3546,16 @@ export function ArmOperatorView({
     ((viewOnly || viewMode === "colleague") && allowTransferInView);
   const isClientBlocked = !!(active && blockedDialogIds[active.id]);
   const composerLocked = isReadOnly || isClientBlocked || !hasActiveDialog;
+
+  useEffect(() => {
+    const dialogId = active?.id || ""
+    setRecommendedTopicId("")
+    setRecommendedTopicPath("")
+    if (!dialogId) return
+    if (!topicScoreByDialogRef.current[dialogId]) {
+      topicScoreByDialogRef.current[dialogId] = {}
+    }
+  }, [active?.id])
 
   useEffect(() => {
     if (!hasActiveDialog) return;
@@ -3827,6 +3809,32 @@ export function ArmOperatorView({
             setLiveSuflerHints(usable.map(mapApiHintToCard));
             setSuflerReportVisible(false);
             setSuflerError("");
+            const articleTitles = usable
+              .map((hint) => hint.citations?.[0]?.title?.trim() || "")
+              .filter(Boolean)
+            if (articleTitles.length && active?.id) {
+              void suggestDialogTopic(articleTitles)
+                .then((topicResult) => {
+                  if (suflerTurnKeyRef.current !== requestKey) return
+                  if (!topicResult.topic_id) return
+                  const dialogId = active.id
+                  const scores = topicScoreByDialogRef.current[dialogId] || {}
+                  const avgRelevance = usable.reduce(
+                    (sum, hint) => sum + (hint.relevance_percent ?? hint.relevance_score * 100),
+                    0,
+                  ) / usable.length
+                  const weight = Math.max(1, currentTurnCount) * Math.max(0.35, avgRelevance / 100)
+                  scores[topicResult.topic_id] = (scores[topicResult.topic_id] ?? 0) + weight
+                  topicScoreByDialogRef.current[dialogId] = scores
+                  const topEntry = Object.entries(scores).sort((a, b) => b[1] - a[1])[0]
+                  if (!topEntry) return
+                  const [topId] = topEntry
+                  const resolvedTopicPath = topicPathById(dialogTopics, topId) || topicResult.topic_path || ""
+                  setRecommendedTopicId(topId)
+                  setRecommendedTopicPath(resolvedTopicPath)
+                })
+                .catch(() => undefined)
+            }
           } else if (result.blocked_reason === "sufler_unavailable") {
             applyUnavailable();
           } else {
@@ -4073,6 +4081,7 @@ export function ArmOperatorView({
       return;
     }
     const topic = closeTopic.trim();
+    const topicId = selectedCloseTopicId.trim();
     if (!topic) {
       setCloseDialogConfirmOpen(false);
       pushComposerNotice("Выберите тематику закрытия перед завершением диалога.", "danger");
@@ -4090,7 +4099,7 @@ export function ArmOperatorView({
       return next;
     });
     if (wasLive) {
-      void closeDialogRemote(closingId, topic)
+      void closeDialogRemote(closingId, topic, topicId || undefined)
         .then((result) => {
           // Trust server grace window — it already checks capacity / mode.
           if (result.assignment_grace_until) {
@@ -4113,6 +4122,7 @@ export function ArmOperatorView({
         });
     }
     onCloseTopicChange("");
+    setSelectedCloseTopicId("");
     const nextDialog = remainingDialogs.find((item) => item.id !== closingId);
     if (nextDialog) {
       onSelectQueue(nextDialog.id);
@@ -4126,13 +4136,8 @@ export function ArmOperatorView({
   const handleAcceptSharedDialog = (dialogId?: string, clientName?: string) => {
     const id = dialogId || active?.id;
     if (!id || acceptingDialogId || viewOnly) return;
-    if (demoOfflineArm || !lineOpen) {
-      pushComposerNotice(
-        demoOfflineArm
-          ? "До начала рабочего дня диалоги брать нельзя."
-          : "Сейчас нерабочее время. Диалоги копятся в очереди.",
-        "danger",
-      );
+    if (!lineOpen) {
+      pushComposerNotice("Сейчас нерабочее время. Диалоги копятся в очереди.", "danger");
       return;
     }
     if (atCapacity) {
@@ -4329,6 +4334,7 @@ export function ArmOperatorView({
     (armRole === "supervisor" || isSharedQueuePeek);
   const takeToolbarEnabled =
     showTakeToolbarButton &&
+    lineOpen &&
     !acceptingDialogId &&
     ((canTakeOverDialog) ||
       (isSharedQueuePeek && !atCapacity && !supervisorOwnsActive));
@@ -4740,45 +4746,6 @@ export function ArmOperatorView({
                 ««
               </button>
             </Row>
-            {(!lineOpen || demoOfflineArm) && !viewOnly ? (
-              <div
-                style={{
-                  marginTop: 8,
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  background: "#FFF7ED",
-                  border: "1px solid #FDBA74",
-                }}
-              >
-                <Text style={{ fontSize: 12, color: "#9A3412", fontWeight: 650 }}>
-                  {demoOfflineArm
-                    ? "Смена ещё не начата (демо 8:55). Автораспределение выключено, диалоги из офлайна копятся в очереди."
-                    : "Сейчас нерабочее время. Новые обращения копятся в очереди и не распределяются."}
-                </Text>
-                {sheipaDemo && !workDayStarted ? (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    style={{ marginTop: 8 }}
-                    onClick={() => {
-                      void controlWorkDay("start")
-                        .then(() => {
-                          setWorkDayStarted(true);
-                          setLineOpen(true);
-                          pushComposerNotice("Рабочий день начат. Очередь снова распределяется.");
-                          void refreshLiveQueues();
-                        })
-                        .catch((err: unknown) => {
-                          const message = err instanceof Error ? err.message : "Не удалось начать рабочий день";
-                          pushComposerNotice(message, "danger");
-                        });
-                    }}
-                  >
-                    Начать рабочий день
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
             </div>
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 12px 12px" }}>
             <Stack style={{ gap: 12 }}>
@@ -4841,7 +4808,7 @@ export function ArmOperatorView({
                                 section.id === "shared" &&
                                 !viewOnly &&
                                 armRole !== "supervisor"
-                                  ? atCapacity || demoOfflineArm || !lineOpen
+                                  ? atCapacity || !lineOpen
                                   : undefined
                               }
                               acceptBusy={acceptingDialogId === q.id}
@@ -4981,8 +4948,13 @@ export function ArmOperatorView({
               <TopicSelect
                 t={t}
                 value={closeTopic}
-                options={CLOSE_TOPICS}
-                onChange={onCloseTopicChange}
+                options={dialogTopics}
+                recommendedPath={recommendedTopicPath}
+                recommendedId={recommendedTopicId}
+                onChange={(nextPath, nextId) => {
+                  onCloseTopicChange(nextPath)
+                  setSelectedCloseTopicId(nextId)
+                }}
                 disabled={isReadOnly}
                 style={{ flex: "1 1 220px", maxWidth: 340 }}
               />
@@ -5416,15 +5388,13 @@ export function ArmOperatorView({
                   aria-label={takeToolbarLabel}
                   disabled={!takeToolbarEnabled || acceptingDialogId === active?.id}
                   onClick={handleTakeToolbar}
-                  style={
-                    takeToolbarEnabled
-                      ? {
-                          background: scheme.accent,
-                          borderColor: scheme.accent,
-                          color: "#fff",
-                        }
-                      : undefined
-                  }
+                  style={{
+                    background: scheme.accent,
+                    borderColor: scheme.accent,
+                    color: "#fff",
+                    opacity: takeToolbarEnabled ? 1 : 0.5,
+                    filter: takeToolbarEnabled ? undefined : "saturate(0.6)",
+                  }}
                 >
                   <TakeDialogIcon size={18} />
                 </IconButton>

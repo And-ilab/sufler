@@ -31,6 +31,40 @@ const STATUS_TONE: Record<AppealHistoryItem['status'], 'success' | 'info' | 'war
 const CHANNEL_FALLBACK = ['Сайт', 'Telegram', 'Viber', 'Телефония', 'Мобильный банк']
 
 type FeedbackFilter = 'all' | 'with' | 'without'
+const HISTORY_LEFT_WIDTH_MIN = 240
+const HISTORY_LEFT_WIDTH_MAX = 520
+const HISTORY_RIGHT_WIDTH_MIN = 220
+const HISTORY_RIGHT_WIDTH_MAX = 460
+
+function clampWidth(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(value)))
+}
+
+function startColumnResize(
+  event: { clientX: number; preventDefault: () => void },
+  initialWidth: number,
+  setWidth: (next: number) => void,
+  min: number,
+  max: number,
+  invert = false,
+): void {
+  event.preventDefault()
+  const startX = event.clientX
+  const handleMove = (moveEvent: MouseEvent) => {
+    const delta = moveEvent.clientX - startX
+    setWidth(clampWidth(invert ? initialWidth - delta : initialWidth + delta, min, max))
+  }
+  const handleUp = () => {
+    window.removeEventListener('mousemove', handleMove)
+    window.removeEventListener('mouseup', handleUp)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', handleMove)
+  window.addEventListener('mouseup', handleUp)
+}
 
 function mapDialogStatus(dialog: OnlineChatDialog): AppealHistoryItem['status'] {
   if (dialog.status === 'active' || dialog.status === 'waiting') return 'active'
@@ -49,6 +83,8 @@ function dialogToAppeal(dialog: OnlineChatDialog): AppealHistoryItem {
     topic: dialog.close_topic || dialog.preview || 'Без темы',
     status: mapDialogStatus(dialog),
     operatorName: dialog.operator_name || '—',
+    clientIp: dialog.client_ip || '',
+    feedbackRating: typeof dialog.feedback_rating === 'number' ? dialog.feedback_rating : null,
     openedAt: dialog.created_at,
     closedAt: dialog.closed_at ?? undefined,
     summary: '',
@@ -100,6 +136,8 @@ function matchesDemoFilters(
     dateTo: string
     closeTopic: string
     operatorFilter: string
+    clientIp: string
+    ratings: number[]
     isElevated: boolean
     operatorName: string
   },
@@ -115,6 +153,15 @@ function matchesDemoFilters(
   if (opts.closeTopic.trim()) {
     const needle = opts.closeTopic.trim().toLowerCase()
     if (!item.topic.toLowerCase().includes(needle)) return false
+  }
+  const ipNeedle = opts.clientIp.trim().toLowerCase()
+  if (ipNeedle) {
+    const itemIp = (item.clientIp || '').toLowerCase()
+    if (!itemIp.includes(ipNeedle)) return false
+  }
+  if (opts.ratings.length) {
+    const rating = typeof item.feedbackRating === 'number' ? item.feedbackRating : null
+    if (rating === null || !opts.ratings.includes(rating)) return false
   }
   if (opts.dateFrom) {
     const day = item.openedAt.slice(0, 10)
@@ -155,6 +202,9 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
   const [hasFeedback, setHasFeedback] = useState<FeedbackFilter>('all')
   const [closeTopic, setCloseTopic] = useState('')
   const [debouncedCloseTopic, setDebouncedCloseTopic] = useState('')
+  const [clientIpFilter, setClientIpFilter] = useState('')
+  const [debouncedClientIpFilter, setDebouncedClientIpFilter] = useState('')
+  const [ratingFilter, setRatingFilter] = useState('')
   const [operatorFilter, setOperatorFilter] = useState(() => {
     try {
       return new URLSearchParams(window.location.search).get('historyOperator') || ''
@@ -173,6 +223,11 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [showSkeleton, setShowSkeleton] = useState(false)
   const [messagesError, setMessagesError] = useState('')
+  const [filtersCollapsed, setFiltersCollapsed] = useState(false)
+  const [leftWidth, setLeftWidth] = useState(320)
+  const [rightWidth, setRightWidth] = useState(280)
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false)
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false)
   const [transcriptKey, setTranscriptKey] = useState(0)
   const messagesCacheRef = useRef<Record<string, OnlineChatMessage[]>>({})
   const itemsRef = useRef(items)
@@ -190,6 +245,22 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
     return () => window.clearTimeout(timer)
   }, [closeTopic])
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedClientIpFilter(clientIpFilter), 320)
+    return () => window.clearTimeout(timer)
+  }, [clientIpFilter])
+
+  const ratingValues = useMemo(() => {
+    return Array.from(
+      new Set(
+        ratingFilter
+          .split(/[,\s]+/)
+          .map((chunk) => Number.parseInt(chunk, 10))
+          .filter((value) => Number.isInteger(value) && value >= 1 && value <= 5),
+      ),
+    ).sort((a, b) => a - b)
+  }, [ratingFilter])
+
   const refresh = useCallback(async () => {
     const extras: Parameters<typeof listDialogs>[1] = {}
     const q = debouncedQuery.trim()
@@ -201,6 +272,9 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
     if (hasFeedback === 'without') extras.has_feedback = false
     const topic = debouncedCloseTopic.trim()
     if (topic) extras.close_topic = topic
+    const ip = debouncedClientIpFilter.trim()
+    if (ip) extras.client_ip = ip
+    if (ratingValues.length) extras.ratings = ratingValues.join(',')
 
     if (!isElevated && operatorName) {
       extras.operator_name = operatorName
@@ -243,6 +317,8 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
           dateTo,
           closeTopic: debouncedCloseTopic,
           operatorFilter,
+          clientIp: debouncedClientIpFilter,
+          ratings: ratingValues,
           isElevated,
           operatorName,
         }),
@@ -264,6 +340,8 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
     channel,
     hasFeedback,
     debouncedCloseTopic,
+    debouncedClientIpFilter,
+    ratingValues,
     operatorFilter,
     isElevated,
     operatorName,
@@ -370,6 +448,8 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
           dateTo,
           closeTopic: debouncedCloseTopic,
           operatorFilter,
+          clientIp: debouncedClientIpFilter,
+          ratings: ratingValues,
           isElevated,
           operatorName,
         })
@@ -385,6 +465,8 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
     dateFrom,
     dateTo,
     debouncedCloseTopic,
+    debouncedClientIpFilter,
+    ratingValues,
     operatorFilter,
     isElevated,
     operatorName,
@@ -405,168 +487,220 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
       onBack={onBack}
       bodyStyle={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
     >
-      <div
-        style={{
-          padding: '10px 12px',
-          borderBottom: `1px solid ${t.stroke.tertiary}`,
-          display: 'flex',
-          gap: 10,
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          flexShrink: 0,
-        }}
-      >
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="слова в диалоге (стоп-слова, закрытие…), телефон, тема"
-          title="Несколько слов через пробел — все должны встретиться в метаданных или тексте сообщений (AND)"
+      <div style={{ borderBottom: `1px solid ${t.stroke.tertiary}`, flexShrink: 0 }}>
+        <div
           style={{
-            flex: '1 1 240px',
-            minWidth: 220,
-            padding: '8px 10px',
-            borderRadius: 8,
-            border: `1px solid ${t.stroke.secondary}`,
-            background: t.bg.editor,
-            color: t.text.primary,
-            fontFamily: 'inherit',
-            fontSize: 13,
+            padding: '10px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
           }}
-        />
-        <label style={labelStyle(t)}>
-          с
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            style={dateInputStyle(t)}
-          />
-        </label>
-        <label style={labelStyle(t)}>
-          по
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            style={dateInputStyle(t)}
-          />
-        </label>
-        <select
-          value={channel}
-          onChange={(e) => setChannel(e.target.value)}
-          style={selectStyle(t)}
         >
-          {channels.map((value) => (
-            <option key={value} value={value}>
-              {value === 'all' ? 'Все каналы' : value}
-            </option>
-          ))}
-        </select>
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value as typeof status)}
-          style={selectStyle(t)}
-        >
-          <option value="all">Все статусы</option>
-          <option value="closed">Закрытые</option>
-          <option value="active">В работе</option>
-          <option value="lost">Потерянные</option>
-          <option value="offline">Офлайн</option>
-        </select>
-        <select
-          value={hasFeedback}
-          onChange={(e) => setHasFeedback(e.target.value as FeedbackFilter)}
-          style={selectStyle(t)}
-        >
-          <option value="all">Оценка: все</option>
-          <option value="with">С оценкой</option>
-          <option value="without">Без оценки</option>
-        </select>
-        <input
-          value={closeTopic}
-          onChange={(e) => setCloseTopic(e.target.value)}
-          placeholder="тема/слова закрытия"
-          style={{
-            flex: '0 1 180px',
-            minWidth: 140,
-            padding: '8px 10px',
-            borderRadius: 8,
-            border: `1px solid ${t.stroke.secondary}`,
-            background: t.bg.editor,
-            color: t.text.primary,
-            fontFamily: 'inherit',
-            fontSize: 13,
-          }}
-        />
-        {isElevated ? (
-          <select
-            value={operatorFilter}
-            onChange={(e) => setOperatorFilter(e.target.value)}
-            style={selectStyle(t)}
+          <Text weight="semibold" style={{ fontSize: 13 }}>Фильтры</Text>
+          <button
+            type="button"
+            onClick={() => setFiltersCollapsed((open) => !open)}
+            style={ghostButtonStyle(t)}
           >
-            <option value="">Все операторы</option>
-            {operatorOptions.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+            {filtersCollapsed ? 'Развернуть' : 'Свернуть'}
+          </button>
+        </div>
+        {!filtersCollapsed ? (
+          <div
+            style={{
+              padding: '0 12px 10px',
+              display: 'flex',
+              gap: 10,
+              flexWrap: 'wrap',
+              alignItems: 'center',
+            }}
+          >
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="слова в диалоге (оператор, IP, тема, телефон...)"
+              title="Несколько слов через пробел — все должны встретиться в метаданных или тексте сообщений (AND)"
+              style={{
+                flex: '1 1 260px',
+                minWidth: 220,
+                padding: '8px 10px',
+                borderRadius: 8,
+                border: `1px solid ${t.stroke.secondary}`,
+                background: t.bg.editor,
+                color: t.text.primary,
+                fontFamily: 'inherit',
+                fontSize: 13,
+              }}
+            />
+            <label style={labelStyle(t)}>
+              с
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                style={dateInputStyle(t)}
+              />
+            </label>
+            <label style={labelStyle(t)}>
+              по
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                style={dateInputStyle(t)}
+              />
+            </label>
+            <select
+              value={channel}
+              onChange={(e) => setChannel(e.target.value)}
+              style={selectStyle(t)}
+            >
+              {channels.map((value) => (
+                <option key={value} value={value}>
+                  {value === 'all' ? 'Все каналы' : value}
+                </option>
+              ))}
+            </select>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value as typeof status)}
+              style={selectStyle(t)}
+            >
+              <option value="all">Все статусы</option>
+              <option value="closed">Закрытые</option>
+              <option value="active">В работе</option>
+              <option value="lost">Потерянные</option>
+              <option value="offline">Офлайн</option>
+            </select>
+            <select
+              value={hasFeedback}
+              onChange={(e) => setHasFeedback(e.target.value as FeedbackFilter)}
+              style={selectStyle(t)}
+            >
+              <option value="all">Оценка: все</option>
+              <option value="with">С оценкой</option>
+              <option value="without">Без оценки</option>
+            </select>
+            <input
+              value={closeTopic}
+              onChange={(e) => setCloseTopic(e.target.value)}
+              placeholder="тема/слова закрытия"
+              style={filterInputStyle(t)}
+            />
+            <input
+              value={clientIpFilter}
+              onChange={(e) => setClientIpFilter(e.target.value)}
+              placeholder="IP клиента"
+              style={filterInputStyle(t)}
+            />
+            <input
+              value={ratingFilter}
+              onChange={(e) => setRatingFilter(e.target.value)}
+              placeholder="оценки (пример: 4,5)"
+              style={filterInputStyle(t)}
+            />
+            {isElevated ? (
+              <select
+                value={operatorFilter}
+                onChange={(e) => setOperatorFilter(e.target.value)}
+                style={selectStyle(t)}
+              >
+                <option value="">Все операторы</option>
+                {operatorOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            <Text style={{ fontSize: 12, color: t.text.tertiary }}>
+              {filtered.length} из {items.length}
+            </Text>
+          </div>
         ) : null}
-        <Text style={{ fontSize: 12, color: t.text.tertiary }}>
-          {filtered.length} из {items.length}
-        </Text>
       </div>
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         {/* Left: dialog library */}
-        <aside
-          style={{
-            width: 320,
-            flexShrink: 0,
-            borderRight: `1px solid ${t.stroke.secondary}`,
-            overflowY: 'auto',
-            padding: 8,
-            background: t.bg.editor,
-          }}
-        >
-          {filtered.length === 0 ? (
-            <ModuleEmpty t={t} title="Ничего не найдено" hint="Измените фильтры или поисковый запрос." />
-          ) : (
-            filtered.map((item) => {
-              const active = selectedId === item.id
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setSelectedId(item.id)}
-                  style={{
-                    width: '100%',
-                    textAlign: 'left',
-                    padding: '11px 12px',
-                    marginBottom: 6,
-                    borderRadius: 10,
-                    border: `1px solid ${active ? scheme.accent : t.stroke.tertiary}`,
-                    background: active ? t.fill.tertiary : t.bg.elevated,
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    color: t.text.primary,
-                  }}
-                >
-                  <Row style={{ justifyContent: 'space-between', gap: 8 }}>
-                    <Text weight="semibold" style={{ fontSize: 13 }}>{item.clientName}</Text>
-                    <Pill tone={STATUS_TONE[item.status]} size="sm">{STATUS_LABEL[item.status]}</Pill>
-                  </Row>
-                  <Text style={{ fontSize: 12, color: t.text.secondary, marginTop: 4 }}>
-                    {item.channel} · {item.topic}
-                  </Text>
-                  <Text style={{ fontSize: 11, color: t.text.tertiary, marginTop: 4 }}>
-                    {formatDateTime(item.openedAt)} · {item.operatorName}
-                  </Text>
+        {leftPanelCollapsed ? (
+          <aside style={collapsedPanelStyle(t)}>
+            <button type="button" onClick={() => setLeftPanelCollapsed(false)} style={collapsedToggleStyle(t)}>
+              ▸
+            </button>
+          </aside>
+        ) : (
+          <>
+            <aside
+              style={{
+                width: leftWidth,
+                flexShrink: 0,
+                borderRight: `1px solid ${t.stroke.secondary}`,
+                overflowY: 'auto',
+                padding: 8,
+                background: t.bg.editor,
+                minWidth: HISTORY_LEFT_WIDTH_MIN,
+                maxWidth: HISTORY_LEFT_WIDTH_MAX,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text weight="semibold" style={{ fontSize: 12 }}>Список диалогов</Text>
+                <button type="button" onClick={() => setLeftPanelCollapsed(true)} style={ghostButtonStyle(t)}>
+                  Свернуть
                 </button>
-              )
-            })
-          )}
-        </aside>
+              </div>
+              {filtered.length === 0 ? (
+                <ModuleEmpty t={t} title="Ничего не найдено" hint="Измените фильтры или поисковый запрос." />
+              ) : (
+                filtered.map((item) => {
+                  const active = selectedId === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setSelectedId(item.id)}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '11px 12px',
+                        marginBottom: 6,
+                        borderRadius: 10,
+                        border: `1px solid ${active ? scheme.accent : t.stroke.tertiary}`,
+                        background: active ? t.fill.tertiary : t.bg.elevated,
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                        color: t.text.primary,
+                      }}
+                    >
+                      <Row style={{ justifyContent: 'space-between', gap: 8 }}>
+                        <Text weight="semibold" style={{ fontSize: 13 }}>{item.clientName}</Text>
+                        <Pill tone={STATUS_TONE[item.status]} size="sm">{STATUS_LABEL[item.status]}</Pill>
+                      </Row>
+                      <Text style={{ fontSize: 12, color: t.text.secondary, marginTop: 4 }}>
+                        {item.channel} · {item.topic}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: t.text.tertiary, marginTop: 4 }}>
+                        {formatDateTime(item.openedAt)} · {item.operatorName}
+                      </Text>
+                    </button>
+                  )
+                })
+              )}
+            </aside>
+            <HistoryResizeHandle
+              t={t}
+              label="Изменить ширину списка диалогов"
+              onMouseDown={(event) =>
+                startColumnResize(
+                  event,
+                  leftWidth,
+                  setLeftWidth,
+                  HISTORY_LEFT_WIDTH_MIN,
+                  HISTORY_LEFT_WIDTH_MAX,
+                )}
+            />
+          </>
+        )}
 
         {/* Center: transcript */}
         <section
@@ -677,15 +811,38 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
         </section>
 
         {/* Right: brief facts */}
-        <aside
-          style={{
-            width: 280,
-            flexShrink: 0,
-            overflowY: 'auto',
-            padding: 14,
-            background: t.bg.editor,
-          }}
-        >
+        {!rightPanelCollapsed ? (
+          <>
+            <HistoryResizeHandle
+              t={t}
+              label="Изменить ширину блока метаданных"
+              onMouseDown={(event) =>
+                startColumnResize(
+                  event,
+                  rightWidth,
+                  setRightWidth,
+                  HISTORY_RIGHT_WIDTH_MIN,
+                  HISTORY_RIGHT_WIDTH_MAX,
+                  true,
+                )}
+            />
+            <aside
+              style={{
+                width: rightWidth,
+                minWidth: HISTORY_RIGHT_WIDTH_MIN,
+                maxWidth: HISTORY_RIGHT_WIDTH_MAX,
+                flexShrink: 0,
+                overflowY: 'auto',
+                padding: 14,
+                background: t.bg.editor,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text weight="semibold" style={{ fontSize: 12 }}>Данные</Text>
+                <button type="button" onClick={() => setRightPanelCollapsed(true)} style={ghostButtonStyle(t)}>
+                  Свернуть
+                </button>
+              </div>
           {!selected ? (
             <Text style={{ fontSize: 12, color: t.text.tertiary, lineHeight: 1.45 }}>
               Здесь появится краткая информация о выбранном диалоге и участниках.
@@ -723,7 +880,13 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
                     <Meta
                       t={t}
                       label="Оценка"
-                      value={selectedDialog.has_feedback ? 'Есть' : 'Нет'}
+                      value={
+                        typeof selectedDialog.feedback_rating === 'number'
+                          ? `${selectedDialog.feedback_rating}/5`
+                          : selectedDialog.has_feedback
+                            ? 'Есть'
+                            : 'Нет'
+                      }
                     />
                   ) : null}
                   <Meta
@@ -748,6 +911,7 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
                 <div style={{ display: 'grid', gap: 10 }}>
                   <Meta t={t} label="Клиент" value={selected.clientName} />
                   <Meta t={t} label="Телефон" value={selected.phoneMasked || '—'} />
+                  <Meta t={t} label="IP клиента" value={selected.clientIp || '—'} />
                   <Meta t={t} label="Оператор" value={selected.operatorName || '—'} />
                   {selectedDialog?.department_name ? (
                     <Meta t={t} label="Отдел" value={selectedDialog.department_name} />
@@ -763,7 +927,15 @@ export function HistoryModule({ t, scheme, onBack, armRole, operatorName }: ArmM
               </Text>
             </div>
           )}
-        </aside>
+            </aside>
+          </>
+        ) : (
+          <aside style={collapsedPanelStyle(t)}>
+            <button type="button" onClick={() => setRightPanelCollapsed(false)} style={collapsedToggleStyle(t)}>
+              ◂
+            </button>
+          </aside>
+        )}
       </div>
     </ArmModuleFrame>
   )
@@ -925,6 +1097,87 @@ function Meta({ t, label, value }: { t: ArmModuleProps['t']; label: string; valu
       <Text style={{ fontSize: 13, marginTop: 2, lineHeight: 1.35 }}>{value}</Text>
     </div>
   )
+}
+
+function HistoryResizeHandle({
+  t,
+  label,
+  onMouseDown,
+}: {
+  t: ArmTheme
+  label: string
+  onMouseDown: (event: { clientX: number; preventDefault: () => void }) => void
+}) {
+  return (
+    <div
+      role="separator"
+      aria-label={label}
+      title="Перетащите для изменения ширины"
+      onMouseDown={onMouseDown}
+      style={{
+        width: 10,
+        flexShrink: 0,
+        alignSelf: 'stretch',
+        cursor: 'col-resize',
+        background: t.fill.secondary,
+        borderLeft: `1px solid ${t.stroke.secondary}`,
+        borderRight: `1px solid ${t.stroke.secondary}`,
+      }}
+    />
+  )
+}
+
+function ghostButtonStyle(t: ArmModuleProps['t']): CSSProperties {
+  return {
+    padding: '6px 8px',
+    borderRadius: 8,
+    border: `1px solid ${t.stroke.secondary}`,
+    background: t.bg.elevated,
+    color: t.text.secondary,
+    fontFamily: 'inherit',
+    fontSize: 12,
+    cursor: 'pointer',
+  }
+}
+
+function filterInputStyle(t: ArmModuleProps['t']): CSSProperties {
+  return {
+    flex: '0 1 180px',
+    minWidth: 140,
+    padding: '8px 10px',
+    borderRadius: 8,
+    border: `1px solid ${t.stroke.secondary}`,
+    background: t.bg.editor,
+    color: t.text.primary,
+    fontFamily: 'inherit',
+    fontSize: 13,
+  }
+}
+
+function collapsedPanelStyle(t: ArmModuleProps['t']): CSSProperties {
+  return {
+    width: 28,
+    flexShrink: 0,
+    borderLeft: `1px solid ${t.stroke.secondary}`,
+    borderRight: `1px solid ${t.stroke.secondary}`,
+    background: t.bg.editor,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  }
+}
+
+function collapsedToggleStyle(t: ArmModuleProps['t']): CSSProperties {
+  return {
+    width: 20,
+    height: 44,
+    borderRadius: 10,
+    border: `1px solid ${t.stroke.secondary}`,
+    background: t.bg.elevated,
+    color: t.text.secondary,
+    cursor: 'pointer',
+    fontSize: 12,
+  }
 }
 
 function selectStyle(t: ArmModuleProps['t']): CSSProperties {

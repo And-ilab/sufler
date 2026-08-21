@@ -314,6 +314,30 @@ class BaseMessage(models.Model):
         ordering = ("sort_order", "created_at")
 
 
+class DialogCloseTopicNode(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="children",
+    )
+    label = models.CharField(max_length=200)
+    full_path = models.CharField(max_length=512, blank=True, default="", db_index=True)
+    sort_order = models.IntegerField(default=100, db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    is_selectable = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("sort_order", "label")
+
+    def __str__(self) -> str:
+        return self.full_path or self.label
+
+
 class Dialog(models.Model):
     """Operator ARM dialog started from the site widget (or other channels)."""
 
@@ -354,6 +378,7 @@ class Dialog(models.Model):
     client_last_name = models.CharField(max_length=100, blank=True, default="")
     client_phone = models.CharField(max_length=40, blank=True, default="")
     client_external_id = models.CharField(max_length=160, blank=True, default="", db_index=True)
+    client_ip = models.CharField(max_length=64, blank=True, default="", db_index=True)
     # Data the client filled in the pre-chat / bot onboarding form, as an ordered
     # list of {"label": str, "value": str} for display in the ARM client card.
     client_fields = models.JSONField(default=list, blank=True)
@@ -374,7 +399,14 @@ class Dialog(models.Model):
     bot_active = models.BooleanField(default=False, db_index=True)
     bot_turns = models.PositiveIntegerField(default=0)
     preview = models.CharField(max_length=500, blank=True, default="")
-    close_topic = models.CharField(max_length=120, blank=True, default="")
+    close_topic = models.CharField(max_length=512, blank=True, default="")
+    close_topic_node = models.ForeignKey(
+        DialogCloseTopicNode,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="dialogs",
+    )
     summary_short = models.TextField(blank=True, default="")
     summary_detailed = models.TextField(blank=True, default="")
     client_online = models.BooleanField(default=True, db_index=True)
@@ -408,12 +440,17 @@ class Dialog(models.Model):
             update_fields=["status", "operator_name", "accepted_at", "updated_at"],
         )
 
-    def mark_closed(self, topic: str = "") -> None:
+    def mark_closed(
+        self,
+        topic: str = "",
+        topic_node: DialogCloseTopicNode | None = None,
+    ) -> None:
         self.status = self.Status.CLOSED
         self.close_topic = topic.strip()
+        self.close_topic_node = topic_node
         self.closed_at = timezone.now()
         self.save(
-            update_fields=["status", "close_topic", "closed_at", "updated_at"],
+            update_fields=["status", "close_topic", "close_topic_node", "closed_at", "updated_at"],
         )
 
     def mark_blocked(self) -> None:
@@ -689,6 +726,11 @@ class WorkScheduleSettings(models.Model):
         default=Override.AUTO,
         help_text="Ручное переопределение расписания (демо / форс-мажор)",
     )
+    # Tracks the last computed is_open() value so a periodic background check can
+    # detect open→closed / closed→open transitions and run the shift side effects
+    # (return dialogs to the queue, take operators offline, flush the queue) even
+    # when nobody manually toggles anything — the schedule alone drives it in prod.
+    last_open_state = models.BooleanField(null=True, blank=True, default=None)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

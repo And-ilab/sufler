@@ -121,6 +121,17 @@ export interface BotConfiguration {
   max_bot_turns: number
 }
 
+export interface DialogTopicNode {
+  id: EntityId
+  parent_id?: EntityId | null
+  label: string
+  full_path: string
+  sort_order: number
+  is_active: boolean
+  is_selectable: boolean
+  children?: DialogTopicNode[]
+}
+
 export interface SupervisorKpis {
   waiting?: number
   waiting_online?: number
@@ -293,6 +304,30 @@ export const channelsApi = {
 export const routingRulesApi = resourceApi<RoutingRule>('routing-rules', 'routing_rule', true)
 export const botsApi = resourceApi<BotConfiguration>('bots', 'bot', true)
 export const baseMessagesApi = resourceApi<BaseMessage>('base-messages', 'base_message', true)
+export const dialogTopicsApi = {
+  async list(activeOnly = false): Promise<DialogTopicNode[]> {
+    const query = activeOnly ? '?active=1' : '?active=0'
+    return listFrom<DialogTopicNode>(await request<unknown>(`dialog-topics/${query}`))
+  },
+  async create(payload: Partial<DialogTopicNode> & { parent_id?: EntityId | null }): Promise<DialogTopicNode> {
+    return itemFrom<DialogTopicNode>(
+      await request<unknown>('dialog-topics/', { method: 'POST', ...json(payload) }),
+      'dialog_topic',
+    )
+  },
+  async update(id: EntityId, payload: Partial<DialogTopicNode> & { parent_id?: EntityId | null }): Promise<DialogTopicNode> {
+    return itemFrom<DialogTopicNode>(
+      await request<unknown>(`dialog-topics/${id}/`, { method: 'PATCH', ...json(payload) }),
+      'dialog_topic',
+    )
+  },
+  async remove(id: EntityId): Promise<void> {
+    await request<unknown>(`dialog-topics/${id}/`, { method: 'DELETE' })
+  },
+  async reorder(payload: { id: EntityId; parent_id?: EntityId | null; sort_order?: number }): Promise<void> {
+    await request<unknown>('dialog-topics/reorder/', { method: 'POST', ...json(payload) })
+  },
+}
 
 export async function getSupervisorOverview(): Promise<SupervisorOverview> {
   return request<SupervisorOverview>('supervisor/overview/')

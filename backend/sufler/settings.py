@@ -486,6 +486,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "online_chat.tasks.classify_stale_dialogs",
         "schedule": 60.0,
     },
+    # Drives the automatic online/offline transition by date/time in prod —
+    # no manual "start/stop work day" button needed outside the test simulator.
+    "online-chat-sync-work-schedule": {
+        "task": "online_chat.tasks.sync_work_schedule",
+        "schedule": 20.0,
+    },
 }
 
 # Original assistant KB uploads (for source download from chat citations).

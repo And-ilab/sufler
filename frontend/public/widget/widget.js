@@ -23,11 +23,6 @@
   var QUERY_PARAMS = new URLSearchParams(global.location.search || '');
   var SIM_CLIENT = QUERY_PARAMS.get('sim_client') || '';
   var RESUME_DIALOG_ID = QUERY_PARAMS.get('dialog_id') || '';
-  // Demo: an offline widget URL (?offline=1) always behaves as non-working hours.
-  var OFFLINE_DEMO =
-    QUERY_PARAMS.get('offline') === '1' ||
-    (SCRIPT && SCRIPT.getAttribute('data-offline') === '1') ||
-    false;
   var LOGO_SRC =
     (SCRIPT && SCRIPT.getAttribute('data-logo-src')) ||
     '/assets/belarusbank-logo.png';
@@ -717,19 +712,34 @@
       return inline || '';
     }
 
-    function createOperatorAvatarNode(url) {
-      if (!url) return null;
+    /**
+     * Avatar for a bank employee (operator/supervisor) bubble or the op-strip header.
+     * Always renders something: employee initials by default and photo when available.
+     */
+    function createOperatorAvatarNode(url, initials) {
       var wrap = document.createElement('div');
       wrap.className = 'avatar avatar--photo';
+      var fallbackInitials = String(initials || STR.operatorInitials || 'О')
+        .trim()
+        .slice(0, 2)
+        .toUpperCase();
+      wrap.textContent = fallbackInitials;
+      if (!url) {
+        return wrap;
+      }
       var img = document.createElement('img');
-      img.src = url;
       img.alt = '';
       img.loading = 'lazy';
       img.decoding = 'async';
-      img.onerror = function () {
-        if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      img.onload = function () {
+        wrap.textContent = '';
+        wrap.appendChild(img);
       };
-      wrap.appendChild(img);
+      img.onerror = function () {
+        // Keep initials fallback when photo URL fails (404 / invalid / blocked).
+        wrap.textContent = fallbackInitials;
+      };
+      img.src = url;
       return wrap;
     }
 
@@ -1089,8 +1099,15 @@
         row.innerHTML = bubble + avatarHtml;
       } else {
         row.innerHTML = bubble;
-        var operatorAvatarNode = createOperatorAvatarNode(options.avatarUrl || '');
-        if (operatorAvatarNode) row.insertBefore(operatorAvatarNode, row.firstChild);
+        // Bot ("Виртуальный помощник") keeps its current no-avatar look — the
+        // silhouette fallback is only for real bank employees (operators/supervisors).
+        if (!options.isBot) {
+          var operatorAvatarNode = createOperatorAvatarNode(
+            options.avatarUrl || '',
+            options.operatorInitials || initialsFromName(options.operatorLabel || state.operatorName),
+          );
+          row.insertBefore(operatorAvatarNode, row.firstChild);
+        }
       }
       var downloadBtn = row.querySelector('[data-attachment-download]');
       if (downloadBtn) {
@@ -1240,7 +1257,7 @@
       if (nameNode) nameNode.textContent = full;
       var existingAvatar = opStrip.querySelector('.avatar');
       if (existingAvatar) existingAvatar.remove();
-      var avatarNode = createOperatorAvatarNode(avatarUrl);
+      var avatarNode = createOperatorAvatarNode(avatarUrl, state.operatorInitials);
       if (avatarNode) {
         var meta = opStrip.querySelector('.op-meta');
         if (meta) opStrip.insertBefore(avatarNode, meta);
@@ -1325,10 +1342,13 @@
               receiptStatus: message.receipt_status,
               quotedText: message.quoted_text,
               avatarUrl: avatarUrl,
+              isBot: message.speaker === 'bot',
               operatorLabel:
                 message.speaker === 'bot'
                   ? 'Виртуальный помощник'
                   : shortNameFromFull(remoteOperatorName),
+              operatorInitials:
+                message.speaker === 'bot' ? '' : initialsFromName(remoteOperatorName),
             },
             attachmentOptionsFromMessage(message),
           ),
@@ -1578,7 +1598,6 @@
           last_name: profile.lastName || '',
           phone: profile.phone || '',
           fields: profile.fields || [],
-          offline_demo: OFFLINE_DEMO,
           locale: LOCALE,
           page_url: global.location.href,
           client_external_id: SIM_CLIENT,
@@ -1600,6 +1619,18 @@
           persistDialogId(state.dialogId);
           if (body.message && body.message.id) rememberMessageId(body.message.id);
           if (state.dialogId) connectDialogSocket(state.dialogId);
+          // The backend may create base/offline bot messages in the same request.
+          // Hydrate them from HTTP response so the client sees them immediately
+          // even if WS subscription starts a moment later.
+          var initialMessages =
+            body &&
+            body.dialog &&
+            Array.isArray(body.dialog.messages)
+              ? body.dialog.messages
+              : [];
+          initialMessages.forEach(function (message) {
+            handleRemoteMessage(message);
+          });
           return body;
         })
         .catch(function (err) {
@@ -1992,6 +2023,7 @@
                         message.speaker === 'bot'
                           ? ''
                           : resolveOperatorAvatarUrl(message, dialog),
+                      isBot: message.speaker === 'bot',
                       operatorLabel:
                         message.speaker === 'bot'
                           ? 'Виртуальный помощник'

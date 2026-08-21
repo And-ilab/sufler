@@ -22,6 +22,7 @@ export type OnlineChatDialog = {
   client_last_name: string
   client_phone: string
   client_external_id?: string
+  client_ip?: string
   client_name: string
   client_fields?: { label: string; value: string }[]
   client_online?: boolean
@@ -32,6 +33,7 @@ export type OnlineChatDialog = {
   preview: string
   entry_url?: string
   close_topic: string
+  close_topic_id?: string | null
   created_at: string
   updated_at: string
   accepted_at: string | null
@@ -44,6 +46,7 @@ export type OnlineChatDialog = {
   /** Simulator / seed client — sufler must stay disabled. */
   is_test_client?: boolean
   has_feedback?: boolean
+  feedback_rating?: number | null
   messages?: OnlineChatMessage[]
 }
 
@@ -97,6 +100,17 @@ export type CloseDialogResponse = {
   dialog: OnlineChatDialog
   assignment_grace_until?: string
   assignment_grace_seconds?: number
+}
+
+export type DialogTopicNode = {
+  id: string
+  parent_id: string | null
+  label: string
+  full_path: string
+  sort_order: number
+  is_active: boolean
+  is_selectable: boolean
+  children: DialogTopicNode[]
 }
 
 export type OnlineChatFeedback = {
@@ -195,6 +209,8 @@ export async function listDialogs(
     has_feedback?: boolean
     outcome?: string
     close_topic?: string
+    client_ip?: string
+    ratings?: string
   },
 ): Promise<OnlineChatDialog[]> {
   const params = new URLSearchParams()
@@ -211,6 +227,8 @@ export async function listDialogs(
   if (extras?.has_feedback === false) params.set('has_feedback', 'false')
   if (extras?.outcome) params.set('outcome', extras.outcome)
   if (extras?.close_topic) params.set('close_topic', extras.close_topic)
+  if (extras?.client_ip) params.set('client_ip', extras.client_ip)
+  if (extras?.ratings) params.set('ratings', extras.ratings)
   const query = params.toString() ? `?${params.toString()}` : ''
   const response = await fetch(`/api/v1/online-chat/dialogs/${query}`)
   const body = await parseJson<{ ok: boolean; items: OnlineChatDialog[] }>(response)
@@ -260,13 +278,39 @@ export async function transferDialogRemote(
 export async function closeDialogRemote(
   dialogId: string,
   topic: string,
+  topicId?: string,
 ): Promise<CloseDialogResponse> {
   const response = await fetch(`/api/v1/online-chat/dialogs/${dialogId}/close/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ topic }),
+    body: JSON.stringify({ topic, topic_id: topicId || '' }),
   })
   return parseJson<CloseDialogResponse>(response)
+}
+
+export async function fetchDialogTopics(activeOnly = true): Promise<DialogTopicNode[]> {
+  const query = activeOnly ? '?active=1' : ''
+  const response = await fetch(`/api/v1/online-chat/dialog-topics/${query}`)
+  const body = await parseJson<{ ok: boolean; items: DialogTopicNode[] }>(response)
+  return body.items || []
+}
+
+export async function suggestDialogTopic(articleTitles: string[]): Promise<{
+  topic_id: string | null
+  topic_path: string
+  confidence: number
+}> {
+  const response = await fetch('/api/v1/online-chat/dialog-topics/suggest/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ article_titles: articleTitles }),
+  })
+  return parseJson<{
+    ok: boolean
+    topic_id: string | null
+    topic_path: string
+    confidence: number
+  }>(response)
 }
 
 export async function fetchAssignmentSettings(): Promise<AssignmentSettingsResponse['settings']> {

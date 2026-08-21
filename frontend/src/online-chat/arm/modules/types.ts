@@ -69,6 +69,8 @@ export type AppealHistoryItem = {
   topic: string
   status: 'closed' | 'active' | 'lost' | 'offline'
   operatorName: string
+  clientIp?: string
+  feedbackRating?: number | null
   openedAt: string
   closedAt?: string
   summary: string

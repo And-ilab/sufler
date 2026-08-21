@@ -24,6 +24,7 @@ from online_chat.models import (
     BotConfiguration,
     ClientBlock,
     Dialog,
+    DialogCloseTopicNode,
     DialogFeedback,
     DialogMessage,
     DialogTranscriptEmail,
@@ -134,6 +135,36 @@ def _send_base_messages(
             _create_bot_message(dialog, message.text)
             sent += 1
     return sent
+
+
+def _enqueue_hold_base_messages(
+    dialog: Dialog,
+    placement_config: WidgetPlacement | None = None,
+) -> int:
+    """Schedule delayed base messages for the waiting-for-operator phase."""
+    if dialog.status != Dialog.Status.WAITING or dialog.outcome == Dialog.Outcome.OFFLINE:
+        return 0
+    messages = BaseMessage.objects.filter(
+        is_active=True,
+        send_phase=BaseMessage.SendPhase.HOLD,
+    ).order_by("sort_order", "created_at")
+    queued = 0
+    from online_chat.tasks import send_hold_base_message
+
+    for message in messages:
+        if not _base_message_matches(message, dialog, placement_config):
+            continue
+        delay = max(0, int(message.delay_seconds or 0))
+        kwargs = {
+            "dialog_id": str(dialog.id),
+            "base_message_id": str(message.id),
+        }
+        try:
+            send_hold_base_message.apply_async(kwargs=kwargs, countdown=delay)
+        except Exception:  # noqa: BLE001 — broker down: run inline
+            send_hold_base_message(**kwargs)
+        queued += 1
+    return queued
 
 
 def _send_offline_notice(
@@ -596,6 +627,7 @@ def serialize_dialog(
 ) -> dict[str, Any]:
     needs_reply = dialog_needs_reply(dialog)
     wait_anchor = _wait_anchor(dialog)
+    feedback = DialogFeedback.objects.filter(dialog_id=dialog.id).only("rating").first()
     payload: dict[str, Any] = {
         "id": str(dialog.id),
         "ref_code": dialog.ref_code(),
@@ -609,6 +641,7 @@ def serialize_dialog(
         "client_phone": dialog.client_phone,
         "client_external_id": dialog.client_external_id,
         "client_fields": _clean_client_fields(dialog.client_fields),
+        "client_ip": dialog.client_ip,
         "entry_url": dialog.entry_url,
         "locale": dialog.locale,
         "client_name": dialog.client_display_name(),
@@ -622,6 +655,7 @@ def serialize_dialog(
         "outcome": dialog.outcome,
         "preview": dialog.preview,
         "close_topic": dialog.close_topic,
+        "close_topic_id": str(dialog.close_topic_node_id) if dialog.close_topic_node_id else None,
         "created_at": dialog.created_at.isoformat(),
         "updated_at": dialog.updated_at.isoformat(),
         "accepted_at": dialog.accepted_at.isoformat() if dialog.accepted_at else None,
@@ -644,7 +678,8 @@ def serialize_dialog(
         ),
         "wait_anchor_at": wait_anchor.isoformat() if wait_anchor is not None else None,
         "is_test_client": is_test_client_dialog(dialog),
-        "has_feedback": DialogFeedback.objects.filter(dialog_id=dialog.id).exists(),
+        "has_feedback": feedback is not None,
+        "feedback_rating": feedback.rating if feedback is not None else None,
     }
     if include_messages:
         current_messages = serialize_messages_for_dialog(
@@ -796,6 +831,7 @@ def create_dialog_with_message(
     initiated_by: str = Dialog.InitiatedBy.CLIENT,
     operator_name: str = "",
     client_fields: list[dict[str, str]] | None = None,
+    client_ip: str = "",
     force_offline: bool = False,
     skip_auto_assign: bool = False,
 ) -> tuple[Dialog, DialogMessage]:
@@ -807,12 +843,11 @@ def create_dialog_with_message(
     if initiated_by == Dialog.InitiatedBy.OPERATOR and operator_name.strip():
         status = Dialog.Status.ACTIVE
     # Client arriving outside working hours is parked until the line opens.
-    # Offline-widget demo clients (force_offline) always park with offline_demo
-    # and are released only when Sheipa starts the working day.
-    # Sheipa leftover stubs (skip_auto_assign) stay as regular waiting holds.
+    # ``force_offline`` lets internal callers (tests, tooling) simulate that
+    # without depending on the real clock/schedule.
     line_open = line_is_open()
     is_offline_intake = initiated_by == Dialog.InitiatedBy.CLIENT and (
-        force_offline or (not skip_auto_assign and not line_open)
+        force_offline or not line_open
     )
     normalized_phone = format_phone_e164(client_phone) if client_phone else ""
 
@@ -824,17 +859,9 @@ def create_dialog_with_message(
     queue_full = department_queue_is_full(department)
     if queue_full:
         routing_reason = f"{routing_reason};queue_full"
-    if force_offline:
-        routing_reason = (
-            f"{routing_reason};offline_demo" if routing_reason else "offline_demo"
-        )
-    elif is_offline_intake:
+    if is_offline_intake:
         routing_reason = (
             f"{routing_reason};offline_hours" if routing_reason else "offline_hours"
-        )
-    if skip_auto_assign and not is_offline_intake:
-        routing_reason = (
-            f"{routing_reason};sheipa_demo" if routing_reason else "sheipa_demo"
         )
     bot = _active_bot_for_department(department.id if department else None)
     now = timezone.now()
@@ -849,6 +876,7 @@ def create_dialog_with_message(
         client_phone=normalized_phone or client_phone.strip(),
         client_external_id=client_external_id.strip(),
         client_fields=_clean_client_fields(client_fields),
+        client_ip=client_ip.strip()[:64],
         entry_url=entry_url.strip(),
         locale=locale.strip() or "ru",
         operator_name=operator_name.strip(),
@@ -908,6 +936,13 @@ def create_dialog_with_message(
         assigned = auto_assign_dialog(dialog)
         if assigned:
             dialog = assigned
+    if (
+        initiated_by == Dialog.InitiatedBy.CLIENT
+        and dialog.status == Dialog.Status.WAITING
+        and not dialog.bot_active
+        and dialog.outcome != Dialog.Outcome.OFFLINE
+    ):
+        _enqueue_hold_base_messages(dialog, placement_config)
     dialog_payload = serialize_dialog(dialog)
     message_payload = serialize_message(message)
     broadcast(ARM_GROUP, "dialog.created", dialog_payload)
@@ -1015,6 +1050,17 @@ def append_message(
             deliver_channel_message(message_id)
     if speaker == DialogMessage.Speaker.CLIENT and dialog.bot_active:
         _handle_bot_turn(dialog, cleaned)
+        dialog.refresh_from_db(fields=["status", "outcome", "bot_active", "operator_id", "accepted_at"])
+    if (
+        speaker == DialogMessage.Speaker.CLIENT
+        and dialog.status == Dialog.Status.WAITING
+        and not dialog.bot_active
+        and dialog.outcome != Dialog.Outcome.OFFLINE
+    ):
+        placement_config = None
+        if dialog.channel == "widget":
+            placement_config = WidgetPlacement.objects.filter(widget_id=dialog.widget_id).first()
+        _enqueue_hold_base_messages(dialog, placement_config)
     return message
 
 
@@ -1071,12 +1117,6 @@ def accept_dialog(dialog: Dialog, operator_name: str) -> Dialog:
         display_name=operator_name,
         is_active=True,
     ).first()
-    reason = dialog.routing_reason or ""
-    if "offline_demo" in reason:
-        if not operator or operator.external_id != "dev-operator-sheipa":
-            raise ValueError("offline demo dialog is reserved for Sheipa")
-    if "sheipa_demo" in reason:
-        raise ValueError("dialog is held until working day starts")
     dialog = accept_waiting_dialog(
         dialog.pk,
         operator=operator,
@@ -1145,9 +1185,14 @@ def transfer_dialog(
     return dialog
 
 
-def close_dialog(dialog: Dialog, *, topic: str) -> Dialog:
+def close_dialog(
+    dialog: Dialog,
+    *,
+    topic: str,
+    topic_node: DialogCloseTopicNode | None = None,
+) -> Dialog:
     previous_operator = dialog.operator
-    dialog.mark_closed(topic)
+    dialog.mark_closed(topic, topic_node=topic_node)
     record_event(dialog, "closed", actor_name=dialog.operator_name, payload={"topic": topic})
     system = DialogMessage.objects.create(
         dialog=dialog,

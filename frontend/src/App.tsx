@@ -135,7 +135,14 @@ function App() {
   const auth = usePortalAuth()
   const route = window.location.pathname.replace(/\/+$/, '') || '/'
   const [chatThemeKind, setChatThemeKind] = useState<ThemeKind>('light')
-  const [armMenuOpen, setArmMenuOpen] = useState(false)
+  const [armMenuOpen, setArmMenuOpen] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      return Boolean(params.get('historyDialog') || params.get('historyOperator'))
+    } catch {
+      return false
+    }
+  })
 
   if (auth.status === 'loading') {
     return (

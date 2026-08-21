@@ -7,8 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from online_chat.channel_delivery import deliver_message
-from online_chat.models import DialogMessage
-from online_chat.models import Dialog
+from online_chat.models import BaseMessage, Dialog, DialogMessage, WidgetPlacement
 from online_chat.routing_services import record_event
 
 
@@ -51,6 +50,47 @@ def deliver_channel_message(message_id: str) -> dict[str, str | bool]:
     }
 
 
+@shared_task(
+    autoretry_for=(OSError, TimeoutError),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def send_hold_base_message(dialog_id: str, base_message_id: str) -> dict[str, str | bool]:
+    """Send one delayed `hold` base message if the dialog still waits."""
+    from online_chat.services import _base_message_matches, _create_bot_message
+
+    dialog = Dialog.objects.filter(pk=dialog_id).first()
+    if dialog is None:
+        return {"sent": False, "reason": "dialog_not_found"}
+    if (
+        dialog.status != Dialog.Status.WAITING
+        or dialog.bot_active
+        or dialog.outcome == Dialog.Outcome.OFFLINE
+    ):
+        return {"sent": False, "reason": "dialog_not_waiting"}
+    message = BaseMessage.objects.filter(
+        pk=base_message_id,
+        is_active=True,
+        send_phase=BaseMessage.SendPhase.HOLD,
+    ).first()
+    if message is None:
+        return {"sent": False, "reason": "base_message_not_found"}
+    placement_config = None
+    if dialog.channel == "widget":
+        placement_config = WidgetPlacement.objects.filter(widget_id=dialog.widget_id).first()
+    if not _base_message_matches(message, dialog, placement_config):
+        return {"sent": False, "reason": "target_mismatch"}
+    already_sent = DialogMessage.objects.filter(
+        dialog=dialog,
+        speaker=DialogMessage.Speaker.BOT,
+        text=message.text,
+    ).exists()
+    if already_sent:
+        return {"sent": False, "reason": "already_sent"}
+    _create_bot_message(dialog, message.text)
+    return {"sent": True, "reason": "ok"}
+
+
 @shared_task
 def run_assignments_after_delay(operator_id: str = "") -> dict[str, int]:
     """Resume auto-assign after post-close grace (manual+auto mode)."""
@@ -69,6 +109,32 @@ def run_assignments_after_delay(operator_id: str = "") -> dict[str, int]:
             return {"assigned": len(assigned)}
     assigned = run_assignments()
     return {"assigned": len(assigned)}
+
+
+@shared_task
+def sync_work_schedule() -> dict[str, object]:
+    """Periodic check that drives the automatic online/offline transition.
+
+    Production has no manual button: the admin configures the work schedule
+    once (``WorkScheduleSettings``), and this task notices when the clock
+    crosses the open/close boundary and applies the matching side effects
+    (return active dialogs to the shared queue + take operators offline, or
+    flush the offline backlog) — see ``routing_services.sync_schedule_state``.
+    Idempotent: a no-op whenever the resolved state hasn't actually changed.
+    """
+    from online_chat.routing_services import sync_schedule_state
+
+    result = sync_schedule_state()
+    if result.get("changed"):
+        from online_chat.services import ARM_GROUP, broadcast
+        from online_chat.models import WorkScheduleSettings
+
+        obj = WorkScheduleSettings.get_solo()
+        broadcast(ARM_GROUP, "work_schedule.updated", {
+            "is_open": obj.is_open(),
+            "manual_override": obj.manual_override,
+        })
+    return result
 
 
 @shared_task

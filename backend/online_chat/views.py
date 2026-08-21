@@ -35,6 +35,7 @@ from online_chat.models import (
     ChannelConnection,
     ClientBlock,
     Department,
+    DialogCloseTopicNode,
     Dialog,
     DialogFeedback,
     DialogMessage,
@@ -50,11 +51,12 @@ from online_chat.models import (
 from online_chat.storage import get_chat_object_store
 from online_chat.routing_services import (
     accept_waiting_dialog,
+    close_working_day,
     line_is_open,
+    open_working_day,
     record_event,
-    release_offline_queue,
-    release_sheipa_demo_holds,
     run_assignments,
+    sync_schedule_state,
     transfer_to_operator,
     update_operator_presence,
 )
@@ -82,6 +84,11 @@ from online_chat.services import (
     transfer_dialog,
     unblock_client,
 )
+from online_chat.dialog_topics_service import (
+    classify_by_titles,
+    rebuild_full_paths,
+    topic_tree,
+)
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -90,6 +97,13 @@ logger = logging.getLogger(__name__)
 
 class OnlineChatApiError(ValueError):
     """Invalid online-chat API payload."""
+
+
+def _request_client_ip(request: HttpRequest) -> str:
+    forwarded = (request.META.get("HTTP_X_FORWARDED_FOR") or "").strip()
+    if forwarded:
+        return forwarded.split(",")[0].strip()[:64]
+    return str(request.META.get("REMOTE_ADDR") or "").strip()[:64]
 
 
 def _chat_permissions(*permissions: str):
@@ -203,6 +217,32 @@ def _int_field(payload: Mapping[str, Any], key: str) -> int:
     return value
 
 
+def _dialog_topic_dict(item: DialogCloseTopicNode) -> dict[str, Any]:
+    return {
+        "id": str(item.id),
+        "parent_id": str(item.parent_id) if item.parent_id else None,
+        "label": item.label,
+        "full_path": item.full_path,
+        "sort_order": item.sort_order,
+        "is_active": item.is_active,
+        "is_selectable": item.is_selectable,
+        "created_at": item.created_at.isoformat(),
+        "updated_at": item.updated_at.isoformat(),
+    }
+
+
+def _would_create_topic_cycle(
+    node: DialogCloseTopicNode,
+    parent: DialogCloseTopicNode | None,
+) -> bool:
+    current = parent
+    while current is not None:
+        if current.id == node.id:
+            return True
+        current = current.parent
+    return False
+
+
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
 def dialogs_collection(request: HttpRequest) -> HttpResponse:
@@ -228,6 +268,9 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
             qs = qs.filter(operator_id=request.GET["operator_id"])
         if request.GET.get("operator_name"):
             qs = qs.filter(operator_name=request.GET["operator_name"])
+        client_ip = (request.GET.get("client_ip") or "").strip()
+        if client_ip:
+            qs = qs.filter(client_ip__icontains=client_ip)
         if request.GET.get("department_id"):
             qs = qs.filter(department_id=request.GET["department_id"])
         if request.GET.get("channel"):
@@ -241,6 +284,19 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
             qs = qs.filter(feedback__isnull=False).distinct()
         elif has_feedback in {"0", "false", "no"}:
             qs = qs.filter(feedback__isnull=True)
+        ratings_raw = (request.GET.get("ratings") or "").strip()
+        if ratings_raw:
+            ratings: list[int] = []
+            for chunk in re.split(r"[,\s]+", ratings_raw):
+                if not chunk:
+                    continue
+                if not chunk.isdigit():
+                    continue
+                value = int(chunk)
+                if 1 <= value <= 5 and value not in ratings:
+                    ratings.append(value)
+            if ratings:
+                qs = qs.filter(feedback__rating__in=ratings).distinct()
         date_from = (request.GET.get("date_from") or "").strip()
         date_to = (request.GET.get("date_to") or "").strip()
         if date_from:
@@ -260,6 +316,7 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
                     | Q(close_topic__icontains=token)
                     | Q(preview__icontains=token)
                     | Q(channel__icontains=token)
+                    | Q(client_ip__icontains=token)
                     | Q(id__icontains=token)
                     | Q(messages__text__icontains=token)
                 )
@@ -307,10 +364,10 @@ def dialogs_collection(request: HttpRequest) -> HttpResponse:
                 channel=_str_field(payload, "channel", "widget") or "widget",
                 initiated_by=initiated_by,
                 operator_name=_str_field(payload, "operator_name"),
+                client_ip=_request_client_ip(request),
                 client_fields=payload.get("fields")
                 if isinstance(payload.get("fields"), list)
                 else None,
-                force_offline=_bool_field(payload, "offline_demo", False),
             )
         except PermissionError as exc:
             return JsonResponse(
@@ -607,19 +664,32 @@ def dialog_close(request: HttpRequest, dialog_id: str) -> HttpResponse:
     dialog = get_object_or_404(Dialog, pk=dialog_id)
     try:
         payload = _json_body(request)
-        topic = _str_field(payload, "topic") or _str_field(payload, "close_topic")
+        topic_id = _str_field(payload, "topic_id")
+        topic_node = None
+        topic = ""
+        if topic_id:
+            topic_node = get_object_or_404(
+                DialogCloseTopicNode,
+                pk=topic_id,
+                is_active=True,
+                is_selectable=True,
+            )
+            topic = topic_node.full_path or topic_node.label
+        else:
+            topic = _str_field(payload, "topic") or _str_field(payload, "close_topic")
         if not topic:
             raise OnlineChatApiError("topic is required")
         if dialog.status == Dialog.Status.CLOSED:
             if topic != dialog.close_topic:
                 dialog.close_topic = topic
-                dialog.save(update_fields=["close_topic", "updated_at"])
+                dialog.close_topic_node = topic_node
+                dialog.save(update_fields=["close_topic", "close_topic_node", "updated_at"])
             return JsonResponse({"ok": True, "dialog": serialize_dialog(dialog)})
         previous_operator = dialog.operator
         previous_departments = list(
             previous_operator.departments.filter(is_active=True)
         ) if previous_operator else []
-        closed = close_dialog(dialog, topic=topic)
+        closed = close_dialog(dialog, topic=topic, topic_node=topic_node)
         # Held operator is skipped inside run_assignments; others can still receive work.
         if previous_departments:
             for department in previous_departments:
@@ -641,6 +711,120 @@ def dialog_close(request: HttpRequest, dialog_id: str) -> HttpResponse:
                 response["assignment_grace_until"] = hold.until.isoformat()
                 response["assignment_grace_seconds"] = AssignmentSettings.GRACE_SECONDS
         return JsonResponse(response)
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+@_chat_permissions(PERM_SUFLER_CHAT, PERM_CC_ADMIN)
+def dialog_topics_collection(request: HttpRequest) -> HttpResponse:
+    if request.method == "GET":
+        active_only = (request.GET.get("active") or "").strip().lower() not in {"0", "false", "no"}
+        return JsonResponse({"ok": True, "items": topic_tree(active_only=active_only)})
+    if not has_permission(request.user, PERM_CC_ADMIN) and not settings.DEBUG:
+        return JsonResponse({"ok": False, "error": "forbidden"}, status=403)
+    try:
+        data = _json_body(request)
+        label = _str_field(data, "label")
+        if not label:
+            raise OnlineChatApiError("label is required")
+        parent = None
+        parent_id = _str_field(data, "parent_id")
+        if parent_id:
+            parent = get_object_or_404(DialogCloseTopicNode, pk=parent_id)
+        item = DialogCloseTopicNode.objects.create(
+            parent=parent,
+            label=label,
+            full_path="",
+            sort_order=_int_field(data, "sort_order") if "sort_order" in data else 100,
+            # Topics are always active once an admin adds them; there is no
+            # UI to deactivate one — removal is done via delete instead.
+            is_active=True,
+            is_selectable=_bool_field(data, "is_selectable", False),
+        )
+        # A node that just gained a child can no longer be a valid closing
+        # topic on its own — only leaves are selectable. This keeps the tree
+        # consistent even if a child gets nested under a former leaf "тема".
+        if parent is not None and parent.is_selectable:
+            parent.is_selectable = False
+            parent.save(update_fields=["is_selectable", "updated_at"])
+        rebuild_full_paths()
+        item.refresh_from_db()
+        return JsonResponse({"ok": True, "dialog_topic": _dialog_topic_dict(item)}, status=201)
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["PATCH", "DELETE"])
+@_chat_permissions(PERM_CC_ADMIN)
+def dialog_topic_detail(request: HttpRequest, item_id: str) -> HttpResponse:
+    item = get_object_or_404(DialogCloseTopicNode, pk=item_id)
+    if request.method == "DELETE":
+        item.delete()
+        rebuild_full_paths()
+        return JsonResponse({"ok": True})
+    try:
+        data = _json_body(request)
+        if "label" in data:
+            item.label = _str_field(data, "label")
+        if "sort_order" in data:
+            item.sort_order = _int_field(data, "sort_order")
+        if "is_active" in data:
+            item.is_active = _bool_field(data, "is_active")
+        if "is_selectable" in data:
+            item.is_selectable = _bool_field(data, "is_selectable")
+        if "parent_id" in data:
+            parent_id = _str_field(data, "parent_id")
+            parent = get_object_or_404(DialogCloseTopicNode, pk=parent_id) if parent_id else None
+            if parent and _would_create_topic_cycle(item, parent):
+                raise OnlineChatApiError("invalid parent_id")
+            item.parent = parent
+        item.save()
+        rebuild_full_paths()
+        item.refresh_from_db()
+        return JsonResponse({"ok": True, "dialog_topic": _dialog_topic_dict(item)})
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@_chat_permissions(PERM_CC_ADMIN)
+def dialog_topics_reorder(request: HttpRequest) -> HttpResponse:
+    try:
+        data = _json_body(request)
+        moved_id = _str_field(data, "id")
+        if not moved_id:
+            raise OnlineChatApiError("id is required")
+        item = get_object_or_404(DialogCloseTopicNode, pk=moved_id)
+        if "parent_id" in data:
+            parent_id = _str_field(data, "parent_id")
+            parent = get_object_or_404(DialogCloseTopicNode, pk=parent_id) if parent_id else None
+            if parent and _would_create_topic_cycle(item, parent):
+                raise OnlineChatApiError("invalid parent_id")
+            item.parent = parent
+        if "sort_order" in data:
+            item.sort_order = _int_field(data, "sort_order")
+        item.save(update_fields=["parent", "sort_order", "updated_at"])
+        rebuild_full_paths()
+        return JsonResponse({"ok": True})
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@_chat_permissions(PERM_SUFLER_CHAT, PERM_CC_ADMIN)
+def dialog_topics_suggest(request: HttpRequest) -> HttpResponse:
+    try:
+        data = _json_body(request)
+        titles = _json_field(data, "article_titles", list, [])
+        if any(not isinstance(item, str) for item in titles):
+            raise OnlineChatApiError("article_titles must be a list of strings")
+        result = classify_by_titles([str(item) for item in titles])
+        return JsonResponse({"ok": True, **result})
     except OnlineChatApiError as exc:
         return _error(exc)
 
@@ -762,30 +946,40 @@ def work_schedule_settings(request: HttpRequest) -> HttpResponse:
                 raise OnlineChatApiError("invalid manual_override")
             obj.manual_override = override
         obj.save()
-        # Applying settings may re-open the line — flush the offline backlog.
-        if obj.is_open():
-            run_assignments()
+        # Applying settings may flip open⇄closed — run the matching transition
+        # (queue restore + operators offline, or backlog flush) automatically.
+        sync_result = sync_schedule_state(obj)
+        if sync_result.get("changed"):
+            _broadcast_schedule_change(obj)
         return JsonResponse({"ok": True, "settings": _work_schedule_dict(obj)})
     except OnlineChatApiError as exc:
         return _error(exc)
 
 
+def _broadcast_schedule_change(obj: WorkScheduleSettings) -> None:
+    broadcast(ARM_GROUP, "work_schedule.updated", {
+        "is_open": obj.is_open(),
+        "manual_override": obj.manual_override,
+    })
+
+
 @require_http_methods(["GET"])
 def work_schedule_status(request: HttpRequest) -> HttpResponse:
-    """Public status the ARM polls to show the line state / start-day button."""
+    """Public status the ARM/widget poll to show the line state.
+
+    Also doubles as a low-latency trigger for the automatic open⇄closed
+    transition in between periodic Celery beat runs (both share
+    ``sync_schedule_state``, which is a no-op unless the state actually
+    changed since the last observation).
+    """
     obj = WorkScheduleSettings.get_solo()
-    is_open = obj.is_open()
-    # When the clock crosses opening time, release overnight leftovers.
-    if is_open and Dialog.objects.filter(
-        status=Dialog.Status.WAITING,
-        outcome=Dialog.Outcome.OFFLINE,
-    ).exists():
-        run_assignments()
-        is_open = obj.is_open()
+    sync_result = sync_schedule_state(obj)
+    if sync_result.get("changed"):
+        _broadcast_schedule_change(obj)
     return JsonResponse(
         {
             "ok": True,
-            "is_open": is_open,
+            "is_open": sync_result["is_open"],
             "enabled": obj.enabled,
             "manual_override": obj.manual_override,
             "start_time": obj.start_time.strftime("%H:%M"),
@@ -797,7 +991,16 @@ def work_schedule_status(request: HttpRequest) -> HttpResponse:
 @csrf_exempt
 @require_http_methods(["POST"])
 def work_day_control(request: HttpRequest) -> HttpResponse:
-    """Start / stop the working day (demo button + prod manual override)."""
+    """Manual online/offline toggle — demo/test simulator only.
+
+    Production relies on the schedule (``WorkScheduleSettings`` + the
+    periodic sync task) to switch automatically; this endpoint exists so the
+    test simulator can flip the line without waiting for the clock. Unlike
+    ``sync_schedule_state`` (which only acts on genuine transitions so the
+    passive pollers stay idempotent), this is an explicit human command, so
+    it always (re)applies the matching transition — harmless no-op if the
+    line was already in that state.
+    """
     try:
         payload = _json_body(request)
         action = str(payload.get("action") or "").strip()
@@ -811,24 +1014,18 @@ def work_day_control(request: HttpRequest) -> HttpResponse:
         else:
             raise OnlineChatApiError("action must be start, stop or auto")
         obj.save(update_fields=["manual_override", "updated_at"])
-        assigned = 0
-        if action == "start":
-            # Sheipa demo: enable auto-distribution and flush overnight + offline stubs.
-            OperatorProfile.objects.filter(
-                external_id="dev-operator-sheipa",
-            ).update(auto_assign=True, presence=OperatorProfile.Presence.ONLINE)
-            release_sheipa_demo_holds()
-            release_offline_queue(include_demo=True)
-            assigned = len(run_assignments())
-        elif obj.is_open():
-            release_offline_queue(include_demo=False)
-            assigned = len(run_assignments())
-        broadcast(ARM_GROUP, "work_schedule.updated", {
-            "is_open": obj.is_open(),
-            "manual_override": obj.manual_override,
-        })
+        now_open = obj.is_open()
+        result = open_working_day() if now_open else close_working_day()
+        obj.last_open_state = now_open
+        obj.save(update_fields=["last_open_state"])
+        _broadcast_schedule_change(obj)
         return JsonResponse(
-            {"ok": True, "is_open": obj.is_open(), "assigned": assigned}
+            {
+                "ok": True,
+                "is_open": now_open,
+                "assigned": result.get("assigned", 0),
+                "returned_to_queue": result.get("returned_to_queue", 0),
+            }
         )
     except OnlineChatApiError as exc:
         return _error(exc)
@@ -2623,19 +2820,6 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
             },
         )
         supervisor.departments.set([department])
-        sheipa, _ = OperatorProfile.objects.update_or_create(
-            external_id="dev-operator-sheipa",
-            defaults={
-                "display_name": "Шейпа Дмитриевна Волкова",
-                "email": "sheipa@dev.local",
-                "presence": OperatorProfile.Presence.ONLINE,
-                "auto_assign": False,
-                "max_active_dialogs": 5,
-                "is_active": True,
-                "role": OperatorProfile.Role.OPERATOR,
-            },
-        )
-        sheipa.departments.set([department])
         BaseMessage.objects.get_or_create(
             title="Вне графика",
             defaults={
@@ -2649,23 +2833,19 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
                 "sort_order": 50,
             },
         )
-        leftover_regular = (
+        # A couple of dialogs left over from a previous shift (unassigned, older
+        # timestamps) — demonstrates that the shared queue keeps them ahead of
+        # anything that arrives later while offline, purely via FIFO ordering.
+        leftover_previews = (
             "Не успели подтвердить лимит по карте до закрытия смены.",
             "Клиент ждал перевод на карту — диалог остался в очереди.",
-        )
-        leftover_offline = (
-            "Вопрос по вкладу поступил после 18:00 — офлайн-заглушка.",
-            "Клиент написал ночью про блокировку карты — офлайн-заглушка.",
         )
         leftover_payload = []
         yesterday = timezone.now() - timedelta(hours=14)
         Dialog.objects.filter(
-            client_external_id__startswith="offline-stub-"
+            client_external_id__startswith="queue-leftover-"
         ).delete()
-        Dialog.objects.filter(
-            client_external_id__startswith="sheipa-stub-"
-        ).delete()
-        for index, preview in enumerate(leftover_regular, start=1):
+        for index, preview in enumerate(leftover_previews, start=1):
             leftover, leftover_msg = create_dialog_with_message(
                 text=preview,
                 widget_id=placement.widget_id,
@@ -2673,7 +2853,7 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
                 client_first_name="Клиент",
                 client_last_name=f"очередь {index}",
                 client_phone=_seed_client_phone(700 + index),
-                client_external_id=f"sheipa-stub-{index}",
+                client_external_id=f"queue-leftover-{index}",
                 skip_auto_assign=True,
             )
             leftover.created_at = yesterday
@@ -2693,54 +2873,14 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
             leftover_msg.save(update_fields=["created_at"])
             leftover_payload.append(
                 {
-                    "id": f"sheipa-stub-{index}",
+                    "id": f"queue-leftover-{index}",
                     "dialog_id": str(leftover.id),
                     "name": leftover.client_display_name(),
                     "widget_url": (
                         f"/widget/sample.html"
-                        f"?sim_client={quote(f'sheipa-stub-{index}')}"
+                        f"?sim_client={quote(f'queue-leftover-{index}')}"
                     ),
                     "status": leftover.status,
-                    "offline": False,
-                }
-            )
-        for index, preview in enumerate(leftover_offline, start=1):
-            leftover, leftover_msg = create_dialog_with_message(
-                text=preview,
-                widget_id=placement.widget_id,
-                placement="website",
-                client_first_name="Клиент",
-                client_last_name=f"офлайн {index}",
-                client_phone=_seed_client_phone(800 + index),
-                client_external_id=f"offline-stub-{index}",
-                force_offline=True,
-            )
-            leftover.created_at = yesterday
-            leftover.last_client_message_at = yesterday
-            leftover.client_online = False
-            leftover.client_last_seen_at = yesterday
-            leftover.save(
-                update_fields=[
-                    "created_at",
-                    "last_client_message_at",
-                    "client_online",
-                    "client_last_seen_at",
-                    "updated_at",
-                ]
-            )
-            leftover_msg.created_at = yesterday
-            leftover_msg.save(update_fields=["created_at"])
-            leftover_payload.append(
-                {
-                    "id": f"offline-stub-{index}",
-                    "dialog_id": str(leftover.id),
-                    "name": leftover.client_display_name(),
-                    "widget_url": (
-                        f"/widget/sample.html?offline=1"
-                        f"&sim_client={quote(f'offline-stub-{index}')}"
-                    ),
-                    "status": leftover.status,
-                    "offline": True,
                 }
             )
         assignment = AssignmentSettings.get_solo()
@@ -2809,14 +2949,12 @@ def dev_seed(request: HttpRequest) -> HttpResponse:
                     "reset": should_reset,
                     "widget_id": placement.widget_id,
                 },
-                "operator_names": [item.display_name for item in operators] + [sheipa.display_name],
-                "operators": [_operator_dict(item) for item in operators] + [_operator_dict(sheipa)],
+                "operator_names": [item.display_name for item in operators],
+                "operators": [_operator_dict(item) for item in operators],
                 "client_ids": [item["id"] for item in clients_payload],
                 "clients": clients_payload,
                 "widget_id": placement.widget_id,
-                "sheipa_name": sheipa.display_name,
-                "offline_widget_url": "/widget/sample.html?offline=1",
-                "offline_stubs": leftover_payload,
+                "queue_leftovers": leftover_payload,
             },
             status=201,
         )

@@ -261,23 +261,15 @@ def _max_load_for_dialog(dialog: Dialog) -> int | None:
 def auto_assign_dialog(dialog: Dialog) -> Dialog | None:
     if dialog.status != Dialog.Status.WAITING:
         return None
-    # Offline-parked dialogs (arrived outside working hours / via offline widget)
-    # are not distributed until the working day starts.
+    # Offline-parked dialogs (arrived outside working hours) are not distributed
+    # until the working day opens and releases the backlog.
     if dialog.outcome == Dialog.Outcome.OFFLINE:
-        return None
-    # Demo leftovers reserved for Sheipa until "Начать рабочий день".
-    if "sheipa_demo" in (dialog.routing_reason or ""):
         return None
     # Outside working hours the line does not auto-distribute at all.
     if not line_is_open():
         return None
     max_load = _max_load_for_dialog(dialog)
     candidates = list(_eligible_operators(dialog, max_load=max_load)[:20])
-    # Offline-widget demo clients stay with Sheipa — never regular operators.
-    if "offline_demo" in (dialog.routing_reason or ""):
-        candidates = [
-            op for op in candidates if op.external_id == "dev-operator-sheipa"
-        ]
     for candidate in candidates:
         try:
             return accept_waiting_dialog(dialog.pk, operator=candidate)
@@ -299,36 +291,18 @@ def waiting_queue_queryset(*, department: Department | None = None):
     return qs
 
 
-def release_offline_queue(*, include_demo: bool = False) -> int:
+def release_offline_queue() -> int:
     """Move parked offline dialogs back into the live waiting queue.
 
-    Calendar opening releases only real after-hours dialogs. The demo offline
-    widget keeps its queue until an operator explicitly starts the working day.
+    Called when the line opens (calendar or manual). Dialogs keep their
+    original ``created_at`` / ``last_client_message_at`` so FIFO ordering
+    still places them ahead of anything created after the line reopened.
     """
-    qs = Dialog.objects.filter(
+    updated = Dialog.objects.filter(
         status=Dialog.Status.WAITING,
         outcome=Dialog.Outcome.OFFLINE,
-    )
-    if not include_demo:
-        qs = qs.exclude(routing_reason__contains="offline_demo")
-    updated = qs.update(outcome="")
+    ).update(outcome="")
     return int(updated)
-
-
-def release_sheipa_demo_holds() -> int:
-    """Allow Sheipa demo leftovers to enter normal auto-assignment."""
-    updated = 0
-    for dialog in Dialog.objects.filter(
-        status=Dialog.Status.WAITING,
-        routing_reason__contains="sheipa_demo",
-    ):
-        reason = (dialog.routing_reason or "").replace("sheipa_demo", "").strip(";")
-        while ";;" in reason:
-            reason = reason.replace(";;", ";")
-        dialog.routing_reason = reason
-        dialog.save(update_fields=["routing_reason", "updated_at"])
-        updated += 1
-    return updated
 
 
 def run_assignments(*, department: Department | None = None) -> list[Dialog]:
@@ -337,7 +311,7 @@ def run_assignments(*, department: Department | None = None) -> list[Dialog]:
         return []
     # Drop expired holds opportunistically.
     OperatorAssignmentHold.objects.filter(until__lte=timezone.now()).delete()
-    release_offline_queue(include_demo=False)
+    release_offline_queue()
     qs = waiting_queue_queryset(department=department)
     assigned: list[Dialog] = []
     for dialog in qs[:500]:
@@ -345,6 +319,86 @@ def run_assignments(*, department: Department | None = None) -> list[Dialog]:
         if result:
             assigned.append(result)
     return assigned
+
+
+@transaction.atomic
+def close_working_day() -> dict[str, int]:
+    """End-of-shift transition: everything active goes back to the shared queue.
+
+    - Every ACTIVE dialog (operator or supervisor) returns to WAITING, keeping
+      its original ``created_at`` / ``last_client_message_at`` so it re-enters
+      the queue at its previous chronological position — ahead of any dialog
+      that arrives later while the line is closed (offline intake).
+    - Every operator goes ``presence=OFFLINE`` so nobody can take dialogs and
+      auto-assign has no eligible candidates until ``open_working_day()`` runs.
+    - Any pending post-close grace holds are cleared (irrelevant once closed).
+    """
+    now = timezone.now()
+    returned = 0
+    for dialog in Dialog.objects.select_for_update().filter(status=Dialog.Status.ACTIVE):
+        previous_operator = dialog.operator_name
+        dialog.status = Dialog.Status.WAITING
+        dialog.operator = None
+        dialog.operator_name = ""
+        dialog.accepted_at = None
+        dialog.save(
+            update_fields=["status", "operator", "operator_name", "accepted_at", "updated_at"]
+        )
+        record_event(
+            dialog,
+            "returned_to_queue",
+            actor_name=previous_operator,
+            payload={"reason": "shift_end"},
+        )
+        returned += 1
+    offlined = OperatorProfile.objects.filter(is_active=True).exclude(
+        presence=OperatorProfile.Presence.OFFLINE
+    ).update(presence=OperatorProfile.Presence.OFFLINE, last_seen_at=now)
+    OperatorAssignmentHold.objects.all().delete()
+    return {"returned_to_queue": returned, "operators_offlined": offlined}
+
+
+def open_working_day() -> dict[str, int]:
+    """Start-of-shift transition: bring operators online and flush backlog."""
+    now = timezone.now()
+    onlined = OperatorProfile.objects.filter(is_active=True).exclude(
+        presence=OperatorProfile.Presence.ONLINE
+    ).update(
+        presence=OperatorProfile.Presence.ONLINE,
+        last_seen_at=now,
+    )
+    release_offline_queue()
+    assigned = run_assignments()
+    return {"assigned": len(assigned), "operators_onlined": int(onlined)}
+
+
+def sync_schedule_state(obj: "WorkScheduleSettings | None" = None) -> dict[str, Any]:
+    """Detect open⇄closed transitions and apply the matching side effects.
+
+    Safe to call repeatedly (from a request handler or a periodic beat task):
+    it is a no-op unless the resolved ``is_open()`` value actually changed
+    since the last call, so both the demo simulator toggle and the automatic
+    schedule-based clock crossing share one source of truth.
+    """
+    obj = obj or WorkScheduleSettings.get_solo()
+    now_open = obj.is_open()
+    previous = obj.last_open_state
+    result: dict[str, Any] = {"changed": False, "is_open": now_open}
+    if previous is None:
+        # First observation ever (fresh install) — record without side effects.
+        obj.last_open_state = now_open
+        obj.save(update_fields=["last_open_state"])
+        return result
+    if now_open == previous:
+        return result
+    if now_open:
+        result.update(open_working_day())
+    else:
+        result.update(close_working_day())
+    obj.last_open_state = now_open
+    obj.save(update_fields=["last_open_state"])
+    result["changed"] = True
+    return result
 
 
 def update_operator_presence(operator: OperatorProfile, presence: str) -> OperatorProfile:
