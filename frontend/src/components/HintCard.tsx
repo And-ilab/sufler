@@ -211,6 +211,7 @@ export const HintCard = forwardRef<HTMLDivElement, HintCardProps>(
                   }}
                 >
                   {option.label}
+                  {active ? ' ✓' : ''}
                 </button>
               )
             })}

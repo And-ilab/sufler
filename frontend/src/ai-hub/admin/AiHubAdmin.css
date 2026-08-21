@@ -160,6 +160,12 @@
   gap: var(--space-3);
 }
 
+.admin-topbar__fabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .admin-topbar__chat-fab {
   display: inline-grid;
   width: 40px;
@@ -225,6 +231,24 @@
 .admin-ocr-screen {
   width: 100%;
   min-height: 480px;
+}
+
+.admin-main--wide {
+  width: min(1280px, 100%);
+}
+
+.admin-reports-embed.rpt-app {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.admin-reports-embed .rpt-frame {
+  max-width: none;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 .admin-ocr-screen .ocr-docs {
@@ -509,19 +533,46 @@
   background: var(--color-danger-bg);
 }
 
+.sufler-policies__columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.sufler-policies__note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: .8125rem;
+  line-height: 1.45;
+}
+
+.sufler-policies__links p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.sufler-policies__links p + p {
+  margin-top: var(--space-2);
+}
+
+.sufler-policies__links a {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
 .qu-preview {
   display: grid;
   gap: var(--space-4);
 }
 
 .qu-preview__query-card,
-.qu-preview__results {
+.qu-preview__results,
+.qu-preview__hint-card {
   padding: 0;
   overflow: hidden;
 }
 
 .qu-preview__query-card > header,
-.qu-preview__results > header {
+.qu-preview__results > header,
+.qu-preview__hint-card > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -539,6 +590,11 @@
   margin-top: var(--space-1);
   color: var(--color-text-muted);
   font-size: .8125rem;
+}
+
+.qu-preview__hint-card .ui-hint {
+  margin: var(--space-4) var(--space-5) var(--space-5);
+  cursor: default;
 }
 
 .qu-preview form {
@@ -651,6 +707,140 @@
 .qu-preview__empty {
   padding: var(--space-5);
   color: var(--color-text-muted);
+}
+
+.qu-admin {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.qu-admin__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.qu-admin__tabs button {
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.qu-admin__tabs button.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-info-bg);
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.qu-admin__grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.qu-admin__stack,
+.qu-admin__form {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.qu-admin .ui-card {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-4);
+}
+
+.qu-admin header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.qu-admin h2,
+.qu-admin p {
+  margin: 0;
+}
+
+.qu-admin header p,
+.qu-admin__lead,
+.qu-admin__hint {
+  color: var(--color-text-muted);
+  font-size: .8125rem;
+  line-height: 1.45;
+}
+
+.qu-admin__form label {
+  display: grid;
+  gap: 6px;
+  font-size: .75rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.qu-admin__form input,
+.qu-admin__form select,
+.qu-admin__form textarea {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.qu-admin__form textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.qu-admin__form > .ui-button {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.qu-admin__table-wrap {
+  overflow-x: auto;
+}
+
+.qu-admin table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .8125rem;
+}
+
+.qu-admin th,
+.qu-admin td {
+  padding: 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.qu-admin__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.qu-admin__error {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+@media (max-width: 1100px) {
+  .qu-admin__grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .kb-admin {
@@ -1011,12 +1201,14 @@
 
   .admin-stats,
   .admin-form-grid,
-  .model-params__columns {
+  .model-params__columns,
+  .sufler-policies__columns {
     grid-template-columns: 1fr;
   }
 
   .qu-preview__query-card > header,
   .qu-preview__results > header,
+  .qu-preview__hint-card > header,
   .qu-preview__actions {
     align-items: flex-start;
     flex-direction: column;

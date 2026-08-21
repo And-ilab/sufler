@@ -18,6 +18,7 @@ export interface SuggestResponse {
   query: string
   profile: string
   kb_id: string
+  kb_slugs?: string[]
   hints: SuflerHint[]
   citations_enabled: boolean
   blocked_reason: string | null
@@ -58,8 +59,14 @@ function friendlySuggestError(raw: string, status: number): string {
 
 export async function requestSuflerSuggest(
   text: string,
-  limit = 3,
-  options?: { clientHistory?: string; dialogContext?: string },
+  limit = 5,
+  options?: {
+    clientHistory?: string
+    dialogContext?: string
+    kbSlugs?: string[]
+    channel?: 'telephony' | 'online_chat'
+    mode?: 'consultation' | 'service'
+  },
 ): Promise<SuggestResponse> {
   // Online-chat ARM is often opened without a prior admin/login bootstrap.
   try {
@@ -68,7 +75,7 @@ export async function requestSuflerSuggest(
   } catch {
     /* ignore — suggest will surface a friendly error if auth still missing */
   }
-  const safeLimit = Math.min(5, Math.max(1, Math.round(limit) || 3))
+  const safeLimit = Math.min(5, Math.max(1, Math.round(limit) || 5))
   const response = await fetch('/api/v1/sufler/suggest', {
     method: 'POST',
     credentials: 'include',
@@ -81,6 +88,9 @@ export async function requestSuflerSuggest(
       limit: safeLimit,
       client_history: options?.clientHistory ?? '',
       dialog_context: options?.dialogContext ?? '',
+      ...(options && 'kbSlugs' in options ? { kb_slugs: options.kbSlugs ?? [] } : {}),
+      ...(options?.channel ? { channel: options.channel } : {}),
+      ...(options?.mode ? { mode: options.mode } : {}),
     }),
   })
   const body = await response.json().catch(() => ({} as { error?: string; details?: { request?: string[] } }))

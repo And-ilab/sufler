@@ -21,6 +21,10 @@ CHANNEL_LABELS = {
     "ok": "Одноклассники",
     "api": "API",
     "email": "E-mail",
+    "chat": "Онлайн-чат",
+    "online_chat": "Онлайн-чат",
+    "telephony": "Телефония",
+    "phone": "Телефония",
 }
 
 OUTCOME_LABELS = {
@@ -37,6 +41,71 @@ FEEDBACK_LABELS = {
     "partial": "Неполный ответ",
     "not_used": "Не воспользовался",
 }
+
+SOURCE_LABELS = {
+    "chat": "Онлайн-чат",
+    "telephony": "Телефония",
+}
+
+
+def _feedback_source(fb: Any) -> str:
+    source = ""
+    if hasattr(fb, "source"):
+        source = str(getattr(fb, "source", "") or "").strip().lower()
+    if source in {"telephony", "phone", "call"}:
+        return "telephony"
+    if source in {"chat", "online_chat", "widget"}:
+        return "chat"
+    dialog = getattr(fb, "dialog", None)
+    channel = str(getattr(dialog, "channel", None) or "").strip().lower() if dialog else ""
+    if channel in {"telephony", "phone"}:
+        return "telephony"
+    return "chat"
+
+
+TELEPHONY_SOURCES = ("telephony", "phone", "call")
+
+RELEVANCE_BUCKET_LABELS = (
+    ("high", "Высокая (≥80%)"),
+    ("mid", "Средняя (50–79%)"),
+    ("low", "Низкая (<50%)"),
+)
+
+
+def _classify_relevance(percent: Any) -> str | None:
+    if percent is None:
+        return None
+    try:
+        value = float(percent)
+    except (TypeError, ValueError):
+        return None
+    if value >= 80:
+        return "high"
+    if value >= 50:
+        return "mid"
+    return "low"
+
+
+def _relevance_bucket_chart(counts: dict[str, int]) -> list[dict[str, Any]]:
+    return [
+        {"label": label, "value": counts.get(key, 0)}
+        for key, label in RELEVANCE_BUCKET_LABELS
+        if counts.get(key, 0)
+    ]
+
+
+def _sufler_source_filter(filters: dict[str, Any] | None) -> str:
+    """Map catalog channel to hint source. Only for sufler stats screen."""
+    if not filters:
+        return ""
+    if str(filters.get("scope") or "").strip().lower() != "sufler":
+        return ""
+    channel = str(filters.get("channel") or "").strip().lower()
+    if channel in {"telephony", "phone"}:
+        return "telephony"
+    if channel in {"online_chat", "chat"}:
+        return "chat"
+    return ""
 
 
 def _utcnow() -> datetime:
@@ -141,9 +210,158 @@ def within_sla(dialog: Any, *, target: int = SLA_FIRST_RESPONSE_SECONDS) -> bool
     return frt <= target
 
 
+def _sufler_demo_stats(date_to: date, *, source: str = "") -> dict[str, Any]:
+    """Stand-in rows so Hub «Статистика суфлёра» is not empty before live feedback."""
+    at = f"{date_to.isoformat()}T14:28:00+03:00"
+    chat = {
+        "channel": "chat",
+        "label": SOURCE_LABELS["chat"],
+        "useful_pct": 72.0,
+        "incomplete_pct": 18.0,
+        "unused_pct": 10.0,
+        "sessions": 148,
+        "avg_relevance": 88.0,
+        "used": 106,
+        "partial": 27,
+        "not_used": 15,
+    }
+    phone = {
+        "channel": "telephony",
+        "label": SOURCE_LABELS["telephony"],
+        "useful_pct": 61.0,
+        "incomplete_pct": 22.0,
+        "unused_pct": 17.0,
+        "sessions": 100,
+        "avg_relevance": 81.0,
+        "used": 61,
+        "partial": 22,
+        "not_used": 17,
+    }
+    sources = [phone] if source == "telephony" else [chat] if source == "chat" else [chat, phone]
+    used = sum(item["used"] for item in sources)
+    partial = sum(item["partial"] for item in sources)
+    unused = sum(item["not_used"] for item in sources)
+    total = used + partial + unused
+    examples = [
+        {
+            "reason": "Оператор не воспользовался подсказкой",
+            "count": 1,
+            "example": "Лимит снятия наличных в банкомате",
+            "channel": "chat",
+            "operator": "Васильева Е.К.",
+            "relevance_pct": 69,
+            "at": at,
+        },
+        {
+            "reason": "Оператор не воспользовался подсказкой",
+            "count": 1,
+            "example": "Комиссия за перевод в РФ",
+            "channel": "telephony",
+            "operator": "Орлов Н.В.",
+            "relevance_pct": 54,
+            "at": at,
+        },
+        {
+            "reason": "Оператор не воспользовался подсказкой",
+            "count": 1,
+            "example": "Блокировка карты при утрате",
+            "channel": "chat",
+            "operator": "Иванов И.И.",
+            "relevance_pct": 61,
+            "at": at,
+        },
+        {
+            "reason": "Оператор не воспользовался подсказкой",
+            "count": 1,
+            "example": "Смена ПИН-кода в банкомате",
+            "channel": "telephony",
+            "operator": "Сидорова А.П.",
+            "relevance_pct": 58,
+            "at": at,
+        },
+    ]
+    if source == "telephony":
+        examples = [row for row in examples if row["channel"] == "telephony"]
+    elif source == "chat":
+        examples = [row for row in examples if row["channel"] == "chat"]
+    topics = [
+        {
+            "channel": "chat",
+            "channel_label": SOURCE_LABELS["chat"],
+            "topic": "Карты и счета",
+            "avg_relevance": 91.0,
+            "answers": 64,
+            "used_pct": 78.0,
+        },
+        {
+            "channel": "telephony",
+            "channel_label": SOURCE_LABELS["telephony"],
+            "topic": "Кредиты",
+            "avg_relevance": 74.0,
+            "answers": 41,
+            "used_pct": 61.0,
+        },
+        {
+            "channel": "chat",
+            "channel_label": SOURCE_LABELS["chat"],
+            "topic": "ЕРИП",
+            "avg_relevance": 88.0,
+            "answers": 29,
+            "used_pct": 76.0,
+        },
+        {
+            "channel": "telephony",
+            "channel_label": SOURCE_LABELS["telephony"],
+            "topic": "Лимиты ATM",
+            "avg_relevance": 69.0,
+            "answers": 22,
+            "used_pct": 45.0,
+        },
+    ]
+    if source == "telephony":
+        topics = [row for row in topics if row["channel"] == "telephony"]
+    elif source == "chat":
+        topics = [row for row in topics if row["channel"] == "chat"]
+    return {
+        "total": total,
+        "used_pct": round(100 * used / total, 1),
+        "partial_pct": round(100 * partial / total, 1),
+        "unused_pct": round(100 * unused / total, 1),
+        "avg_relevance": round(
+            sum(item["avg_relevance"] * item["sessions"] for item in sources) / total,
+            1,
+        ),
+        "by_choice": [
+            {
+                "label": FEEDBACK_LABELS[choice],
+                "choice": choice,
+                "value": count,
+                "pct": round(100 * count / total, 1),
+            }
+            for choice, count in (
+                ("used", used),
+                ("partial", partial),
+                ("not_used", unused),
+            )
+        ],
+        "by_channel_topic": topics,
+        "by_source": sources,
+        "recent": [],
+        "examples_not_used": examples,
+        "relevance_buckets": {
+            "high": round(total * 0.58),
+            "mid": round(total * 0.30),
+            "low": max(0, total - round(total * 0.58) - round(total * 0.30)),
+        },
+        "demo": True,
+    }
+
+
 def sufler_stats(
     date_from: date,
     date_to: date,
+    *,
+    source: str = "",
 ) -> dict[str, Any]:
     from online_chat.models import SuflerHintFeedback
 
@@ -151,19 +369,18 @@ def sufler_stats(
         created_at__date__gte=date_from,
         created_at__date__lte=date_to,
     )
+    source = (source or "").strip().lower()
+    if source in {"online_chat", "widget"}:
+        source = "chat"
+    if source == "phone":
+        source = "telephony"
+    if source == "telephony":
+        qs = qs.filter(source__in=TELEPHONY_SOURCES)
+    elif source == "chat":
+        qs = qs.exclude(source__in=TELEPHONY_SOURCES)
     total = qs.count()
     if not total:
-        return {
-            "total": 0,
-            "used_pct": None,
-            "partial_pct": None,
-            "unused_pct": None,
-            "avg_relevance": None,
-            "by_choice": [],
-            "by_channel_topic": [],
-            "recent": [],
-            "examples_not_used": [],
-        }
+        return _sufler_demo_stats(date_to, source=source)
 
     by_choice = {
         row["choice"]: row["c"]
@@ -174,11 +391,23 @@ def sufler_stats(
     unused = by_choice.get("not_used", 0)
     avg_rel = qs.exclude(relevance_percent=None).aggregate(v=Avg("relevance_percent"))["v"]
 
-    topic_rows: list[dict[str, Any]] = []
+    topic_rows: list[tuple[str, str, Any, Any]] = []
+    by_source_acc: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"used": 0, "partial": 0, "not_used": 0, "rels": [], "total": 0}
+    )
+    buckets = {"high": 0, "mid": 0, "low": 0}
     for fb in qs.select_related("dialog")[:2000]:
-        channel = getattr(fb.dialog, "channel", None) or "widget"
+        channel = _feedback_source(fb)
         topic = (getattr(fb.dialog, "close_topic", None) or "").strip() or "Без тематики"
         topic_rows.append((channel, topic, fb.relevance_percent, fb.choice))
+        acc = by_source_acc[channel]
+        acc["total"] += 1
+        acc[fb.choice] = acc.get(fb.choice, 0) + 1
+        if fb.relevance_percent is not None:
+            acc["rels"].append(fb.relevance_percent)
+        bucket = _classify_relevance(fb.relevance_percent)
+        if bucket:
+            buckets[bucket] += 1
 
     grouped: dict[tuple[str, str], list[Any]] = defaultdict(list)
     for channel, topic, rel, choice in topic_rows:
@@ -200,13 +429,35 @@ def sufler_stats(
             }
         )
 
+    by_source = []
+    for key in ("chat", "telephony"):
+        acc = by_source_acc.get(key)
+        if not acc:
+            continue
+        total_source = acc["total"] or 1
+        rels = acc["rels"]
+        by_source.append(
+            {
+                "channel": key,
+                "label": SOURCE_LABELS[key],
+                "useful_pct": round(100 * acc["used"] / total_source, 1),
+                "incomplete_pct": round(100 * acc["partial"] / total_source, 1),
+                "unused_pct": round(100 * acc["not_used"] / total_source, 1),
+                "sessions": acc["total"],
+                "avg_relevance": round(mean(rels), 1) if rels else None,
+                "used": acc["used"],
+                "partial": acc["partial"],
+                "not_used": acc["not_used"],
+            }
+        )
+
     recent = []
     for fb in qs.select_related("dialog").order_by("-created_at")[:40]:
         dialog = fb.dialog
         recent.append(
             {
                 "id": str(fb.id),
-                "channel": getattr(dialog, "channel", None) or "widget",
+                "channel": _feedback_source(fb),
                 "operator": fb.operator_name or "—",
                 "topic": (getattr(dialog, "close_topic", None) or "").strip() or "—",
                 "relevance_pct": fb.relevance_percent,
@@ -226,7 +477,7 @@ def sufler_stats(
                 "reason": "Оператор не воспользовался подсказкой",
                 "count": 1,
                 "example": (fb.query or fb.hint_text or "—")[:180],
-                "channel": getattr(fb.dialog, "channel", None) or "widget",
+                "channel": _feedback_source(fb),
                 "operator": fb.operator_name or "—",
                 "relevance_pct": fb.relevance_percent,
                 "at": fb.created_at.isoformat(),
@@ -254,8 +505,11 @@ def sufler_stats(
             if count
         ],
         "by_channel_topic": by_channel_topic,
+        "by_source": by_source,
         "recent": recent,
         "examples_not_used": examples,
+        "relevance_buckets": buckets,
+        "demo": False,
     }
 
 
@@ -665,19 +919,21 @@ def report_chat_history(date_from: date, date_to: date, **filters: Any) -> dict[
     }
 
 
-def report_usefulness(date_from: date, date_to: date, **_filters: Any) -> dict[str, Any]:
-    stats = sufler_stats(date_from, date_to)
-    rows = [
-        {
-            "channel": "online_chat",
-            "label": "Онлайн-чат",
-            "useful_pct": stats["used_pct"] or 0,
-            "incomplete_pct": stats["partial_pct"] or 0,
-            "unused_pct": stats["unused_pct"] or 0,
-            "sessions": stats["total"],
-            "avg_relevance": stats["avg_relevance"],
-        }
-    ]
+def report_usefulness(date_from: date, date_to: date, **filters: Any) -> dict[str, Any]:
+    stats = sufler_stats(date_from, date_to, source=_sufler_source_filter(filters))
+    rows = stats.get("by_source") or []
+    if not rows and stats["total"]:
+        rows = [
+            {
+                "channel": "chat",
+                "label": "Все каналы",
+                "useful_pct": stats["used_pct"] or 0,
+                "incomplete_pct": stats["partial_pct"] or 0,
+                "unused_pct": stats["unused_pct"] or 0,
+                "sessions": stats["total"],
+                "avg_relevance": stats["avg_relevance"],
+            }
+        ]
     chart = [
         {"label": item["label"], "value": item["pct"]}
         for item in stats["by_choice"]
@@ -690,34 +946,46 @@ def report_usefulness(date_from: date, date_to: date, **_filters: Any) -> dict[s
             "used_pct": stats["used_pct"],
             "avg_relevance": stats["avg_relevance"],
         },
-        "stub": stats["total"] == 0,
+        "stub": bool(stats.get("demo")),
     }
 
 
-def report_relevance(date_from: date, date_to: date, **_filters: Any) -> dict[str, Any]:
-    stats = sufler_stats(date_from, date_to)
-    rows = stats["by_channel_topic"]
-    chart = [
-        {"label": f"{row['topic'][:24]}", "value": row["avg_relevance"] or 0}
-        for row in rows[:12]
+def report_relevance(date_from: date, date_to: date, **filters: Any) -> dict[str, Any]:
+    stats = sufler_stats(date_from, date_to, source=_sufler_source_filter(filters))
+    rows = [
+        {
+            "channel_label": row["channel_label"],
+            "topic": row["topic"],
+            "avg_relevance": row["avg_relevance"],
+            "answers": row["answers"],
+            "used_pct": row["used_pct"],
+        }
+        for row in stats["by_channel_topic"]
     ]
+    chart = _relevance_bucket_chart(stats.get("relevance_buckets") or {})
+    if not chart:
+        chart = [
+            {"label": f"{row['topic'][:24]}", "value": row["answers"] or 0}
+            for row in rows[:12]
+            if row.get("answers")
+        ]
     return {
         "rows": rows,
         "chart": chart,
         "summary": {"answers": stats["total"], "avg_relevance": stats["avg_relevance"]},
-        "stub": stats["total"] == 0,
+        "stub": bool(stats.get("demo")),
     }
 
 
-def report_correctness(date_from: date, date_to: date, **_filters: Any) -> dict[str, Any]:
-    stats = sufler_stats(date_from, date_to)
-    rows = stats["by_choice"]
-    chart = [{"label": row["label"], "value": row["pct"]} for row in rows]
+def report_correctness(date_from: date, date_to: date, **filters: Any) -> dict[str, Any]:
+    stats = sufler_stats(date_from, date_to, source=_sufler_source_filter(filters))
+    rows = stats.get("by_source") or stats["by_choice"]
+    chart = [{"label": row["label"], "value": row["pct"]} for row in stats["by_choice"]]
     return {
         "rows": rows,
         "chart": chart,
         "summary": {"total": stats["total"]},
-        "stub": stats["total"] == 0,
+        "stub": bool(stats.get("demo")),
     }
 
 
@@ -758,25 +1026,27 @@ def report_performance(date_from: date, date_to: date, **filters: Any) -> dict[s
     }
 
 
-def report_errors(date_from: date, date_to: date, **_filters: Any) -> dict[str, Any]:
-    stats = sufler_stats(date_from, date_to)
-    rows = stats["examples_not_used"]
-    # Aggregate by reason label
-    reason_counts = Counter(row["reason"] for row in rows)
-    aggregated = [
+def report_errors(date_from: date, date_to: date, **filters: Any) -> dict[str, Any]:
+    stats = sufler_stats(date_from, date_to, source=_sufler_source_filter(filters))
+    rows = [
         {
-            "reason": reason,
-            "count": count,
-            "example": next(r["example"] for r in rows if r["reason"] == reason),
-            "channel": "online_chat",
+            "operator": row.get("operator") or "—",
+            "example": row.get("example") or "—",
+            "relevance_pct": row.get("relevance_pct"),
+            "at": row.get("at") or "",
         }
-        for reason, count in reason_counts.most_common()
+        for row in stats["examples_not_used"]
+    ]
+    by_operator = Counter(row["operator"] for row in rows)
+    chart = [
+        {"label": name, "value": count}
+        for name, count in by_operator.most_common(12)
     ]
     return {
-        "rows": aggregated or rows,
-        "chart": [{"label": r["reason"][:28], "value": r["count"]} for r in aggregated],
+        "rows": rows,
+        "chart": chart,
         "summary": {"cases": len(rows)},
-        "stub": not rows,
+        "stub": bool(stats.get("demo")),
     }
 
 

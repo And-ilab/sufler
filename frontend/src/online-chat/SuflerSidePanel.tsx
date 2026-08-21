@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Button, Card, HintCard, StatusBadge } from '../components'
-import { relevanceStatusFromPercent } from '../components/hintRelevance'
+import { relevanceStatusFromPercent, type HintFeedbackChoice } from '../components/hintRelevance'
 import type { SuflerHint } from '../sufler/api/suggest'
+import { submitSuflerHintFeedback } from './api/onlineChatApi'
 import {
   ACTIVE_CLIENT,
   ACTIVE_SUMMARY_HISTORY,
@@ -19,6 +20,9 @@ export interface SuflerSidePanelProps {
   disabled?: boolean
   client?: ClientInfoData
   summary?: SummaryHistoryData
+  query?: string
+  operatorName?: string
+  requestId?: string
 }
 
 function hintTitle(hint: SuflerHint): string {
@@ -40,10 +44,14 @@ export function SuflerSidePanel({
   disabled = false,
   client = ACTIVE_CLIENT,
   summary = ACTIVE_SUMMARY_HISTORY,
+  query = '',
+  operatorName = '',
+  requestId = '',
 }: SuflerSidePanelProps) {
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [clientOpen, setClientOpen] = useState(false)
   const [phoneRevealed, setPhoneRevealed] = useState(false)
+  const [feedbackByHint, setFeedbackByHint] = useState<Record<number, HintFeedbackChoice>>({})
 
   return (
     <aside className="chat-arm__sufler" data-testid="sufler-side-panel" aria-label="Клиент и суфлёр">
@@ -163,6 +171,21 @@ export function SuflerSidePanel({
               relevanceStatus={relevanceStatusFromPercent(hint.relevance_percent)}
               suzLink={hintSuz(hint)}
               showFeedback
+              feedbackValue={feedbackByHint[hint.rank] ?? null}
+              onFeedback={(choice) => {
+                setFeedbackByHint((current) => ({ ...current, [hint.rank]: choice }))
+                void submitSuflerHintFeedback({
+                  operator_name: operatorName,
+                  query,
+                  hint_rank: hint.rank,
+                  hint_text: hint.text,
+                  choice,
+                  relevance_percent: hint.relevance_percent,
+                  citation_title: hint.citations[0]?.title,
+                  request_id: requestId,
+                  source: 'chat',
+                }).catch(() => {})
+              }}
               hintIndex={index + 1}
               hintTotal={hints.length}
               onInsert={
@@ -170,6 +193,7 @@ export function SuflerSidePanel({
                   ? undefined
                   : () => onInsert(hint.text)
               }
+              defaultExpanded={index === 0}
               data-testid={`chat-hint-${hint.rank}`}
             >
               {hint.text}

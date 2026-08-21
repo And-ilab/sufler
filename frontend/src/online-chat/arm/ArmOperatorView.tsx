@@ -32,6 +32,8 @@ import {
   requestSuflerSuggest,
   type SuflerHint,
 } from '../../sufler/api/suggest'
+import { KbPicker } from '../../sufler/KbPicker'
+import { useKnowledgeBaseSelection } from '../../sufler/hooks/useKnowledgeBaseSelection'
 import {
   getInternalUnreadCount,
   operatorsApi,
@@ -1023,7 +1025,7 @@ function SuflerFeedbackChip({
         onSelect();
       }}
     >
-      {option.label}
+      {option.label}{selected ? ' ✓' : ''}
     </button>
   );
 }
@@ -2983,6 +2985,8 @@ export function ArmOperatorView({
   const [suflerQuery, setSuflerQuery] = useState("");
   const [suflerLoading, setSuflerLoading] = useState(false);
   const [suflerError, setSuflerError] = useState("");
+  const kb = useKnowledgeBaseSelection();
+  const kbSlugsKey = kb.slugs.join("|");
   const [assignmentGraceUntil, setAssignmentGraceUntil] = useState<number | null>(null);
   const [acceptingDialogId, setAcceptingDialogId] = useState<string | null>(null);
   const [operatorCapacity, setOperatorCapacity] = useState(3);
@@ -3481,7 +3485,7 @@ export function ArmOperatorView({
       setSuflerLoading(false);
       return;
     }
-    const turnKey = `${active.id}:${latestClientMessage.id}`;
+    const turnKey = `${active.id}:${latestClientMessage.id}:${kbSlugsKey}`;
     if (suflerTurnKeyRef.current === turnKey) {
       return;
     }
@@ -3498,26 +3502,27 @@ export function ArmOperatorView({
         setSuflerError("Ошибка суфлёра. Повторите попытку позже.");
       }
     }, 25000);
-    void requestSuflerSuggest(latestClientMessage.text, 3, {
+    void requestSuflerSuggest(latestClientMessage.text, 5, {
       clientHistory: historyContext,
       dialogContext: dialogContextForSufler,
+      channel: 'online_chat',
+      ...(kb.status === "ready" ? { kbSlugs: kb.slugs } : {}),
     })
       .then((result) => {
         if (suflerTurnKeyRef.current !== requestKey) return;
         window.clearTimeout(timeoutId);
         setSuflerRequestId(result.request_id || "");
-        // Extra UI guard: drop anything ≤20% even if backend slips.
-        const usable = (result.hints || []).filter(
-          (hint) => (hint.relevance_percent ?? hint.relevance_score * 100) > 20,
-        );
+        const usable = result.hints || [];
         setLiveSuflerRaw(usable);
         setLiveSuflerHints(usable.map(mapApiHintToCard));
         if (!usable.length) {
           setSuflerError(
             result.blocked_reason === "no_relevant_knowledge"
-              ? "Нет подсказок с релевантностью выше 20% — ответьте вручную."
-              : "Ошибка суфлёра. Повторите попытку позже.",
-          );
+              ? "По этой реплике в выбранных базах нет близкой статьи."
+              : result.blocked_reason === "sufler_unavailable"
+                ? "В выбранных базах нет проиндексированных статей."
+                : "Ошибка суфлёра. Повторите попытку позже.",
+          )
         } else {
           setSuflerError("");
         }
@@ -3544,7 +3549,7 @@ export function ArmOperatorView({
     };
     // Depend on stable client message id — not liveMessages array identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active?.id, active?.live, active?.isTestClient, latestClientMessage?.id, latestClientMessage?.text]);
+  }, [active?.id, active?.live, active?.isTestClient, latestClientMessage?.id, latestClientMessage?.text, kbSlugsKey, kb.status]);
 
   useEffect(() => {
     if (assignmentGraceUntil == null) return;
@@ -5143,6 +5148,20 @@ export function ArmOperatorView({
               {suflerLoading ? "загрузка…" : suflerError ? "недоступен" : "активен"}
             </Pill>
           </Row>
+          <div style={{ marginTop: 8 }}>
+            <KbPicker
+              catalog={kb.catalog}
+              selected={kb.selected}
+              status={kb.status}
+              allSelected={kb.allSelected}
+              someSelected={kb.someSelected}
+              onToggleAll={kb.toggleAll}
+              onToggle={(id, checked) =>
+                kb.setSelected((current) => ({ ...current, [id]: checked }))
+              }
+              compact
+            />
+          </div>
           {suflerError ? (
             <Callout tone="warning" style={{ marginTop: 8, fontSize: 12 }}>
               {suflerError}
@@ -5177,6 +5196,7 @@ export function ArmOperatorView({
                     relevance_percent: raw?.relevance_percent,
                     citation_title: hint.suzTitle,
                     request_id: suflerRequestId,
+                    source: "chat",
                   }).catch(() => {});
                 }}
               />

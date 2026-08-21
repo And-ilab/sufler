@@ -62,7 +62,13 @@ export function BarChartView({
   )
 }
 
-export function PieChartView({ data }: { data: PieSlice[] }) {
+export function PieChartView({
+  data,
+  onSelect,
+}: {
+  data: PieSlice[]
+  onSelect?: (label: string) => void
+}) {
   const total = data.reduce((sum, item) => sum + item.value, 0) || 1
   let cursor = 0
   const stops = data.map((item) => {
@@ -81,17 +87,36 @@ export function PieChartView({ data }: { data: PieSlice[] }) {
         <div className="rpt-pie__hole" />
       </div>
       <div className="rpt-pie__legend">
-        {data.map((item) => (
-          <div key={item.label} className="rpt-pie__legend-item">
-            <span
-              className="rpt-pie__dot"
-              style={{ background: TONE_COLOR[item.tone || 'info'] }}
-            />
-            <span>
-              {item.label} — {item.value} ({Math.round((item.value / total) * 100)}%)
-            </span>
-          </div>
-        ))}
+        {data.map((item) => {
+          const body = (
+            <>
+              <span
+                className="rpt-pie__dot"
+                style={{ background: TONE_COLOR[item.tone || 'info'] }}
+              />
+              <span>
+                {item.label} — {item.value} ({Math.round((item.value / total) * 100)}%)
+              </span>
+            </>
+          )
+          if (!onSelect) {
+            return (
+              <div key={item.label} className="rpt-pie__legend-item">
+                {body}
+              </div>
+            )
+          }
+          return (
+            <button
+              key={item.label}
+              type="button"
+              className="rpt-pie__legend-item rpt-pie__legend-item--btn"
+              onClick={() => onSelect(item.label)}
+            >
+              {body}
+            </button>
+          )
+        })}
       </div>
     </div>
   )

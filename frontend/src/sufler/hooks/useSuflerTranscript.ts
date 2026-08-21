@@ -13,6 +13,7 @@ export interface TranscriptLine {
   hints?: SuflerHint[]
   hintStatus?: 'loading' | 'ready' | 'empty'
   hintMessage?: string
+  requestId?: string
 }
 
 interface UseSuflerTranscriptOptions {
@@ -20,6 +21,7 @@ interface UseSuflerTranscriptOptions {
   callId?: string
   demoMode?: boolean
   demoLines?: TranscriptLine[]
+  getKbSlugs?: () => string[] | undefined
 }
 
 type WsInbound =
@@ -42,6 +44,7 @@ type WsInbound =
       hints: SuflerHint[]
       latency_ms?: Record<string, number>
       request_id?: string
+      blocked_reason?: string | null
     }
   | { type: 'error'; message: string; turn_id?: string }
   | { type: 'pong' }
@@ -57,6 +60,7 @@ export function useSuflerTranscript({
   callId = 'live',
   demoMode = false,
   demoLines = [],
+  getKbSlugs,
 }: UseSuflerTranscriptOptions) {
   const [lines, setLines] = useState<TranscriptLine[]>(demoMode ? demoLines : [])
   const [connected, setConnected] = useState(demoMode)
@@ -84,13 +88,14 @@ export function useSuflerTranscript({
   }, [])
 
   const attachHints = useCallback(
-    (turnId: string, hints: SuflerHint[], hintMessage = '') => {
+    (turnId: string, hints: SuflerHint[], hintMessage = '', requestId = '') => {
       setLines((current) => {
         const next = current.map((line) =>
           line.turnId === turnId && line.speaker === 'client'
             ? {
                 ...line,
                 hints,
+                requestId: requestId || line.requestId,
                 hintStatus: (hints.length ? 'ready' : 'empty') as TranscriptLine['hintStatus'],
                 hintMessage: hints.length
                   ? ''
@@ -158,7 +163,12 @@ export function useSuflerTranscript({
           payload.hints.slice(0, 5),
           payload.hints.length
             ? ''
-            : 'Подсказок нет. Проверьте DeepSeek (SUFLER_LLM_*) и SUFLER_ALLOW_UNGROUNDED=1.',
+            : payload.blocked_reason === 'sufler_unavailable'
+              ? 'В выбранных базах нет проиндексированных статей. Проверьте индексацию в Центре настроек.'
+              : payload.blocked_reason === 'no_relevant_knowledge'
+                ? 'По этой реплике в выбранных базах нет близкой статьи.'
+                : 'Подсказок нет: модель не вернула текст по найденным статьям.',
+          payload.request_id,
         )
         if (payload.latency_ms?.total != null) {
           setLatencyMs(payload.latency_ms.total)
@@ -204,7 +214,13 @@ export function useSuflerTranscript({
           `${line.speaker === 'client' ? 'Клиент' : 'Оператор'}: ${line.text}`,
         )
         .join('\n')
-      void requestSuflerSuggest(message.text, 3, { dialogContext })
+      void requestSuflerSuggest(message.text, 5, {
+        dialogContext,
+        channel: 'telephony',
+        ...(getKbSlugs && getKbSlugs() !== undefined
+          ? { kbSlugs: getKbSlugs() }
+          : {}),
+      })
         .then((result) => {
           const hints = result.hints.slice(0, 5)
           const blocked = result.blocked_reason
@@ -214,8 +230,11 @@ export function useSuflerTranscript({
             hints.length
               ? ''
               : blocked === 'sufler_unavailable'
-                ? 'База знаний пуста, а модель не ответила. Проверьте SUFLER_LLM_* и SUFLER_ALLOW_UNGROUNDED=1.'
-                : 'Подсказок нет: в базе нет статьи по этому вопросу, а модель не вернула текст.',
+                ? 'В выбранных базах нет проиндексированных статей. Проверьте индексацию в Центре настроек.'
+                : blocked === 'no_relevant_knowledge'
+                  ? 'По этой реплике в выбранных базах нет близкой статьи.'
+                  : 'Подсказок нет: модель не вернула текст по найденным статьям.',
+            result.request_id,
           )
           setLatencyMs(result.latency_ms.total)
         })
@@ -228,7 +247,7 @@ export function useSuflerTranscript({
           setError(hintMessage)
         })
     },
-    [attachHints, upsertLine],
+    [attachHints, getKbSlugs, upsertLine],
   )
 
   const pushAsr = useCallback(
@@ -242,9 +261,14 @@ export function useSuflerTranscript({
         ingestLive(message)
         return
       }
-      socketRef.current?.send(JSON.stringify(message))
+      const slugs = getKbSlugs?.()
+      socketRef.current?.send(
+        JSON.stringify(
+          slugs === undefined ? message : { ...message, kb_slugs: slugs },
+        ),
+      )
     },
-    [demoMode, ingestLive],
+    [demoMode, getKbSlugs, ingestLive],
   )
 
   const replaceLines = useCallback(

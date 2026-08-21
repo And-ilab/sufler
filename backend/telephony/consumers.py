@@ -111,13 +111,28 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
         )
 
         if is_final and speaker == "client":
-            await self._emit_hints(text.strip(), turn_id=turn_id)
+            kb_slugs = payload.get("kb_slugs")
+            await self._emit_hints(text.strip(), turn_id=turn_id, kb_slugs=kb_slugs)
 
-    async def _emit_hints(self, text: str, *, turn_id: str) -> None:
+    async def _emit_hints(
+        self,
+        text: str,
+        *,
+        turn_id: str,
+        kb_slugs: Any = None,
+    ) -> None:
+        slugs = None
+        if isinstance(kb_slugs, list):
+            slugs = [
+                item.strip()
+                for item in kb_slugs
+                if isinstance(item, str) and item.strip()
+            ]
         try:
             result = await sync_to_async(suggest, thread_sensitive=True)(
                 text,
                 limit=5,
+                kb_slugs=slugs,
             )
         except SuflerOrchestratorError as exc:
             await self.send_json(

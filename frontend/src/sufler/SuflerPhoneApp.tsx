@@ -1,11 +1,22 @@
 import { useMemo, useRef, useState } from 'react'
 import { Button, Card, HintCard, StatusBadge } from '../components'
-import { relevanceStatusFromPercent } from '../components/hintRelevance'
+import { useAiHubColorTheme } from '../ai-hub/colorTheme'
+import {
+  relevanceStatusFromPercent,
+  type HintFeedbackChoice,
+} from '../components/hintRelevance'
 import {
   useSuflerTranscript,
   type TranscriptLine,
 } from './hooks/useSuflerTranscript'
 import { useLiveDualAsr, type DualSpeaker } from './hooks/useLiveDualAsr'
+import { useKnowledgeBaseSelection } from './hooks/useKnowledgeBaseSelection'
+import { useClientSummary } from './hooks/useClientSummary'
+import { KbPicker } from './KbPicker'
+import {
+  submitSuflerHintFeedback,
+  type ClientHistorySummaryBlock,
+} from '../online-chat/api/onlineChatApi'
 import type { SuflerHint } from './api/suggest'
 import './SuflerPhoneApp.css'
 
@@ -17,11 +28,8 @@ export interface SuflerPhoneAppProps {
   operatorName?: string
   /** Embed inside portal module window (II.3.2 / I-0b). */
   embedded?: boolean
-  clientSummary?: {
-    preview: string
-    summary: string
-    detailedSummary: string
-  }
+  /** Caller phone from telephony; until wired, demo Oktell number is used. */
+  clientPhone?: string
 }
 
 function hintTitle(hint: SuflerHint): string {
@@ -32,15 +40,6 @@ function hintSuz(hint: SuflerHint) {
   const citation = hint.citations[0]
   if (!citation?.permalink) return null
   return { title: citation.title, href: citation.permalink }
-}
-
-const DEFAULT_SUMMARY = {
-  preview:
-    '3 обращения за 90 дней: лимиты ATM (чат), перевод РФ (тел.), карта NFC (Telegram). Повторная тема: переводы.',
-  summary:
-    '3 обращения за 90 дней: лимиты ATM (чат), перевод РФ (тел.), карта NFC (Telegram). Повторная тема: переводы.',
-  detailedSummary:
-    'За 90 дней — 3 обращения по теме лимитов и переводов.\n\n12.05.2026 · онлайн-чат · лимит ATM — оператор Сидорова М.В. Разъяснены суточные лимиты карты Visa.\n\n03.04.2026 · Telegram · NFC — оператор Козлов Д.А. Проверены настройки бесконтактной оплаты.\n\n15.03.2026 · телефония (Oktell) · перевод в РФ — оператор Петрова А.С., длит. 4:12. Рекомендован раздел «Платежи → За рубеж».\n\nПовторная тема: переводы. Рекомендация: проверить актуальный лимит в мобильном банке перед ответом.',
 }
 
 /** II-2 demo: 3 hints 92% / 87% / 81% on transfer-to-RF turn. */
@@ -109,10 +108,16 @@ function ClientSummaryCard({
   preview,
   summary,
   detailedSummary,
+  blocks,
+  isFirst,
+  loading,
 }: {
   preview: string
   summary: string
   detailedSummary: string
+  blocks: ClientHistorySummaryBlock[]
+  isFirst: boolean
+  loading?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -141,10 +146,36 @@ function ClientSummaryCard({
             <p>{summary}</p>
             <hr />
             <small>Детальный summary</small>
-            <p className="sufler-phone__summary-detailed">{detailedSummary}</p>
+            {isFirst || blocks.length === 0 ? (
+              <p className="sufler-phone__summary-detailed">
+                {isFirst
+                  ? 'Первое обращение клиента — предыдущей истории нет.'
+                  : detailedSummary || 'Нет предыдущих обращений по этому номеру.'}
+              </p>
+            ) : (
+              <div className="sufler-phone__summary-blocks">
+                {blocks.map((block, index) => (
+                  <article
+                    key={`${block.date_label}-${index}`}
+                    className="sufler-phone__summary-block"
+                  >
+                    <header>
+                      <span>{block.date_label}</span>
+                      <span>{block.topic}</span>
+                    </header>
+                    <p>{block.essence || 'Нет краткого описания сути обращения.'}</p>
+                    <small>
+                      {block.channel || '—'} · {block.operator_name || 'оператор не указан'}
+                    </small>
+                  </article>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
-          <p className="sufler-phone__summary-preview">{preview}</p>
+          <p className="sufler-phone__summary-preview">
+            {loading ? 'Загрузка истории…' : preview}
+          </p>
         )}
       </Card>
     </div>
@@ -157,15 +188,20 @@ export function SuflerPhoneApp({
   demoLines = DEFAULT_DEMO,
   operatorName = 'Оператор КЦ',
   embedded = false,
-  clientSummary = DEFAULT_SUMMARY,
+  clientPhone = '',
 }: SuflerPhoneAppProps) {
+  const { theme: colorTheme } = useAiHubColorTheme()
+  const kb = useKnowledgeBaseSelection()
+  const clientHistory = useClientSummary(clientPhone)
   const { lines, connected, error, latencyMs, ingestLive, pushAsr, setLines } = useSuflerTranscript({
     callId,
     demoMode,
     demoLines,
+    getKbSlugs: kb.getKbSlugs,
   })
   const liveTurns = useRef<Record<DualSpeaker, string>>({ client: '', operator: '' })
   const [typedLine, setTypedLine] = useState('')
+  const [feedbackByHint, setFeedbackByHint] = useState<Record<string, HintFeedbackChoice>>({})
 
   const handleUtterance = (speaker: DualSpeaker, text: string, isFinal: boolean) => {
     if (!liveTurns.current[speaker]) {
@@ -198,10 +234,32 @@ export function SuflerPhoneApp({
 
   const blocks = useMemo(() => lines, [lines])
 
+  const handleHintFeedback = (
+    line: TranscriptLine,
+    hint: SuflerHint,
+    choice: HintFeedbackChoice,
+  ) => {
+    const key = `${line.turnId}-${hint.rank}`
+    setFeedbackByHint((current) => ({ ...current, [key]: choice }))
+    void submitSuflerHintFeedback({
+      operator_name: operatorName,
+      query: line.text,
+      hint_rank: hint.rank,
+      hint_text: hint.text,
+      choice,
+      relevance_percent: hint.relevance_percent,
+      citation_title: hint.citations[0]?.title,
+      request_id: line.requestId,
+      source: 'telephony',
+      call_id: callId,
+    }).catch(() => {})
+  }
+
   return (
     <main
       className={`sufler-phone${embedded ? ' sufler-phone--embedded' : ''}`}
       data-testid="sufler-phone-app"
+      data-ai-color-theme={colorTheme}
     >
       <header className="sufler-phone__header">
         <div>
@@ -209,6 +267,18 @@ export function SuflerPhoneApp({
           <h1>Телефония</h1>
         </div>
         <div className="sufler-phone__meta">
+          <KbPicker
+            catalog={kb.catalog}
+            selected={kb.selected}
+            status={kb.status}
+            allSelected={kb.allSelected}
+            someSelected={kb.someSelected}
+            onToggleAll={kb.toggleAll}
+            onToggle={(id, checked) =>
+              kb.setSelected((current) => ({ ...current, [id]: checked }))
+            }
+            compact
+          />
           <StatusBadge status={live.recording || connected ? 'success' : 'warning'}>
             {live.recording ? 'Имитация' : connected ? 'ASR активен' : 'ASR офлайн'}
           </StatusBadge>
@@ -267,8 +337,11 @@ export function SuflerPhoneApp({
                         relevanceStatus={relevanceStatusFromPercent(hint.relevance_percent)}
                         suzLink={hintSuz(hint)}
                         showFeedback
+                        feedbackValue={feedbackByHint[`${line.turnId}-${hint.rank}`] ?? null}
+                        onFeedback={(choice) => handleHintFeedback(line, hint, choice)}
                         hintIndex={index + 1}
                         hintTotal={hints.length}
+                        defaultExpanded={index === 0}
                         data-testid={`hint-${line.turnId}-${hint.rank}`}
                       >
                         {hint.text}
@@ -303,7 +376,10 @@ export function SuflerPhoneApp({
           <header className="sufler-phone__context-header">
             <strong>Контекст</strong>
           </header>
-          <ClientSummaryCard {...clientSummary} />
+          <ClientSummaryCard
+            {...clientHistory.data}
+            loading={clientHistory.loading}
+          />
         </aside>
       </div>
 

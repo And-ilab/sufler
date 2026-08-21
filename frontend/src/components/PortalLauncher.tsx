@@ -141,7 +141,7 @@ function ModuleWindow({
       role="dialog"
       aria-label={title}
       data-testid={`${module}-window`}
-      data-ai-color-theme={module === 'assistant' ? colorTheme : undefined}
+      data-ai-color-theme={colorTheme}
     >
       <header className="portal-module-window__header">
         <div className="portal-module-window__identity">
@@ -257,7 +257,7 @@ function PortalBackdrop({
       ? 'Переключить на цветовую схему онлайн-чата'
       : 'Вернуть текущую цветовую схему'
   return (
-    <div className="portal-launcher__backdrop">
+    <div className="portal-launcher__backdrop" data-ai-color-theme={colorTheme}>
       <header className="portal-launcher__portal-header">
         <img src="/assets/belarusbank-logo.png" alt="Беларусбанк" />
         <nav aria-label="Навигация корпоративного портала">
@@ -396,6 +396,7 @@ export function PortalLauncher({
           roleLabel={roleLabel}
           roles={roles}
           settingsEntry={settingsEntry}
+          colorTheme={colorTheme}
           onClose={() => closeModule('sufler')}
           onMinimize={() => closeModule('sufler')}
         />

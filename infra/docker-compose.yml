@@ -212,6 +212,35 @@ services:
       retries: 10
       start_period: 5s
 
+  embedding:
+    build:
+      context: ../backend/services/embedding
+      dockerfile: Dockerfile
+    image: ${EMBEDDING_IMAGE:-sufler-embedding:local}
+    restart: unless-stopped
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
+      HF_HOME: /models/hf-cache
+      TRANSFORMERS_CACHE: /models/hf-cache
+      SENTENCE_TRANSFORMERS_HOME: /models/hf-cache
+    volumes:
+      - ${EMBEDDING_MODELS_DIR:-../models}:/models
+    ports:
+      - "${EMBEDDING_PORT_HOST:-8090}:8090"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 20
+      start_period: 240s
+
   celery-worker:
     build:
       context: ../backend

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from collections.abc import Mapping
@@ -71,6 +72,7 @@ from online_chat.services import (
 )
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+logger = logging.getLogger(__name__)
 
 
 class OnlineChatApiError(ValueError):
@@ -641,7 +643,15 @@ def sufler_hint_feedback(request: HttpRequest) -> HttpResponse:
             relevance_percent=relevance_int,
             citation_title=_str_field(payload, "citation_title"),
             request_id=_str_field(payload, "request_id"),
+            source=(_str_field(payload, "source") or "chat")[:32],
+            call_id=_str_field(payload, "call_id")[:64],
         )
+        try:
+            from qu.admin_service import enqueue_from_feedback
+
+            enqueue_from_feedback(row)
+        except Exception:
+            logger.exception("QU enqueue from sufler feedback failed")
         return JsonResponse(
             {
                 "ok": True,

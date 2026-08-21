@@ -139,10 +139,10 @@
   border-color: #3685bf70;
   background: #3685bf24;
 }
+.ui-hint__feedback-btn--used.is-active,
+.ui-hint__feedback-btn--not_used.is-active,
 .ui-hint__feedback-btn--partial.is-active {
-  color: #8a6d00;
-  border-color: #c06028a8;
-  background: #e8c0302e;
+  font-weight: 700;
 }
 .ui-hint__insert {
   display: inline-flex;

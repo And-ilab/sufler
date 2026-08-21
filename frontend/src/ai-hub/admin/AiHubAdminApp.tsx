@@ -12,12 +12,19 @@ import {
   ModelParamsScreen,
   type ModelParamsScreenHandle,
 } from './ModelParamsScreen'
+import {
+  SuflerPoliciesScreen,
+  type SuflerPoliciesScreenHandle,
+} from './SuflerPoliciesScreen'
 import { QuPreviewScreen } from './QuPreviewScreen'
 import { KbAdminScreen } from './KbAdminScreen'
 import { PromptsAssistantScreen } from './PromptsAssistantScreen'
 import { CapabilitiesScreen } from './CapabilitiesScreen'
 import { DocTypesScreen } from './DocTypesScreen'
 import { OcrDocumentsPanel } from '../ocr/OcrDocumentsPanel'
+import { CcReportsScreen } from '../reports/CcReportsScreen'
+import { AsrQaScreen } from '../reports/AsrQaScreen'
+import '../reports/ReportsTheme.css'
 import type { ModelParamsData } from './api/modelRegistry'
 import {
   ADMIN_GROUPS,
@@ -94,9 +101,9 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
   },
   qu_admin: {
     title: 'Модуль понимания',
-    subtitle: 'Предпросмотр семантического поиска, релевантности и совпавших примеров.',
-    status: 'Гибридный режим',
-    cards: [['Намерения', '46', 'Активные классы'], ['Точность совпадений', '94%', 'RU / EN'], ['Порог', '0.72', 'Калибровка']],
+    subtitle: '',
+    status: 'Модуль понимания',
+    cards: [['Выборка', '', ''], ['Модерация', '', ''], ['Предпросмотр', '', '']],
   },
   data_sources: {
     title: 'Источники данных',
@@ -146,9 +153,21 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
   },
   sufler_policies: {
     title: 'Политики суфлёра',
-    subtitle: 'Релевантность, автоответы и ограничения подсказок.',
-    status: 'Политика v4',
-    cards: [['Порог контекста', '0.62', 'Реестр моделей'], ['Детерминированный ответ', '0.84', 'Реестр моделей'], ['Макс. подсказок', '3', 'На один запрос']],
+    subtitle: 'Порог релевантности, лимит карточек и режим Консультация / Услуга.',
+    status: 'Политика суфлёра',
+    cards: [['Порог подсказки', '20%', 'Оператор'], ['Макс. карточек', '1–5', 'На одну реплику'], ['Режим', 'Консультация', 'По умолчанию']],
+  },
+  sufler_stats: {
+    title: 'Статистика суфлёра',
+    subtitle: 'Отчётность КЦ: полезность по отметкам «Воспользовался / Неполный / Не воспользовался».',
+    status: 'Отчётность КЦ',
+    cards: [['Полезность', 'pie', 'FR-RPT-CC-08'], ['Релевантность', 'каналы', 'FR-RPT-CC-07'], ['Слабые', 'таблица', 'Не воспользовался']],
+  },
+  sufler_training: {
+    title: 'Модуль обучения',
+    subtitle: '',
+    status: 'Модуль обучения',
+    cards: [['Очередь', '', ''], ['Эталон', '', ''], ['Обучение', '', '']],
   },
   ocr: {
     title: 'OCR',
@@ -195,6 +214,7 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
 }
 
 const DEMO_ROLE_LABELS: Record<DemoAdminRole, string> = {
+  software_admin: 'Админ ПО',
   kb_admin: 'Админ БЗ',
   cc_admin: 'Админ сценариев / КЦ',
   doc_admin: 'Админ OCR',
@@ -202,11 +222,25 @@ const DEMO_ROLE_LABELS: Record<DemoAdminRole, string> = {
 }
 
 function demoCanEdit(role: DemoAdminRole, item?: AdminNavItem): boolean {
+  if (role === 'software_admin') return true
   if (!item || role === 'auditor') return false
   if (item.group === 'АССИСТЕНТ') return role === 'kb_admin'
-  if (item.group === 'СУФЛЁР / КЦ') return role === 'cc_admin'
+  if (item.group === 'СУФЛЁР / КЦ') return role === 'cc_admin' || role === 'kb_admin'
   if (item.group === 'ДОКУМЕНТЫ') return role === 'doc_admin'
   return item.demoRoles.includes(role)
+}
+
+function demoRoleFromAuth(roles: readonly string[]): DemoAdminRole {
+  if (roles.includes('software_administrator')) return 'software_admin'
+  if (roles.includes('contact_center_module_administrator')) return 'cc_admin'
+  if (roles.includes('document_recognition_module_administrator')) return 'doc_admin'
+  if (
+    roles.includes('llm_knowledge_base_administrator')
+    || roles.includes('ai_assistant_module_administrator')
+  ) {
+    return 'kb_admin'
+  }
+  return 'software_admin'
 }
 
 function hasRole(roles: readonly string[], item: AdminNavItem): boolean {
@@ -229,17 +263,24 @@ export function AiHubAdminApp({
     : resolved.screen
   const [screen, setScreen] = useState(initialScreen ?? fallbackScreen)
   const [profile, setProfile] = useState(initialProfile ?? resolved.profile)
-  const [demoRole, setDemoRole] = useState<DemoAdminRole>('kb_admin')
+  const [demoRole, setDemoRole] = useState<DemoAdminRole>(() => demoRoleFromAuth(roles))
   const [saved, setSaved] = useState(false)
-  const modelParamsRef = useRef<ModelParamsScreenHandle>(null)
-  const [modelFormState, setModelFormState] = useState({
+  const emptyFormState = {
     dirty: false,
     valid: false,
     saving: false,
     message: '',
-  })
+  }
+  const modelParamsRef = useRef<ModelParamsScreenHandle>(null)
+  const suflerPoliciesRef = useRef<SuflerPoliciesScreenHandle>(null)
+  const [modelFormState, setModelFormState] = useState(emptyFormState)
+  const [policiesFormState, setPoliciesFormState] = useState(emptyFormState)
   const handleModelFormState = useCallback(
     (state: typeof modelFormState) => setModelFormState(state),
+    [],
+  )
+  const handlePoliciesFormState = useCallback(
+    (state: typeof policiesFormState) => setPoliciesFormState(state),
     [],
   )
 
@@ -282,9 +323,14 @@ export function AiHubAdminApp({
     (item) => item.id === screen && (item.profile === undefined || item.profile === profile),
   )
   const reportsOnly = !demoRoleSwitcher && isAdminReportsOnlyRole(roles)
-  const canEdit = demoRoleSwitcher
-    ? demoCanEdit(demoRole, activeItem)
-    : Boolean(activeItem && hasRole(roles, activeItem) && !reportsOnly)
+  const isSoftwareAdmin = roles.includes('software_administrator')
+  const canEdit = isSoftwareAdmin
+    || (demoRoleSwitcher && demoRole === 'software_admin')
+    || (
+      demoRoleSwitcher
+        ? demoCanEdit(demoRole, activeItem)
+        : Boolean(activeItem && hasRole(roles, activeItem) && !reportsOnly)
+    )
 
   useEffect(() => {
     if (demoRoleSwitcher || !visibleNav.length) return
@@ -299,6 +345,7 @@ export function AiHubAdminApp({
       setProfile(first.profile ?? 'assistant')
     }
   }, [demoRoleSwitcher, visibleNav, screen, profile])
+
   const copy = SCREEN_COPY[screen]
   const screenBadge = activeItem?.label ?? copy.title
   const profileBadge = screen === 'model_params'
@@ -306,15 +353,12 @@ export function AiHubAdminApp({
     : undefined
 
   const navigate = (event: MouseEvent<HTMLAnchorElement>, item: AdminNavItem) => {
-    if (item.id === 'asr_qa' || item.id === 'cc_reports') {
-      window.location.assign(adminRoute(item))
-      return
-    }
     event.preventDefault()
     setScreen(item.id)
     setProfile(item.profile ?? (item.id === 'llm_config_cc' ? 'cc' : 'assistant'))
     setSaved(false)
     setModelFormState({ dirty: false, valid: false, saving: false, message: '' })
+    setPoliciesFormState({ dirty: false, valid: false, saving: false, message: '' })
     window.history.pushState({}, '', adminRoute(item))
   }
 
@@ -381,7 +425,8 @@ export function AiHubAdminApp({
                 {items.map((item) => {
                   const active = item.id === screen
                     && (item.profile === undefined || item.profile === profile)
-                  const demoReadable = item.demoRoles.includes(demoRole)
+                  const demoReadable =
+                    demoRole === 'software_admin' || item.demoRoles.includes(demoRole)
                   return (
                     <a
                       key={`${item.id}-${item.profile ?? 'default'}`}
@@ -421,19 +466,37 @@ export function AiHubAdminApp({
               </label>
             )}
             {!demoRoleSwitcher && <StatusBadge status="success">RBAC активен</StatusBadge>}
-            <a
-              href="/ai-hub?open=assistant"
-              className="admin-topbar__chat-fab"
-              data-testid="admin-back-to-chat"
-              title="Открыть ИИ-чат"
-              aria-label="Открыть ИИ-чат"
-            >
-              <span className="admin-topbar__chat-fab-mark" aria-hidden="true">AI</span>
-            </a>
+            <div className="admin-topbar__fabs">
+              <a
+                href="/ai-hub?open=sufler"
+                className="admin-topbar__chat-fab"
+                data-testid="admin-back-to-sufler"
+                title="Открыть суфлёр"
+                aria-label="Открыть суфлёр"
+              >
+                <span className="admin-topbar__chat-fab-mark" aria-hidden="true">S</span>
+              </a>
+              <a
+                href="/ai-hub?open=assistant"
+                className="admin-topbar__chat-fab"
+                data-testid="admin-back-to-chat"
+                title="Открыть ИИ-чат"
+                aria-label="Открыть ИИ-чат"
+              >
+                <span className="admin-topbar__chat-fab-mark" aria-hidden="true">AI</span>
+              </a>
+            </div>
           </div>
         </header>
 
-        <main className="admin-main" data-screen-id={screen}>
+        <main
+          className={`admin-main${
+            screen === 'sufler_stats' || screen === 'cc_reports' || screen === 'asr_qa' || screen === 'qu_admin' || screen === 'sufler_training'
+              ? ' admin-main--wide'
+              : ''
+          }`}
+          data-screen-id={screen}
+        >
           <div className="admin-breadcrumbs" aria-label="Хлебные крошки">
             <a href="/ai-hub/admin">Центр настроек</a><span>/</span><span>{copy.title}</span>
           </div>
@@ -443,7 +506,7 @@ export function AiHubAdminApp({
                 <h1>{copy.title}</h1>
                 {profileBadge && <StatusBadge status="info">{profileBadge}</StatusBadge>}
               </div>
-              <p>{copy.subtitle}</p>
+              {copy.subtitle ? <p>{copy.subtitle}</p> : null}
             </div>
             <StatusBadge status={canEdit ? 'success' : 'neutral'}>
               {canEdit ? copy.status : 'Только просмотр'}
@@ -464,8 +527,16 @@ export function AiHubAdminApp({
               initialData={initialModelParams}
               onStateChange={handleModelFormState}
             />
+          ) : screen === 'sufler_policies' ? (
+            <SuflerPoliciesScreen
+              ref={suflerPoliciesRef}
+              canEdit={canEdit}
+              onStateChange={handlePoliciesFormState}
+            />
           ) : screen === 'qu_admin' ? (
-            <QuPreviewScreen />
+            <QuPreviewScreen key="qu_admin" canEdit={canEdit} />
+          ) : screen === 'sufler_training' ? (
+            <QuPreviewScreen key="sufler_training" canEdit={canEdit} initialTab="moderation" />
           ) : screen === 'kb_admin' ? (
             <KbAdminScreen canEdit={canEdit} />
           ) : screen === 'prompts_assistant' ? (
@@ -478,6 +549,18 @@ export function AiHubAdminApp({
             </div>
           ) : screen === 'doc_types' ? (
             <DocTypesScreen canEdit={canEdit} />
+          ) : screen === 'sufler_stats' ? (
+            <div className="rpt-app admin-reports-embed">
+              <CcReportsScreen initialReport="usefulness" scope="sufler" />
+            </div>
+          ) : screen === 'cc_reports' ? (
+            <div className="rpt-app admin-reports-embed">
+              <CcReportsScreen />
+            </div>
+          ) : screen === 'asr_qa' ? (
+            <div className="rpt-app admin-reports-embed">
+              <AsrQaScreen />
+            </div>
           ) : (
             <>
               <section className="admin-stats" aria-label={`Сводка экрана ${copy.title}`}>
@@ -521,18 +604,28 @@ export function AiHubAdminApp({
           )}
         </main>
 
-        {screen !== 'qu_admin' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && screen !== 'doc_types' && screen !== 'ocr' && (
+        {screen !== 'qu_admin' && screen !== 'sufler_training' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && screen !== 'doc_types' && screen !== 'ocr' && screen !== 'sufler_stats' && screen !== 'cc_reports' && screen !== 'asr_qa' && (
         <footer className="admin-save-footer" data-testid="admin-save-footer">
           <span>
             {screen === 'model_params'
               ? modelFormState.message || (modelFormState.dirty ? 'Есть несохранённые изменения' : 'Настройки синхронизированы')
-              : saved ? 'Изменения сохранены' : 'Есть несохранённые изменения'}
+              : screen === 'sufler_policies'
+                ? policiesFormState.message || (policiesFormState.dirty ? 'Есть несохранённые изменения' : 'Настройки синхронизированы')
+                : saved ? 'Изменения сохранены' : 'Есть несохранённые изменения'}
           </span>
           <div>
             <Button
               variant="ghost"
-              disabled={!canEdit || (screen === 'model_params' && !modelFormState.dirty)}
-              onClick={() => screen === 'model_params' ? modelParamsRef.current?.reset() : setSaved(false)}
+              disabled={
+                !canEdit
+                || (screen === 'model_params' && !modelFormState.dirty)
+                || (screen === 'sufler_policies' && !policiesFormState.dirty)
+              }
+              onClick={() => {
+                if (screen === 'model_params') modelParamsRef.current?.reset()
+                else if (screen === 'sufler_policies') suflerPoliciesRef.current?.reset()
+                else setSaved(false)
+              }}
             >
               Сбросить
             </Button>
@@ -547,16 +640,29 @@ export function AiHubAdminApp({
                     || modelFormState.saving
                   )
                 )
+                || (
+                  screen === 'sufler_policies'
+                  && (
+                    !policiesFormState.dirty
+                    || !policiesFormState.valid
+                    || policiesFormState.saving
+                  )
+                )
               }
               onClick={() => {
                 if (screen === 'model_params') {
                   void modelParamsRef.current?.save()
+                } else if (screen === 'sufler_policies') {
+                  void suflerPoliciesRef.current?.save()
                 } else {
                   setSaved(true)
                 }
               }}
             >
-              {modelFormState.saving && screen === 'model_params' ? 'Сохранение…' : 'Сохранить'}
+              {(modelFormState.saving && screen === 'model_params')
+                || (policiesFormState.saving && screen === 'sufler_policies')
+                ? 'Сохранение…'
+                : 'Сохранить'}
             </Button>
           </div>
         </footer>

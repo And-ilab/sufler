@@ -111,6 +111,81 @@
   font-size: .8125rem;
 }
 
+.sufler-kb {
+  position: relative;
+  min-width: 180px;
+  max-width: 260px;
+}
+
+.sufler-kb--compact {
+  min-width: 160px;
+}
+
+.sufler-kb__trigger {
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-size: .75rem;
+}
+
+.sufler-kb__trigger span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sufler-kb__menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  right: 0;
+  left: auto;
+  min-width: 240px;
+  max-height: 320px;
+  overflow: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md, 0 8px 24px #0000001a);
+  display: grid;
+  gap: 4px;
+}
+
+.sufler-kb__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: .8125rem;
+  color: var(--color-text);
+}
+
+.sufler-kb__option--all {
+  padding-bottom: var(--space-2);
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 700;
+}
+
+.sufler-kb__empty {
+  margin: 0;
+  padding: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: .8125rem;
+  line-height: 1.4;
+}
+
 .sufler-phone__workspace {
   display: grid;
   min-height: 0;
@@ -193,6 +268,7 @@
   display: flex;
   min-height: 0;
   flex-direction: column;
+  overflow: auto;
   border-left: 1px solid var(--color-border);
   background: var(--color-surface-muted);
 }
@@ -256,6 +332,41 @@
 
 .sufler-phone__summary-detailed {
   white-space: pre-line;
+}
+
+.sufler-phone__summary-blocks {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sufler-phone__summary-block {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.sufler-phone__summary-block header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: .75rem;
+  font-weight: 700;
+}
+
+.sufler-phone__summary-block p {
+  margin: 0;
+  font-size: .8125rem;
+  line-height: 1.4;
+}
+
+.sufler-phone__summary-block small {
+  color: var(--color-text-muted);
+  font-size: .6875rem;
+  font-weight: 500;
+  text-transform: none;
 }
 
 .sufler-phone__error {

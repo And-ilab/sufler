@@ -19,7 +19,18 @@ from orchestrator.test_dialog import run_test_prompt
 from orchestrator.transcribe import TranscribeError, transcribe_wav
 
 
-def _parse_suggest_body(body: bytes) -> tuple[str, int, str, str]:
+def _optional_string(payload: Mapping[str, Any], field: str) -> str:
+    value = payload.get(field, "")
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise SuflerOrchestratorError(f"{field} must be a string")
+    return value
+
+
+def _parse_suggest_body(
+    body: bytes,
+) -> tuple[str, int, str, str, list[str] | None, str, str]:
     try:
         payload = json.loads(body or b"{}")
     except json.JSONDecodeError as exc:
@@ -31,7 +42,7 @@ def _parse_suggest_body(body: bytes) -> tuple[str, int, str, str]:
     text = payload.get("text", payload.get("query"))
     if not isinstance(text, str) or not text.strip():
         raise SuflerOrchestratorError("text must be a non-empty string")
-    limit: Any = payload.get("limit", 3)
+    limit: Any = payload.get("limit", 5)
     if isinstance(limit, bool) or not isinstance(limit, int):
         raise SuflerOrchestratorError("limit must be an integer")
     history = payload.get("client_history", payload.get("history", ""))
@@ -44,7 +55,26 @@ def _parse_suggest_body(body: bytes) -> tuple[str, int, str, str]:
         dialog_context = ""
     if not isinstance(dialog_context, str):
         raise SuflerOrchestratorError("dialog_context must be a string")
-    return text, limit, history, dialog_context
+    kb_slugs: list[str] | None
+    if "kb_slugs" not in payload:
+        kb_slugs = None
+    else:
+        raw_slugs = payload.get("kb_slugs")
+        if raw_slugs is None:
+            kb_slugs = []
+        elif not isinstance(raw_slugs, list):
+            raise SuflerOrchestratorError("kb_slugs must be an array of strings")
+        else:
+            kb_slugs = []
+            for index, slug in enumerate(raw_slugs):
+                if not isinstance(slug, str) or not slug.strip():
+                    raise SuflerOrchestratorError(
+                        f"kb_slugs[{index}] must be a non-empty string"
+                    )
+                kb_slugs.append(slug.strip())
+    channel = _optional_string(payload, "channel")
+    mode = _optional_string(payload, "mode")
+    return text, limit, history, dialog_context, kb_slugs, channel, mode
 
 
 @require_http_methods(["POST"])
@@ -57,15 +87,24 @@ def _parse_suggest_body(body: bytes) -> tuple[str, int, str, str]:
 def sufler_suggest(request: HttpRequest) -> JsonResponse:
     """POST /api/v1/sufler/suggest — FR-CC-03 / FR-CC-14."""
     try:
-        text, limit, client_history, dialog_context = _parse_suggest_body(
-            request.body
-        )
+        (
+            text,
+            limit,
+            client_history,
+            dialog_context,
+            kb_slugs,
+            channel,
+            mode,
+        ) = _parse_suggest_body(request.body)
         result = suggest(
             text,
             limit=limit,
             request_id=getattr(request, "audit_request_id", None),
             client_history=client_history,
             dialog_context=dialog_context,
+            kb_slugs=kb_slugs,
+            channel=channel,
+            mode=mode,
         )
     except SuflerOrchestratorError as exc:
         return JsonResponse(

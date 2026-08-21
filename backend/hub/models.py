@@ -355,3 +355,62 @@ class AssistantCapability(models.Model):
 
     def __str__(self) -> str:
         return self.code
+
+
+class SuflerPolicy(models.Model):
+    """Operator hint guardrails for sufler_cc (II.3.5.2 / FR-UND-13 / FR-SUF-08/13)."""
+
+    MODE_CONSULTATION = "consultation"
+    MODE_SERVICE = "service"
+    MODE_CHOICES = (
+        (MODE_CONSULTATION, "Консультация"),
+        (MODE_SERVICE, "Услуга"),
+    )
+
+    telephony_min_relevance_percent = models.PositiveSmallIntegerField(default=20)
+    clarify_min_relevance_percent = models.PositiveSmallIntegerField(default=15)
+    max_hints = models.PositiveSmallIntegerField(default=1)
+    default_mode = models.CharField(
+        max_length=16,
+        choices=MODE_CHOICES,
+        default=MODE_CONSULTATION,
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=150, blank=True, default="")
+
+    class Meta:
+        verbose_name = "Sufler policy"
+        verbose_name_plural = "Sufler policies"
+
+    def clean(self) -> None:
+        errors: dict[str, str] = {}
+        for field_name in (
+            "telephony_min_relevance_percent",
+            "clarify_min_relevance_percent",
+        ):
+            value = int(getattr(self, field_name))
+            if not 0 <= value <= 100:
+                errors[field_name] = "Порог должен быть от 0 до 100%."
+        if not 1 <= int(self.max_hints) <= 5:
+            errors["max_hints"] = "На реплику допускается от 1 до 5 подсказок."
+        if self.default_mode not in {self.MODE_CONSULTATION, self.MODE_SERVICE}:
+            errors["default_mode"] = "Режим должен быть консультация или услуга."
+        floor = int(self.telephony_min_relevance_percent)
+        if int(self.clarify_min_relevance_percent) > floor:
+            errors["clarify_min_relevance_percent"] = (
+                "Порог уточнения не может быть выше порога подсказки."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def min_relevance_for_channel(self, channel: str) -> float:
+        """Single operator floor for telephony and online chat."""
+        _ = channel
+        return int(self.telephony_min_relevance_percent) / 100
+
+    def __str__(self) -> str:
+        return f"sufler-policy max={self.max_hints}"

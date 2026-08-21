@@ -53,7 +53,25 @@ from hub.model_registry_store import (
     update_model_settings,
 )
 from hub.models import ContactCenterKnowledgeBase
-from qu.service import preview_query
+from hub.sufler_policy import (
+    get_sufler_policy,
+    serialize_sufler_policy,
+    update_sufler_policy,
+)
+from qu.admin_service import (
+    QuAdminError,
+    create_example,
+    delete_example,
+    list_bindable_documents,
+    list_examples,
+    review_example,
+    serialize_example,
+    serialize_policy,
+    update_example,
+    update_policy,
+)
+from qu.models import QuReferenceExample
+from qu.assistant_retrieval import preview_admin_query
 
 
 ADMIN_ROLES = (
@@ -206,6 +224,77 @@ def model_params(request: HttpRequest) -> JsonResponse:
     return JsonResponse(serialize_model_settings(instance))
 
 
+SUFLER_POLICY_ROLES = (
+    "software_administrator",
+    "llm_knowledge_base_administrator",
+    "contact_center_module_administrator",
+)
+
+
+def _parse_sufler_policy_payload(request: HttpRequest) -> dict[str, Any]:
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError("Request body must be valid JSON") from exc
+    if not isinstance(body, Mapping):
+        raise ValueError("Request body must be a JSON object")
+    allowed = {
+        "telephony_min_relevance_percent",
+        "clarify_min_relevance_percent",
+        "max_hints",
+        "default_mode",
+    }
+    unknown = set(body) - allowed
+    if unknown:
+        raise ValueError(f"Unknown fields: {', '.join(sorted(unknown))}")
+    payload: dict[str, Any] = {}
+    for field in (
+        "telephony_min_relevance_percent",
+        "clarify_min_relevance_percent",
+        "max_hints",
+    ):
+        if field not in body:
+            continue
+        try:
+            payload[field] = int(body[field])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field} must be an integer") from exc
+    if "default_mode" in body:
+        mode = str(body.get("default_mode") or "").strip()
+        if not mode:
+            raise ValueError("default_mode must be a non-empty string")
+        payload["default_mode"] = mode
+    if not payload:
+        raise ValueError("No policy fields to update")
+    return payload
+
+
+@require_http_methods(["GET", "PUT"])
+@roles_required(*SUFLER_POLICY_ROLES, api=True)
+def sufler_policies(request: HttpRequest) -> JsonResponse:
+    try:
+        if request.method == "PUT":
+            payload = _parse_sufler_policy_payload(request)
+            instance = update_sufler_policy(
+                payload,
+                username=request.user.get_username(),
+            )
+        else:
+            instance = get_sufler_policy()
+    except ValidationError as exc:
+        details = getattr(exc, "message_dict", {"form": exc.messages})
+        return JsonResponse(
+            {"error": "validation_error", "details": details},
+            status=400,
+        )
+    except (TypeError, ValueError) as exc:
+        return JsonResponse(
+            {"error": "validation_error", "details": {"form": [str(exc)]}},
+            status=400,
+        )
+    return JsonResponse(serialize_sufler_policy(instance))
+
+
 @require_http_methods(["POST"])
 @require_permissions(PERM_QU_ADMIN, api=True)
 def qu_preview(request: HttpRequest) -> JsonResponse:
@@ -219,7 +308,7 @@ def qu_preview(request: HttpRequest) -> JsonResponse:
         limit = body.get("limit", 5)
         if isinstance(limit, bool) or not isinstance(limit, int):
             raise ValueError("limit must be an integer")
-        result = preview_query(query, limit=limit)
+        result = preview_admin_query(query, limit=limit)
     except json.JSONDecodeError:
         return JsonResponse(
             {
@@ -237,6 +326,87 @@ def qu_preview(request: HttpRequest) -> JsonResponse:
             status=400,
         )
     return JsonResponse(result)
+
+
+def _qu_admin_error(exc: Exception) -> JsonResponse:
+    return JsonResponse(
+        {
+            "error": "validation_error",
+            "details": {"request": [str(exc)]},
+        },
+        status=400,
+    )
+
+
+@require_http_methods(["GET", "POST"])
+@require_permissions(PERM_QU_ADMIN, api=True)
+def qu_examples(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        status = str(request.GET.get("status") or "").strip()
+        return JsonResponse(list_examples(status=status))
+    try:
+        body = _parse_json_object(request)
+        created = create_example(body, username=request.user.get_username())
+    except (AssistantAdminError, QuAdminError) as exc:
+        return _qu_admin_error(exc)
+    return JsonResponse(created, status=201)
+
+
+@require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
+@require_permissions(PERM_QU_ADMIN, api=True)
+def qu_example_detail(request: HttpRequest, example_id: int) -> JsonResponse:
+    try:
+        if request.method == "GET":
+            item = QuReferenceExample.objects.get(pk=example_id)
+            return JsonResponse(serialize_example(item))
+        if request.method == "DELETE":
+            delete_example(example_id)
+            return JsonResponse({"ok": True})
+        body = _parse_json_object(request)
+        updated = update_example(example_id, body)
+    except QuReferenceExample.DoesNotExist:
+        return JsonResponse({"error": "not_found"}, status=404)
+    except (AssistantAdminError, QuAdminError) as exc:
+        if str(exc) == "example not found":
+            return JsonResponse({"error": "not_found"}, status=404)
+        return _qu_admin_error(exc)
+    return JsonResponse(updated)
+
+
+@require_http_methods(["POST"])
+@require_permissions(PERM_QU_ADMIN, api=True)
+def qu_example_review(request: HttpRequest, example_id: int) -> JsonResponse:
+    try:
+        body = _parse_json_object(request)
+        updated = review_example(
+            example_id,
+            body,
+            username=request.user.get_username(),
+        )
+    except (AssistantAdminError, QuAdminError) as exc:
+        if str(exc) == "example not found":
+            return JsonResponse({"error": "not_found"}, status=404)
+        return _qu_admin_error(exc)
+    return JsonResponse(updated)
+
+
+@require_http_methods(["GET", "PUT", "PATCH"])
+@require_permissions(PERM_QU_ADMIN, api=True)
+def qu_policy(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        return JsonResponse(serialize_policy())
+    try:
+        body = _parse_json_object(request)
+        updated = update_policy(body, username=request.user.get_username())
+    except (AssistantAdminError, QuAdminError) as exc:
+        return _qu_admin_error(exc)
+    return JsonResponse(updated)
+
+
+@require_http_methods(["GET"])
+@require_permissions(PERM_QU_ADMIN, api=True)
+def qu_kb_documents(request: HttpRequest) -> JsonResponse:
+    return JsonResponse({"items": list_bindable_documents()})
 
 
 def _kb_validation_error(exc: Exception) -> JsonResponse:
@@ -550,3 +720,5 @@ def assistant_capability_detail(
             return JsonResponse({"error": "not_found"}, status=404)
         return _assistant_validation_error(exc)
     return JsonResponse(updated)
+
+

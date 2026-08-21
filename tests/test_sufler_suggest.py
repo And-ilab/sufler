@@ -29,6 +29,7 @@ from orchestrator.sufler import (  # noqa: E402
     SuflerOrchestratorError,
     suggest,
 )
+from qu.service import _lexical_score  # noqa: E402
 
 
 class SuflerSuggestPipelineTest(TestCase):
@@ -77,7 +78,7 @@ class SuflerSuggestPipelineTest(TestCase):
         hint = result["hints"][0]
         self.assertTrue(hint["text"].strip())
         self.assertNotIn("Подсказка оператору", hint["text"])
-        self.assertIn("СУЗ", hint["text"])
+        self.assertIn("оформить", hint["text"].casefold())
         self.assertTrue(hint["citations"])
         self.assertEqual(hint["citations"][0]["title"], "Оформление карты")
         self.assertTrue(
@@ -133,6 +134,29 @@ class SuflerSuggestPipelineTest(TestCase):
         self.assertEqual(result["hints"], [])
         self.assertEqual(result["blocked_reason"], "no_relevant_knowledge")
         self.assertEqual(result["latency_ms"]["llm"], 0.0)
+
+    def test_inflected_ru_query_still_finds_article(self):
+        self.add_chunk(
+            44,
+            "Блокировка карты",
+            "Заблокировать карту можно в мобильном приложении или по телефону контакт-центра.",
+        )
+        result = suggest(
+            "как заблокировать карту",
+            limit=1,
+            gateway=ModelGateway.from_registry(),
+        )
+        self.assertTrue(result["hints"], result.get("blocked_reason"))
+        self.assertIsNone(result["blocked_reason"])
+        self.assertIn("карт", result["hints"][0]["citations"][0]["title"].casefold())
+
+    def test_lexical_score_matches_card_inflections(self):
+        score = _lexical_score(
+            "как заблокировать карту",
+            "Блокировка карты",
+            "Карту блокируют в приложении банка.",
+        )
+        self.assertGreaterEqual(score, 0.2)
 
     def test_ungrounded_empty_index_still_returns_hint(self):
         with patch.dict(os.environ, {"SUFLER_ALLOW_UNGROUNDED": "1"}, clear=False):

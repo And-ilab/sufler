@@ -16,7 +16,13 @@ from hub.views import (
     knowledge_base_upload,
     knowledge_bases,
     model_params,
+    qu_example_detail,
+    qu_example_review,
+    qu_examples,
+    qu_kb_documents,
+    qu_policy,
     qu_preview,
+    sufler_policies,
 )
 
 
@@ -26,7 +32,17 @@ urlpatterns = [
         model_params,
         name="model_registry_model_params",
     ),
+    path("sufler/policies/", sufler_policies, name="sufler_policies"),
     path("qu/preview/", qu_preview, name="qu_preview"),
+    path("qu/examples/", qu_examples, name="qu_examples"),
+    path("qu/examples/<int:example_id>/", qu_example_detail, name="qu_example_detail"),
+    path(
+        "qu/examples/<int:example_id>/review/",
+        qu_example_review,
+        name="qu_example_review",
+    ),
+    path("qu/policy/", qu_policy, name="qu_policy"),
+    path("qu/documents/", qu_kb_documents, name="qu_kb_documents"),
     path("kb/", knowledge_bases, name="knowledge_bases"),
     path("kb/<int:kb_id>/", knowledge_base_detail, name="knowledge_base_detail"),
     path(

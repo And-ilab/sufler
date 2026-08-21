@@ -16,7 +16,13 @@ from typing import Any, Mapping, Sequence
 
 from core.model_gateway import ModelGateway
 from hub.model_registry_store import get_model_settings
+from hub.models import SuflerPolicy
+from hub.sufler_policy import get_sufler_policy
 from qu.service import (
+    _tokens,
+    complete_sentences,
+    extractive_answer,
+    focused_snippet,
     ignored_suz_fixtures_exist,
     is_suz_transfer_commission_doc,
     preview_query,
@@ -26,23 +32,27 @@ logger = logging.getLogger(__name__)
 
 PROFILE = "sufler_cc"
 KB_ID = "cc_production"
-DEFAULT_HINT_LIMIT = 3
+DEFAULT_HINT_LIMIT = 1
 MAX_HINT_LIMIT = 5
-# Operator-facing floor: never show hints below 20% relevance.
+# Fallback if policy row is missing: never show hints below 20% relevance.
 OPERATOR_MIN_RELEVANCE = 0.20
 # Prefer a second hint when it is reasonably close to the best match.
 SECOND_HINT_RELATIVE_FLOOR = 0.55
 
 SYSTEM_PROMPT = (
     "Ты суфлёр оператора контакт-центра Беларусбанка. "
-    "Отвечай ТОЛЬКО на основе переданных фрагментов СУЗ и контекста переписки. "
-    "Не выдумывай факты, цифры и условия.\n"
+    "Пиши ТОЛЬКО на грамотном литературном русском языке: "
+    "без латиницы, без транслита, без смеси языков, без опечаток "
+    "и без грамматических ошибок. "
+    "Отвечай СТРОГО на основе переданных фрагментов базы знаний. "
+    "Не выдумывай факты, цифры, тарифы, сроки и условия, которых нет во фрагментах.\n"
+    "Если во фрагментах есть точная цифра или срок — обязательно включи её в ОТВЕТ целиком.\n"
     "Учитывай весь диалог: уточнения клиента (тип карты, продукт и т.п.) "
     "должны влиять на формулировку ответа.\n"
     "Формат ответа СТРОГО (без markdown, без звёздочек *, без жирного):\n"
     "ОТВЕТ:\n"
     "<готовый текст ответа клиенту в изъявительном наклонении; "
-    "2–5 предложений. ЗАПРЕЩЕНО писать вопросы, в том числе риторические. "
+    "2–5 законченных предложений, без обрыва на полуслове. ЗАПРЕЩЕНО писать вопросы, в том числе риторические. "
     "Не копируй вопросы из статьи. Без «Уважаемый клиент» и без вводных фраз>\n"
     "СОВЕТ:\n"
     "<одна короткая ремарка оператору только если нужна; иначе оставь пустым>\n"
@@ -53,6 +63,35 @@ SYSTEM_PROMPT = (
 
 class SuflerOrchestratorError(ValueError):
     """Raised when suggest input or pipeline configuration is invalid."""
+
+
+def _policy_settings() -> SuflerPolicy:
+    try:
+        return get_sufler_policy()
+    except Exception:  # noqa: BLE001 — suggest must not fail if admin table is empty
+        logger.exception("sufler_policy_load_failed")
+        return SuflerPolicy(
+            telephony_min_relevance_percent=20,
+            clarify_min_relevance_percent=15,
+            max_hints=DEFAULT_HINT_LIMIT,
+            default_mode=SuflerPolicy.MODE_CONSULTATION,
+        )
+
+
+def _normalize_channel(channel: str) -> str:
+    key = (channel or "").strip().lower()
+    if key in {"online_chat", "chat", "widget"}:
+        return "online_chat"
+    return "telephony"
+
+
+def _normalize_mode(mode: str, *, default: str) -> str:
+    key = (mode or "").strip().lower()
+    if key in {SuflerPolicy.MODE_SERVICE, "usluga"}:
+        return SuflerPolicy.MODE_SERVICE
+    if key in {SuflerPolicy.MODE_CONSULTATION, "consult"}:
+        return SuflerPolicy.MODE_CONSULTATION
+    return default or SuflerPolicy.MODE_CONSULTATION
 
 
 def _elapsed_ms(started: float) -> float:
@@ -140,9 +179,18 @@ def _clean_answer_text(text: str) -> str:
     return result or cleaned
 
 
-def _snippet_as_answer(document: Mapping[str, Any]) -> str:
-    snippet = _strip_markup(str(document.get("snippet") or document.get("content") or ""))
-    return _clean_answer_text(snippet)
+def _snippet_as_answer(document: Mapping[str, Any], query: str = "") -> str:
+    raw = str(document.get("content") or document.get("snippet") or "")
+    extracted = extractive_answer(raw, query or str(document.get("title") or ""))
+    return _clean_answer_text(extracted) or extracted
+
+
+def _llm_misses_source(answer: str, document: Mapping[str, Any]) -> bool:
+    source_tokens = _tokens(str(document.get("content") or document.get("snippet") or ""))
+    answer_tokens = _tokens(answer)
+    if not source_tokens or not answer_tokens:
+        return True
+    return len(source_tokens & answer_tokens) < 2
 
 
 def _retrieval_query(text: str, dialog_context: str = "") -> str:
@@ -161,8 +209,12 @@ def _select_documents(
     *,
     limit: int,
     context_threshold: float,
+    allow_weak: bool = False,
+    query: str = "",
+    min_relevance: float = OPERATOR_MIN_RELEVANCE,
 ) -> list[Mapping[str, Any]]:
-    """Return 1…limit docs, never below OPERATOR_MIN_RELEVANCE (20%)."""
+    """Return 1…limit docs above the operator relevance floor from policy."""
+    floor_score = max(float(min_relevance), 0.0)
     pool = [
         document
         for document in documents
@@ -170,34 +222,43 @@ def _select_documents(
     ]
     if not pool:
         return []
-    floor = max(float(context_threshold), OPERATOR_MIN_RELEVANCE)
+    floor = max(float(context_threshold), floor_score)
     ranked = [
         document
         for document in pool
-        if float(document["relevance_score"]) > OPERATOR_MIN_RELEVANCE
+        if float(document["relevance_score"]) >= floor_score
         and float(document["relevance_score"]) >= floor
     ]
-    # Soft floor: still allow docs above 20% even if below registry threshold.
+    # Soft floor: still allow docs at/above the policy threshold even if below RAG.
     if not ranked:
         ranked = [
             document
             for document in pool
-            if float(document["relevance_score"]) > OPERATOR_MIN_RELEVANCE
+            if float(document["relevance_score"]) >= floor_score
         ]
+    if not ranked and allow_weak:
+        ranked = sorted(
+            pool,
+            key=lambda document: -float(document["relevance_score"]),
+        )[:limit]
     if not ranked:
         return []
+    ranked = _merge_article_chunks(ranked, query=query)
     selected: list[Mapping[str, Any]] = [ranked[0]]
     if limit >= 2:
         best = float(ranked[0]["relevance_score"])
         second_floor = max(
-            OPERATOR_MIN_RELEVANCE + 0.01,
+            0.0 if allow_weak else floor_score + 0.01,
             best * SECOND_HINT_RELATIVE_FLOOR,
         )
+        selected_ids = {selected[0]["article_id"]}
         for document in ranked[1:]:
-            if document["article_id"] == selected[0]["article_id"]:
+            if document["article_id"] in selected_ids:
                 continue
             if float(document["relevance_score"]) >= second_floor:
                 selected.append(document)
+                selected_ids.add(document["article_id"])
+            if len(selected) >= limit:
                 break
     return selected[:limit]
 
@@ -218,19 +279,60 @@ def _allow_ungrounded() -> bool:
     return _sufler_llm_configured()
 
 
+def _document_body(document: Mapping[str, Any]) -> str:
+    raw = str(document.get("content") or document.get("snippet") or "")
+    return complete_sentences(_strip_markup(raw), max_chars=6000)
+
+
+def _merge_article_chunks(
+    documents: Sequence[Mapping[str, Any]],
+    *,
+    query: str = "",
+) -> list[dict[str, Any]]:
+    """Join chunks of one file so the LLM sees the answering clause, not only the header."""
+    merged: dict[int, dict[str, Any]] = {}
+    order: list[int] = []
+    for document in documents:
+        article_id = int(document["article_id"])
+        body = str(document.get("content") or document.get("snippet") or "").strip()
+        if article_id not in merged:
+            order.append(article_id)
+            item = dict(document)
+            item["content"] = body
+            merged[article_id] = item
+            continue
+        current = merged[article_id]
+        if body and body not in current["content"]:
+            current["content"] = f"{current['content']}\n{body}".strip()
+        current["relevance_score"] = max(
+            float(current["relevance_score"]),
+            float(document["relevance_score"]),
+        )
+        current["relevance_percent"] = round(float(current["relevance_score"]) * 100)
+        if int(document.get("chunk_index") or 0) < int(current.get("chunk_index") or 0):
+            current["chunk_index"] = document["chunk_index"]
+    result: list[dict[str, Any]] = []
+    for article_id in order:
+        item = merged[article_id]
+        item["snippet"] = focused_snippet(item["content"], query, 1200)
+        result.append(item)
+    return result
+
+
 def _build_messages(
     query: str,
     documents: Sequence[Mapping[str, Any]],
     *,
     client_history: str = "",
     dialog_context: str = "",
+    kb_label: str = KB_ID,
 ) -> list[dict[str, str]]:
     context_blocks = []
     for document in documents:
         context_blocks.append(
             f"[{document['rank']}] {document['title']}\n"
             f"URL: {document['permalink']}\n"
-            f"{document['snippet']}"
+            f"{_document_body(document)}"
         )
     context = "\n\n".join(context_blocks)
     history_block = ""
@@ -253,9 +355,9 @@ def _build_messages(
             f"{history_block}"
             f"{dialog_block}"
             f"Последняя реплика клиента:\n{query}\n\n"
-            "Фрагменты СУЗ сейчас недоступны. Сформируй краткий ответ оператору "
+            "Фрагменты базы знаний сейчас недоступны. Сформируй краткий ответ оператору "
             "по общим правилам розничного банка. В СОВЕТЕ напиши, что формулировку "
-            "нужно сверить со статьёй СУЗ перед озвучиванием.\n"
+            "нужно сверить со статьёй базы знаний перед озвучиванием.\n"
             "Сформируй ответ по шаблону ОТВЕТ:/СОВЕТ:."
         )
         return [
@@ -263,8 +365,8 @@ def _build_messages(
                 "role": "system",
                 "content": (
                     SYSTEM_PROMPT
-                    + "\nЕсли фрагменты СУЗ не переданы, всё равно заполни ОТВЕТ "
-                    "осторожной формулировкой и укажи в СОВЕТЕ сверку с СУЗ."
+                    + "\nЕсли фрагменты базы знаний не переданы, всё равно заполни ОТВЕТ "
+                    "осторожной формулировкой и укажи в СОВЕТЕ сверку с базой знаний."
                 ),
             },
             {"role": "user", "content": user_content},
@@ -275,9 +377,10 @@ def _build_messages(
         f"{dialog_block}"
         f"Последняя реплика клиента:\n{query}\n\n"
         f"Основная статья для ответа: [{primary['rank']}] {primary['title']}\n\n"
-        f"Фрагменты базы знаний СУЗ ({KB_ID}):\n{context}\n\n"
-        "Сформируй ответ по шаблону ОТВЕТ:/СОВЕТ: с учётом переписки. "
-        "Если клиент уточнил детали (например, тип карты) — отрази это в ОТВЕТЕ."
+        f"Фрагменты выбранных баз знаний ({kb_label}):\n{context}\n\n"
+        "Сформируй ответ по шаблону ОТВЕТ:/СОВЕТ: строго по этим фрагментам. "
+        "Если клиент уточнил детали (например, тип карты) — отрази это в ОТВЕТЕ. "
+        "Пиши естественно и грамотно по-русски."
     )
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -322,6 +425,38 @@ def _log_latency(
     )
 
 
+def _normalize_kb_slugs(kb_slugs: Sequence[str] | None) -> list[str] | None:
+    if kb_slugs is None:
+        return None
+    return [
+        slug.strip()
+        for slug in kb_slugs
+        if isinstance(slug, str) and slug.strip()
+    ]
+
+
+def _retrieve_documents(
+    retrieval_text: str,
+    *,
+    limit: int,
+    kb_slugs: list[str] | None,
+) -> tuple[dict[str, Any], str]:
+    """Return QU result and kb label. Selected slugs search the same catalog as AI chat."""
+    if kb_slugs is None:
+        result = preview_query(retrieval_text, limit=max(limit, 5), snippet_chars=2000)
+        return result, KB_ID
+    if not kb_slugs:
+        return {"documents": []}, "none"
+    from qu.assistant_retrieval import preview_assistant_query
+
+    result = preview_assistant_query(
+        retrieval_text,
+        kb_slugs=kb_slugs,
+        limit=max(limit, 5),
+    )
+    return result, ",".join(kb_slugs)
+
+
 def suggest(
     text: str,
     *,
@@ -330,6 +465,9 @@ def suggest(
     request_id: str | None = None,
     client_history: str = "",
     dialog_context: str = "",
+    kb_slugs: Sequence[str] | None = None,
+    channel: str = "",
+    mode: str = "",
 ) -> dict[str, Any]:
     """Run text → QU → RAG → ModelGateway(sufler_cc) → citations."""
     normalized = text.strip() if isinstance(text, str) else ""
@@ -342,14 +480,48 @@ def suggest(
             f"limit must be between 1 and {MAX_HINT_LIMIT}"
         )
 
+    policy = _policy_settings()
+    channel_key = _normalize_channel(channel)
+    resolved_mode = _normalize_mode(mode, default=policy.default_mode)
+    min_relevance = float(policy.min_relevance_for_channel(channel_key))
+    limit = min(limit, max(1, int(policy.max_hints)))
+
     correlation_id = request_id or str(uuid.uuid4())
     total_started = time.perf_counter()
     latency_ms = {"qu": 0.0, "rag": 0.0, "llm": 0.0, "total": 0.0}
     retrieval_text = _retrieval_query(normalized, dialog_context)
+    selected_slugs = _normalize_kb_slugs(kb_slugs)
+    grounded_only = selected_slugs is not None
+    kb_label = KB_ID
+
+    if resolved_mode == SuflerPolicy.MODE_SERVICE:
+        latency_ms["total"] = _elapsed_ms(total_started)
+        _log_latency(
+            request_id=correlation_id,
+            latency_ms=latency_ms,
+            hint_count=0,
+            document_count=0,
+        )
+        return {
+            "query": normalized,
+            "profile": PROFILE,
+            "kb_id": kb_label,
+            "kb_slugs": selected_slugs or [],
+            "hints": [],
+            "citations_enabled": True,
+            "blocked_reason": "service_mode",
+            "min_relevance": min_relevance,
+            "latency_ms": latency_ms,
+            "request_id": correlation_id,
+        }
 
     qu_started = time.perf_counter()
     try:
-        qu_result = preview_query(retrieval_text, limit=max(limit, 5))
+        qu_result, kb_label = _retrieve_documents(
+            retrieval_text,
+            limit=limit,
+            kb_slugs=selected_slugs,
+        )
     except Exception:
         logger.exception(
             "sufler_qu_failed request_id=%s",
@@ -366,17 +538,23 @@ def suggest(
         qu_result["documents"],
         limit=limit,
         context_threshold=context_threshold,
+        allow_weak=bool(selected_slugs),
+        query=retrieval_text,
+        min_relevance=min_relevance,
     )
     latency_ms["rag"] = _elapsed_ms(rag_started)
 
     if not documents:
-        # Empty index or nothing above 20% relevance.
+        # Empty index or nothing above the policy relevance floor.
         empty_reason = (
             "sufler_unavailable"
-            if not qu_result["documents"]
+            if not qu_result.get("documents")
             else "no_relevant_knowledge"
         )
-        if not _allow_ungrounded() and not ignored_suz_fixtures_exist():
+        skip_ungrounded = grounded_only or (
+            not _allow_ungrounded() and not ignored_suz_fixtures_exist()
+        )
+        if skip_ungrounded:
             latency_ms["total"] = _elapsed_ms(total_started)
             _log_latency(
                 request_id=correlation_id,
@@ -387,17 +565,15 @@ def suggest(
             return {
                 "query": normalized,
                 "profile": PROFILE,
-                "kb_id": KB_ID,
+                "kb_id": kb_label,
+                "kb_slugs": selected_slugs or [],
                 "hints": [],
                 "citations_enabled": True,
                 "blocked_reason": empty_reason,
-                "min_relevance": OPERATOR_MIN_RELEVANCE,
+                "min_relevance": min_relevance,
                 "latency_ms": latency_ms,
                 "request_id": correlation_id,
             }
-        ungrounded = True
-    else:
-        ungrounded = False
 
     llm_started = time.perf_counter()
     active_gateway = gateway or ModelGateway.from_registry()
@@ -409,17 +585,21 @@ def suggest(
                 documents,
                 client_history=client_history,
                 dialog_context=dialog_context,
+                kb_label=kb_label,
             ),
             temperature=float(settings.temperature),
             top_p=float(settings.top_p),
             max_tokens=int(settings.max_tokens),
         )
         llm_text = _extract_llm_text(llm_response)
-        if len(llm_text) > int(settings.response_chars_max):
-            llm_text = llm_text[: int(settings.response_chars_max)].rstrip()
+        char_limit = max(int(settings.response_chars_max), 400)
         answer_text, operator_tip = _parse_llm_hint(llm_text)
         cleaned = _clean_answer_text(answer_text)
-        answer_text = cleaned or answer_text
+        answer_text = complete_sentences(cleaned or answer_text, max_chars=char_limit)
+        if documents and _llm_misses_source(answer_text, documents[0]):
+            grounded = _snippet_as_answer(documents[0], normalized)
+            if grounded:
+                answer_text = grounded
     except Exception:  # noqa: BLE001 — fall back to KB snippets
         logger.exception("sufler_llm_failed request_id=%s", correlation_id)
         answer_text, operator_tip = "", ""
@@ -429,25 +609,25 @@ def suggest(
 
     if not answer_text:
         if documents:
-            answer_text = _snippet_as_answer(documents[0])
+            answer_text = _snippet_as_answer(documents[0], normalized)
         if not answer_text:
             answer_text = (
-                "В базе СУЗ нет подходящей статьи по этой реплике. "
+                "В выбранных базах знаний нет подходящей статьи по этой реплике. "
                 "Оформите продукт в отделении с паспортом либо через "
                 "интернет-банк / мобильное приложение. Перед ответом "
-                "сверьте актуальные условия в СУЗ."
+                "сверьте актуальные условия в базе знаний."
             )
-            operator_tip = operator_tip or "Сверить формулировку со статьёй СУЗ."
+            operator_tip = operator_tip or "Сверить формулировку со статьёй базы знаний."
 
     hints: list[dict[str, Any]] = []
     for index, document in enumerate(documents):
-        if float(document["relevance_score"]) <= OPERATOR_MIN_RELEVANCE:
+        if float(document["relevance_score"]) < min_relevance and not selected_slugs:
             continue
         if index == 0:
             hint_text = answer_text
             tip = operator_tip
         else:
-            hint_text = _snippet_as_answer(document)
+            hint_text = _snippet_as_answer(document, normalized)
             tip = ""
         if not hint_text:
             continue
@@ -463,20 +643,20 @@ def suggest(
         )
     if answer_text and not hints:
         source = documents[0] if documents else None
-        hints.append(
-            {
-                "rank": 1,
-                "text": answer_text,
-                "operator_tip": operator_tip,
-                "relevance_score": (
-                    float(source["relevance_score"]) if source else 0.5
-                ),
-                "relevance_percent": (
-                    int(source["relevance_percent"]) if source else 50
-                ),
-                "citations": [_citation(source)] if source else [],
-            }
-        )
+        source_score = float(source["relevance_score"]) if source else 0.5
+        if source is None or source_score >= min_relevance or selected_slugs:
+            hints.append(
+                {
+                    "rank": 1,
+                    "text": answer_text,
+                    "operator_tip": operator_tip,
+                    "relevance_score": source_score,
+                    "relevance_percent": (
+                        int(source["relevance_percent"]) if source else 50
+                    ),
+                    "citations": [_citation(source)] if source else [],
+                }
+            )
     if not hints:
         latency_ms["total"] = _elapsed_ms(total_started)
         _log_latency(
@@ -488,11 +668,12 @@ def suggest(
         return {
             "query": normalized,
             "profile": PROFILE,
-            "kb_id": KB_ID,
+            "kb_id": kb_label,
+            "kb_slugs": selected_slugs or [],
             "hints": [],
             "citations_enabled": True,
             "blocked_reason": "no_relevant_knowledge",
-            "min_relevance": OPERATOR_MIN_RELEVANCE,
+            "min_relevance": min_relevance,
             "latency_ms": latency_ms,
             "request_id": correlation_id,
         }
@@ -507,11 +688,12 @@ def suggest(
     return {
         "query": normalized,
         "profile": PROFILE,
-        "kb_id": KB_ID,
+        "kb_id": kb_label,
+        "kb_slugs": selected_slugs or [],
         "hints": hints,
         "citations_enabled": True,
         "blocked_reason": None,
-        "min_relevance": OPERATOR_MIN_RELEVANCE,
+        "min_relevance": min_relevance,
         "latency_ms": latency_ms,
         "request_id": correlation_id,
         "gateway_model": active_gateway.get_profile(PROFILE).model,

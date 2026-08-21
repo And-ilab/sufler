@@ -268,7 +268,10 @@ export async function submitSuflerHintFeedback(payload: {
   choice: 'used' | 'not_used' | 'partial'
   relevance_percent?: number
   citation_title?: string
+  kb_id?: string
   request_id?: string
+  source?: string
+  call_id?: string
 }): Promise<void> {
   const response = await fetch('/api/v1/online-chat/sufler-feedback/', {
     method: 'POST',
@@ -438,7 +441,9 @@ export async function fetchClientHistory(params: {
   if (params.dialogId) query.set('dialog_id', params.dialogId)
   if (params.phone) query.set('phone', params.phone)
   if (params.externalId) query.set('external_id', params.externalId)
-  const response = await fetch(`/api/v1/online-chat/history/?${query.toString()}`)
+  const response = await fetch(`/api/v1/online-chat/history/?${query.toString()}`, {
+    credentials: 'include',
+  })
   return parseJson<ClientHistoryResponse>(response)
 }
 

@@ -11,6 +11,7 @@ export interface CcAnalyticsFilters {
   topic?: string
   status?: string
   department?: string
+  scope?: 'chat' | 'sufler' | string
 }
 
 export interface CcAnalyticsSummary {
@@ -129,6 +130,8 @@ export interface CatalogReportMeta {
   fr: string
   label: string
   default_view: string
+  group?: string
+  description?: string
 }
 
 export interface CatalogPayload {
@@ -182,6 +185,7 @@ function toQuery(
   if (filters.topic) params.set('topic', filters.topic)
   if (filters.status) params.set('status', filters.status)
   if (filters.department) params.set('department', filters.department)
+  if (filters.scope) params.set('scope', filters.scope)
   for (const [key, value] of Object.entries(extra)) {
     if (value) params.set(key, value)
   }

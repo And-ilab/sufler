@@ -3,6 +3,7 @@ import { BarChartView, DataTable, PieChartView } from './charts'
 import {
   CHANNEL_OPTIONS,
   CLOSE_TOPICS,
+  SUFLER_REPORT_IDS,
   type ReportViewMode,
 } from './demoData'
 import {
@@ -52,12 +53,25 @@ function downloadCsv(filename: string, headers: string[], rows: string[][]) {
 
 export function CcReportsScreen({
   initialPanel = 'reports',
+  initialReport,
+  scope = 'chat',
 }: {
   initialPanel?: 'reports' | 'builder'
+  initialReport?: string
+  scope?: 'chat' | 'sufler'
 }) {
+  const sufler = scope === 'sufler'
+  const channelOptions = CHANNEL_OPTIONS.filter((item) => item.value !== 'phone')
   const [panel, setPanel] = useState<'reports' | 'builder'>(initialPanel)
   const [catalogMeta, setCatalogMeta] = useState<CatalogReportMeta[]>([])
-  const [reportType, setReportType] = useState('chat-period')
+  const [reportType, setReportType] = useState(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get('report') || ''
+    const fallback = initialReport || (sufler ? 'usefulness' : 'chat-period')
+    if (sufler && fromUrl && !SUFLER_REPORT_IDS.has(fromUrl)) {
+      return fallback
+    }
+    return fromUrl || fallback
+  })
   const [viewMode, setViewMode] = useState<ReportViewMode>('bar')
   const [filtersOpen, setFiltersOpen] = useState(true)
   const [periodFrom, setPeriodFrom] = useState(isoDaysAgo(13))
@@ -83,20 +97,31 @@ export function CcReportsScreen({
     )
   }, [catalogMeta, payload, reportType])
 
+  const catalogForUi = useMemo(() => {
+    if (!sufler) return catalogMeta
+    return catalogMeta.filter((item) => SUFLER_REPORT_IDS.has(item.id))
+  }, [catalogMeta, sufler])
+
   const loadReport = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const messenger = channel === 'all' || channel === 'phone' ? '' : channel
-      const data = await fetchCcCatalog({
-        date_from: periodFrom,
-        date_to: periodTo,
-        channel: 'online_chat',
-        report: reportType,
-        messenger,
-        topic: topic === 'all' ? '' : topic,
-        status: dialogueStatus === 'all' ? '' : dialogueStatus,
-      })
+      const data = sufler
+        ? await fetchCcCatalog({
+            date_from: periodFrom,
+            date_to: periodTo,
+            report: reportType,
+            scope: 'sufler',
+          })
+        : await fetchCcCatalog({
+            date_from: periodFrom,
+            date_to: periodTo,
+            channel: 'online_chat',
+            report: reportType,
+            messenger: channel === 'all' || channel === 'phone' ? '' : channel,
+            topic: topic === 'all' ? '' : topic,
+            status: dialogueStatus === 'all' ? '' : dialogueStatus,
+          })
       setPayload(data)
       setCatalogMeta(data.catalog || [])
       const nextView = (data.report.default_view || 'table') as ReportViewMode
@@ -114,7 +139,7 @@ export function CcReportsScreen({
     } finally {
       setLoading(false)
     }
-  }, [channel, dialogueStatus, periodFrom, periodTo, reportType, topic])
+  }, [channel, dialogueStatus, periodFrom, periodTo, reportType, sufler, topic])
 
   useEffect(() => {
     if (panel === 'reports') {
@@ -122,8 +147,17 @@ export function CcReportsScreen({
     }
   }, [panel, loadReport])
 
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (reportType) {
+      url.searchParams.set('report', reportType)
+      window.history.replaceState({}, '', `${url.pathname}${url.search}`)
+    }
+  }, [reportType])
+
   const table = useMemo(() => rowsToTable((payload?.rows || []) as Record<string, unknown>[]), [payload])
   const chart = payload?.chart || []
+  const chartUsable = chart.length >= 1
   const pieData = chart.map((item, index) => ({
     label: item.label,
     value: item.value,
@@ -133,8 +167,8 @@ export function CcReportsScreen({
   const barSeries = [{ name: selected.label, data: chart.map((item) => item.value) }]
 
   const channelLabel =
-    CHANNEL_OPTIONS.find((item) => item.value === channel)?.label ?? 'Все каналы чата'
-  const filtersSummary = `${periodFrom} — ${periodTo} · ${channelLabel}`
+    channelOptions.find((item) => item.value === channel)?.label ?? 'Все каналы'
+  const filtersSummary = sufler ? `${periodFrom} — ${periodTo}` : `${periodFrom} — ${periodTo} · ${channelLabel}`
 
   const exportCurrentCsv = () => {
     downloadCsv(`${selected.label}.csv`, table.headers, table.rows)
@@ -145,12 +179,19 @@ export function CcReportsScreen({
     setError(null)
     try {
       const { blob, filename } = await downloadCcExport(
-        {
-          date_from: periodFrom,
-          date_to: periodTo,
-          channel: 'online_chat',
-          report: reportType,
-        },
+        sufler
+          ? {
+              date_from: periodFrom,
+              date_to: periodTo,
+              report: reportType,
+              scope: 'sufler',
+            }
+          : {
+              date_from: periodFrom,
+              date_to: periodTo,
+              channel: 'online_chat',
+              report: reportType,
+            },
         format,
       )
       triggerBrowserDownload(blob, filename)
@@ -166,15 +207,17 @@ export function CcReportsScreen({
   }
 
   return (
-    <div className="rpt-body" data-testid="cc-reports-screen">
-      <div className="rpt-row rpt-row--end">
-        <button type="button" className="rpt-pill is-active" onClick={() => setPanel('reports')}>
-          Готовые отчёты
-        </button>
-        <button type="button" className="rpt-pill" onClick={() => setPanel('builder')}>
-          Конструктор
-        </button>
-      </div>
+    <div className="rpt-body" data-testid={sufler ? 'sufler-reports-screen' : 'cc-reports-screen'}>
+      {sufler ? null : (
+        <div className="rpt-row rpt-row--end">
+          <button type="button" className="rpt-pill is-active" onClick={() => setPanel('reports')}>
+            Готовые отчёты
+          </button>
+          <button type="button" className="rpt-pill" onClick={() => setPanel('builder')}>
+            Конструктор
+          </button>
+        </div>
+      )}
 
       <div className="rpt-card">
         <div className="rpt-card__head">
@@ -199,8 +242,8 @@ export function CcReportsScreen({
                   value={reportType}
                   onChange={(event) => setReportType(event.target.value)}
                 >
-                  {(catalogMeta.length
-                    ? catalogMeta
+                  {(catalogForUi.length
+                    ? catalogForUi
                     : [{ id: reportType, label: selected.label, fr: '', default_view: 'table' }]
                   ).map((item) => (
                     <option key={item.id} value={item.id}>
@@ -217,40 +260,47 @@ export function CcReportsScreen({
                 Период по
                 <input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} />
               </label>
-              <label className="rpt-field">
-                Канал чата
-                <select value={channel} onChange={(e) => setChannel(e.target.value)}>
-                  {CHANNEL_OPTIONS.filter((item) => item.value !== 'phone').map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="rpt-field">
-                Тематика закрытия
-                <select value={topic} onChange={(e) => setTopic(e.target.value)}>
-                  <option value="all">Все тематики</option>
-                  {CLOSE_TOPICS.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="rpt-field">
-                Статус / outcome
-                <select value={dialogueStatus} onChange={(e) => setDialogueStatus(e.target.value)}>
-                  <option value="all">Все</option>
-                  <option value="closed">Закрыт</option>
-                  <option value="active">В работе</option>
-                  <option value="waiting">В очереди</option>
-                  <option value="offline">Офлайн</option>
-                  <option value="lost">Потерянный</option>
-                  <option value="rejected">Отказ клиента</option>
-                </select>
-              </label>
+              {sufler ? null : (
+                <>
+                  <label className="rpt-field">
+                    Канал чата
+                    <select value={channel} onChange={(e) => setChannel(e.target.value)}>
+                      {channelOptions.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="rpt-field">
+                    Тематика закрытия
+                    <select value={topic} onChange={(e) => setTopic(e.target.value)}>
+                      <option value="all">Все тематики</option>
+                      {CLOSE_TOPICS.map((item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="rpt-field">
+                    Статус / outcome
+                    <select value={dialogueStatus} onChange={(e) => setDialogueStatus(e.target.value)}>
+                      <option value="all">Все</option>
+                      <option value="closed">Закрыт</option>
+                      <option value="active">В работе</option>
+                      <option value="waiting">В очереди</option>
+                      <option value="offline">Офлайн</option>
+                      <option value="lost">Потерянный</option>
+                      <option value="rejected">Отказ клиента</option>
+                    </select>
+                  </label>
+                </>
+              )}
             </div>
+            {selected.description ? (
+              <p className="rpt-muted" style={{ margin: '8px 0 0' }}>{selected.description}</p>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -324,11 +374,24 @@ export function CcReportsScreen({
           {!loading && viewMode === 'table' ? (
             <DataTable headers={table.headers} rows={table.rows} />
           ) : null}
-          {!loading && viewMode === 'pie' && pieData.length ? <PieChartView data={pieData} /> : null}
-          {!loading && viewMode === 'bar' && barCategories.length ? (
+          {!loading && viewMode === 'pie' && chartUsable ? (
+            <PieChartView
+              data={pieData}
+              onSelect={
+                sufler && reportType === 'usefulness'
+                  ? (label) => {
+                      if (label.includes('Не воспользовался')) {
+                        setReportType('errors')
+                      }
+                    }
+                  : undefined
+              }
+            />
+          ) : null}
+          {!loading && viewMode === 'bar' && chartUsable ? (
             <BarChartView categories={barCategories} series={barSeries} />
           ) : null}
-          {!loading && viewMode !== 'table' && !chart.length ? (
+          {!loading && viewMode !== 'table' && !chartUsable ? (
             <DataTable headers={table.headers} rows={table.rows} />
           ) : null}
         </div>
