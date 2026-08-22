@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Mapping
 
 from django.db import transaction
@@ -104,8 +105,6 @@ def _clean_graph(raw: Any) -> dict[str, Any]:
             if not isinstance(edge, Mapping):
                 continue
             target = str(edge.get("to") or "").strip()
-            if not target:
-                continue
             keywords = edge.get("keywords") or []
             if not isinstance(keywords, list):
                 keywords = []
@@ -123,14 +122,14 @@ def _clean_graph(raw: Any) -> dict[str, Any]:
                 {
                     "to": target,
                     "label": str(edge.get("label") or "").strip(),
+                    "reply": str(edge.get("reply") or "").strip(),
                     "keywords": cleaned_keywords,
                 }
             )
         examples = node.get("examples") or []
         if not isinstance(examples, list):
             examples = []
-        cleaned.append(
-            {
+        clean_node = {
                 "id": node_id,
                 "type": str(node.get("type") or "answer").strip() or "answer",
                 "label": str(node.get("label") or node_id).strip(),
@@ -140,8 +139,50 @@ def _clean_graph(raw: Any) -> dict[str, Any]:
                 "intent_id": str(node.get("intent_id") or "").strip(),
                 "edges": edges,
             }
-        )
+        position = node.get("position")
+        if isinstance(position, Mapping):
+            try:
+                x = max(0.0, min(float(position.get("x", 0)), 10000.0))
+                y = max(0.0, min(float(position.get("y", 0)), 10000.0))
+                clean_node["position"] = {"x": round(x, 1), "y": round(y, 1)}
+            except (TypeError, ValueError):
+                pass
+        cleaned.append(clean_node)
     return {"nodes": cleaned}
+
+
+def backfill_missing_replies(
+    graph: Mapping[str, Any] | None,
+    catalog_graph: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], int]:
+    """Copy catalog replies into matching edges without changing other data."""
+    result = deepcopy(dict(graph or {}))
+    catalog_nodes = {
+        str(node.get("id") or ""): node
+        for node in _graph_nodes(catalog_graph)
+        if str(node.get("id") or "")
+    }
+    updated = 0
+    for node in _graph_nodes(result):
+        source_id = str(node.get("id") or "")
+        catalog_node = catalog_nodes.get(source_id)
+        if catalog_node is None:
+            continue
+        replies = {
+            str(edge.get("to") or ""): str(edge.get("reply") or "").strip()
+            for edge in catalog_node.get("edges") or []
+            if isinstance(edge, Mapping)
+            and str(edge.get("to") or "")
+            and str(edge.get("reply") or "").strip()
+        }
+        for edge in node.get("edges") or []:
+            if not isinstance(edge, dict) or str(edge.get("reply") or "").strip():
+                continue
+            reply = replies.get(str(edge.get("to") or ""))
+            if reply:
+                edge["reply"] = reply
+                updated += 1
+    return result, updated
 
 
 def _next_version_number(scenario: DialogScenario) -> int:

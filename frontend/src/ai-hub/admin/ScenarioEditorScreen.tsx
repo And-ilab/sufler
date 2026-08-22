@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Card, StatusBadge } from '../../components'
+import { useCallback, useEffect, useState } from 'react'
+import { Button, StatusBadge } from '../../components'
 import {
   createDialogScenario,
   getDialogScenario,
   listDialogScenarios,
   saveDialogScenario,
+  type ScenarioChannel,
   type ScenarioDetail,
+  type ScenarioEdge,
   type ScenarioGraph,
   type ScenarioListItem,
   type ScenarioNode,
@@ -14,68 +16,78 @@ import {
   createScenarioNode,
   duplicateScenarioNode,
   removeScenarioNode,
-  updateClientVariant,
-  updateClientVariantTarget,
+  updateClientReply,
   validateScenario,
 } from './scenarioGraphAdapter'
-import {
-  ScenarioConstructor,
-  ScenarioScheme,
-  ScenarioTestPreview,
-} from './ScenarioEditorWorkspace'
+import { ScenarioTestPreview, ScenarioWorkspace } from './ScenarioEditorWorkspace'
 import './ScenarioEditor.css'
 
 interface ScenarioEditorScreenProps {
   canEdit: boolean
+  initialCode?: string
+  onBack?: () => void
   onOpenTest?: (code: string) => void
+  onScenarioCreated?: (code: string) => void
 }
 
-function channelLabel(channel: string): string {
-  if (channel === 'telephony') return 'Телефония'
-  if (channel === 'online_chat') return 'Онлайн-чат'
-  return 'Телефония и чат'
+interface NewScenarioForm {
+  title: string
+  rootQuestion: string
+  channels: ScenarioChannel
 }
 
-export function ScenarioEditorScreen({ canEdit, onOpenTest }: ScenarioEditorScreenProps) {
+export function ScenarioEditorScreen({
+  canEdit,
+  initialCode = '',
+  onBack,
+  onOpenTest,
+  onScenarioCreated,
+}: ScenarioEditorScreenProps) {
   const [items, setItems] = useState<ScenarioListItem[]>([])
-  const [counts, setCounts] = useState({ total: 0, production: 0, draft: 0 })
-  const [selected, setSelected] = useState('')
+  const [selected, setSelected] = useState(initialCode)
   const [detail, setDetail] = useState<ScenarioDetail | null>(null)
-  const [mode, setMode] = useState<'constructor' | 'scheme'>('constructor')
-  const [nodeId, setNodeId] = useState('')
-  const [query, setQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'production' | 'draft'>('all')
+  const [pathIds, setPathIds] = useState<string[]>([])
   const [message, setMessage] = useState('')
   const [publishIssues, setPublishIssues] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [newForm, setNewForm] = useState<NewScenarioForm>({
+    title: '',
+    rootQuestion: '',
+    channels: 'both',
+  })
 
   const loadList = useCallback(async () => {
     try {
       const payload = await listDialogScenarios()
       setItems(payload.items)
-      setCounts(payload.counts)
-      setSelected((current) => current || payload.items[0]?.code || '')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Не удалось загрузить сценарии')
     }
   }, [])
 
+  useEffect(() => { void loadList() }, [loadList])
   useEffect(() => {
-    void loadList()
-  }, [loadList])
+    setSelected(initialCode)
+    if (initialCode === 'new') {
+      setDetail(null)
+      setPathIds([])
+      setMessage('')
+    }
+  }, [initialCode])
 
   useEffect(() => {
-    if (!selected) {
-      setDetail(null)
+    if (!selected || selected === 'new') {
+      if (selected !== 'new') setDetail(null)
       return
     }
     let cancelled = false
     void getDialogScenario(selected)
       .then((payload) => {
         if (cancelled) return
+        const start = payload.graph.nodes.find((node) => node.type === 'start') ?? payload.graph.nodes[0]
         setDetail(payload)
-        setNodeId(payload.graph.nodes.find((node) => node.type === 'start')?.id ?? payload.graph.nodes[0]?.id ?? '')
+        setPathIds(start ? [start.id] : [])
         setPublishIssues([])
         setMessage('')
       })
@@ -85,26 +97,32 @@ export function ScenarioEditorScreen({ canEdit, onOpenTest }: ScenarioEditorScre
     return () => { cancelled = true }
   }, [selected])
 
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    return items.filter((item) => (
-      (statusFilter === 'all' || item.status === statusFilter)
-      && (!needle || item.code.toLowerCase().includes(needle) || item.title.toLowerCase().includes(needle))
-    ))
-  }, [items, query, statusFilter])
-
   const nodes = detail?.graph.nodes ?? []
-  const activeIndex = Math.max(0, nodes.findIndex((node) => node.id === nodeId))
-  const activeNode = nodes[activeIndex]
+  const path = pathIds.map((id) => nodes.find((node) => node.id === id)).filter((node): node is ScenarioNode => Boolean(node))
+  const issueNodeIds = new Set<string>()
+  publishIssues.forEach((issue) => {
+    nodes.forEach((node) => {
+      if (issue.includes(`«${node.label || node.id}»`) || issue.startsWith(`${node.label}:`)) {
+        issueNodeIds.add(node.id)
+      }
+    })
+  })
 
   const updateGraph = (graph: ScenarioGraph) => {
     setDetail((current) => current ? { ...current, graph } : current)
     setPublishIssues([])
   }
 
-  const patchNode = (patch: Partial<ScenarioNode>) => {
-    if (!activeNode) return
-    updateGraph({ nodes: nodes.map((node) => node.id === activeNode.id ? { ...node, ...patch } : node) })
+  const patchNode = (nodeId: string, patch: Partial<ScenarioNode>) => {
+    updateGraph({ nodes: nodes.map((node) => node.id === nodeId ? { ...node, ...patch } : node) })
+  }
+
+  const patchEdge = (nodeId: string, edgeIndex: number, patch: Partial<ScenarioEdge>) => {
+    updateGraph({
+      nodes: nodes.map((node) => node.id === nodeId
+        ? { ...node, edges: node.edges.map((edge, index) => index === edgeIndex ? { ...edge, ...patch } : edge) }
+        : node),
+    })
   }
 
   const handleSave = async (publish: boolean) => {
@@ -141,17 +159,19 @@ export function ScenarioEditorScreen({ canEdit, onOpenTest }: ScenarioEditorScre
   }
 
   const handleCreate = async () => {
-    if (!canEdit) return
+    if (!canEdit || !newForm.title.trim() || !newForm.rootQuestion.trim()) return
     let next = items.length + 1
     const codes = new Set(items.map((item) => item.code))
     while (codes.has(`CC-SCR-${String(next).padStart(3, '0')}`)) next += 1
     const code = `CC-SCR-${String(next).padStart(3, '0')}`
     setCreating(true)
+    setMessage('')
     try {
       const created = await createDialogScenario({
         code,
-        title: 'Новый сценарий',
-        root_question: '',
+        title: newForm.title.trim(),
+        root_question: newForm.rootQuestion.trim(),
+        channels: newForm.channels,
         graph: {
           nodes: [{
             id: 'start',
@@ -159,17 +179,18 @@ export function ScenarioEditorScreen({ canEdit, onOpenTest }: ScenarioEditorScre
             label: 'Начало разговора',
             hint_text: '',
             clarify_text: '',
-            examples: [],
+            examples: [newForm.rootQuestion.trim()],
             intent_id: code,
             edges: [],
           }],
         },
       })
-      await loadList()
       setSelected(created.code)
       setDetail(created)
-      setNodeId('start')
-      setMode('constructor')
+      setPathIds(['start'])
+      setNewForm({ title: '', rootQuestion: '', channels: 'both' })
+      await loadList()
+      onScenarioCreated?.(created.code)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Не удалось создать сценарий')
     } finally {
@@ -177,147 +198,177 @@ export function ScenarioEditorScreen({ canEdit, onOpenTest }: ScenarioEditorScre
     }
   }
 
-  const addNode = () => {
+  const createContinuation = (pathIndex: number, nodeId: string, edgeIndex: number) => {
     if (!detail) return
-    const node = createScenarioNode(detail.graph)
-    updateGraph({ nodes: [...nodes, node] })
-    setNodeId(node.id)
+    const source = nodes.find((node) => node.id === nodeId)
+    const edge = source?.edges[edgeIndex]
+    if (!source || !edge) return
+    const node = {
+      ...createScenarioNode(detail.graph),
+      label: edge.label && !/^Вариант \d+$/.test(edge.label) ? edge.label : 'Следующий шаг',
+      examples: (edge.reply ?? '').trim() ? [(edge.reply ?? '').trim()] : [],
+    }
+    const nextNodes = [...nodes, node].map((item) => item.id === nodeId
+      ? {
+          ...item,
+          edges: item.edges.map((itemEdge, index) => index === edgeIndex
+            ? { ...itemEdge, to: node.id }
+            : itemEdge),
+        }
+      : item)
+    updateGraph({ nodes: nextNodes })
+    setPathIds((current) => [...current.slice(0, pathIndex + 1), node.id])
+    window.requestAnimationFrame(() => document.getElementById(`scenario-step-${node.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
   }
 
-  const duplicateNode = () => {
-    if (!detail || !activeNode) return
-    const node = duplicateScenarioNode(detail.graph, activeNode)
-    updateGraph({ nodes: [...nodes, node] })
-    setNodeId(node.id)
+  if (selected === 'new') {
+    return (
+      <div className="scr-editor" data-testid="scenario-editor">
+        <header className="scr-editor__head">
+          <div className="scr-editor__identity">
+            {onBack ? <button type="button" onClick={onBack}>← Все сценарии</button> : null}
+            <div><span>НОВЫЙ СЦЕНАРИЙ</span><h2>Сначала настройте вход в разговор</h2></div>
+          </div>
+        </header>
+        <section className="scr-create">
+          <header>
+            <span>Шаг 1 из 2</span>
+            <h2>Основные данные</h2>
+            <p>После создания вы сразу добавите вопрос оператора, варианты клиента и продолжения.</p>
+          </header>
+          <div className="scr-create__fields">
+            <label>
+              <span>Название сценария *</span>
+              <input
+                autoFocus
+                value={newForm.title}
+                placeholder="Например: Открытие счёта ребёнку"
+                onChange={(event) => setNewForm((current) => ({ ...current, title: event.target.value }))}
+              />
+              <small>Короткое название для каталога.</small>
+            </label>
+            <label>
+              <span>Что говорит клиент в начале *</span>
+              <textarea
+                rows={3}
+                value={newForm.rootQuestion}
+                placeholder="Например: Хочу открыть счёт сыну"
+                onChange={(event) => setNewForm((current) => ({ ...current, rootQuestion: event.target.value }))}
+              />
+              <small>По этой реплике суфлёр распознает сценарий.</small>
+            </label>
+            <label>
+              <span>Где работает сценарий</span>
+              <select value={newForm.channels} onChange={(event) => setNewForm((current) => ({ ...current, channels: event.target.value as ScenarioChannel }))}>
+                <option value="both">Телефония и чат</option>
+                <option value="telephony">Только телефония</option>
+                <option value="online_chat">Только онлайн-чат</option>
+              </select>
+            </label>
+          </div>
+          <footer>
+            <Button variant="ghost" onClick={onBack}>Отмена</Button>
+            <Button
+              disabled={creating || !newForm.title.trim() || !newForm.rootQuestion.trim()}
+              onClick={() => void handleCreate()}
+            >
+              {creating ? 'Создаём…' : 'Создать и настроить шаги →'}
+            </Button>
+          </footer>
+        </section>
+        {message ? <p className="scr-editor__message">{message}</p> : null}
+      </div>
+    )
   }
 
-  const deleteNode = () => {
-    if (!detail || !activeNode || nodes.length <= 1) return
-    const nextSelected = nodes[activeIndex + 1] ?? nodes[activeIndex - 1]
-    updateGraph(removeScenarioNode(detail.graph, activeNode.id))
-    setNodeId(nextSelected?.id ?? '')
+  if (!selected || !detail || !path.length) {
+    return (
+      <section className="scr-editor-empty" data-testid="scenario-editor">
+        <h2>Сначала выберите сценарий</h2>
+        <p>Откройте каталог и нажмите на нужную карточку.</p>
+        {onBack ? <Button onClick={onBack}>Перейти к каталогу</Button> : null}
+        {message ? <p>{message}</p> : null}
+      </section>
+    )
   }
 
   return (
     <div className="scr-editor" data-testid="scenario-editor">
-      <section className="admin-stats" aria-label="Сводка сценариев">
-        <Card><span>Всего</span><strong>{counts.total || items.length}</strong><small>В реестре</small></Card>
-        <Card><span>Опубликовано</span><strong>{counts.production}</strong><small>Рабочий контур</small></Card>
-        <Card><span>Черновики</span><strong>{counts.draft}</strong><small>Ожидают проверки</small></Card>
-      </section>
+      <header className="scr-editor__head">
+        <div className="scr-editor__identity">
+          {onBack ? <button type="button" onClick={onBack}>← Все сценарии</button> : null}
+          <div><span>{detail.code}</span><h2>{detail.title}</h2></div>
+          <StatusBadge status={detail.status === 'production' ? 'success' : 'warning'}>
+            {detail.status === 'production' ? 'Опубликован' : 'Черновик'}
+          </StatusBadge>
+        </div>
+        <div className="scr-editor__head-actions">
+          {onOpenTest ? <Button variant="ghost" onClick={() => onOpenTest(detail.code)}>Тестировать</Button> : null}
+          <Button variant="secondary" disabled={!canEdit || saving} onClick={() => void handleSave(false)}>Сохранить</Button>
+          <Button disabled={!canEdit || saving} onClick={() => void handleSave(true)}>Опубликовать</Button>
+        </div>
+      </header>
 
-      <div className="scr-editor__layout">
-        <aside className="scr-editor__registry">
-          <header className="scr-editor__registry-head">
-            <div><strong>Сценарии</strong><small>{filtered.length} из {counts.total || items.length}</small></div>
-            <Button variant="ghost" disabled={!canEdit || creating} onClick={() => void handleCreate()}>
-              + Новый
-            </Button>
-          </header>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по коду или теме" aria-label="Поиск сценария" />
-          <div className="scr-editor__filters" aria-label="Фильтр статуса">
-            <button type="button" className={statusFilter === 'all' ? 'is-active' : ''} onClick={() => setStatusFilter('all')}>Все <span>{counts.total || items.length}</span></button>
-            <button type="button" className={statusFilter === 'production' ? 'is-active' : ''} onClick={() => setStatusFilter('production')}>Готовые <span>{counts.production}</span></button>
-            <button type="button" className={statusFilter === 'draft' ? 'is-active' : ''} onClick={() => setStatusFilter('draft')}>Черновики <span>{counts.draft}</span></button>
-          </div>
-          <ul className="scr-editor__scenario-list">
-            {filtered.map((item) => (
-              <li key={item.code}>
-                <button type="button" className={item.code === selected ? 'is-active' : ''} onClick={() => setSelected(item.code)}>
-                  <span className="scr-editor__scenario-row"><b>{item.code}</b><i className={`scr-status-dot scr-status-dot--${item.status}`} /><em>{item.status === 'production' ? 'Готов' : 'Черновик'}</em></span>
-                  <strong>{item.title}</strong>
-                  <small>v{item.version_number || 1} · {channelLabel(item.channels)}</small>
-                </button>
-              </li>
-            ))}
-            {!filtered.length && <li className="scr-editor__no-results">Ничего не найдено</li>}
-          </ul>
-        </aside>
+      {publishIssues.length ? (
+        <section className="scr-validation" aria-live="polite">
+          <strong>Что нужно исправить</strong>
+          <ul>{publishIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
+        </section>
+      ) : null}
 
-        <main className="scr-editor__main">
-          {!detail || !activeNode ? <p className="app-muted">Выберите сценарий слева или создайте новый.</p> : (
-            <>
-              <header className="scr-editor__head">
-                <div className="scr-editor__title-row">
-                  <span>{detail.code}</span>
-                  <StatusBadge status={detail.status === 'production' ? 'success' : 'warning'}>
-                    {detail.status === 'production' ? 'Опубликован' : 'Черновик'}
-                  </StatusBadge>
-                </div>
-                <div className="scr-editor__head-actions">
-                  <div className="scr-mode-switch" aria-label="Режим редактора">
-                    <button type="button" className={mode === 'constructor' ? 'is-active' : ''} onClick={() => setMode('constructor')}>Конструктор</button>
-                    <button type="button" className={mode === 'scheme' ? 'is-active' : ''} onClick={() => setMode('scheme')}>Схема</button>
-                  </div>
-                  {onOpenTest && <Button variant="ghost" onClick={() => onOpenTest(detail.code)}>Полный тест</Button>}
-                  <Button variant="secondary" disabled={!canEdit || saving} onClick={() => void handleSave(false)}>Сохранить</Button>
-                  <Button disabled={!canEdit || saving} onClick={() => void handleSave(true)}>Опубликовать</Button>
-                </div>
-              </header>
-
-              {publishIssues.length > 0 && (
-                <section className="scr-validation" aria-live="polite">
-                  <strong>Проверка перед публикацией</strong>
-                  <ul>{publishIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
-                </section>
-              )}
-
-              {mode === 'constructor' ? (
-                <ScenarioConstructor
-                  detail={detail}
-                  activeNode={activeNode}
-                  activeIndex={activeIndex}
-                  canEdit={canEdit}
-                  onDetailChange={(patch) => {
-                    setDetail((current) => current ? { ...current, ...patch } : current)
-                    setPublishIssues([])
-                  }}
-                  onNodeChange={patchNode}
-                  onEdgeChange={(index, patch) => {
-                    if (typeof patch.to === 'string') {
-                      updateGraph(
-                        updateClientVariantTarget(
-                          detail.graph,
-                          activeNode.id,
-                          index,
-                          patch.to,
-                        ),
-                      )
-                      return
-                    }
-                    patchNode({
-                      edges: activeNode.edges.map((edge, edgeIndex) =>
-                        edgeIndex === index ? { ...edge, ...patch } : edge,
-                      ),
-                    })
-                  }}
-                  onClientVariantChange={(index, text) => {
-                    updateGraph(updateClientVariant(detail.graph, activeNode.id, index, text))
-                    setPublishIssues([])
-                  }}
-                  onAddEdge={() => {
-                    const target = nodes.find((node) => node.id !== activeNode.id)
-                    patchNode({ edges: [...activeNode.edges, { to: target?.id ?? '', label: '', keywords: [] }] })
-                  }}
-                  onRemoveEdge={(index) => patchNode({ edges: activeNode.edges.filter((_, edgeIndex) => edgeIndex !== index) })}
-                  onSelectNode={setNodeId}
-                  onAddNode={addNode}
-                  onDuplicateNode={duplicateNode}
-                  onDeleteNode={deleteNode}
-                />
-              ) : (
-                <ScenarioScheme
-                  detail={detail}
-                  selectedId={activeNode.id}
-                  onOpenNode={(id) => { setNodeId(id); setMode('constructor') }}
-                />
-              )}
-              <ScenarioTestPreview code={detail.code} />
-            </>
-          )}
-          {message && <p className="scr-editor__message" aria-live="polite">{message}</p>}
-        </main>
-      </div>
+      <ScenarioWorkspace
+        detail={detail}
+        path={path}
+        canEdit={canEdit}
+        issueNodeIds={issueNodeIds}
+        onDetailChange={(patch) => {
+          setDetail((current) => current ? { ...current, ...patch } : current)
+          setPublishIssues([])
+        }}
+        onNodeChange={patchNode}
+        onEdgeChange={patchEdge}
+        onReplyChange={(nodeId, edgeIndex, reply) => updateGraph(updateClientReply(detail.graph, nodeId, edgeIndex, reply))}
+        onAddEdge={(nodeId) => {
+          const node = nodes.find((item) => item.id === nodeId)
+          if (!node) return
+          patchNode(nodeId, {
+            edges: [...node.edges, {
+              to: '',
+              label: `Вариант ${node.edges.length + 1}`,
+              reply: '',
+              keywords: [],
+            }],
+          })
+        }}
+        onRemoveEdge={(nodeId, edgeIndex) => {
+          const node = nodes.find((item) => item.id === nodeId)
+          if (node) patchNode(nodeId, { edges: node.edges.filter((_, index) => index !== edgeIndex) })
+        }}
+        onOpenBranch={(pathIndex, targetId) => {
+          setPathIds((current) => [...current.slice(0, pathIndex + 1), targetId])
+          window.requestAnimationFrame(() => document.getElementById(`scenario-step-${targetId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+        }}
+        onCreateBranch={createContinuation}
+        onSelectPathStep={(pathIndex) => {
+          const target = path[pathIndex]
+          setPathIds((current) => current.slice(0, pathIndex + 1))
+          window.requestAnimationFrame(() => document.getElementById(`scenario-step-${target.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+        }}
+        onDuplicateNode={(nodeId) => {
+          const source = nodes.find((node) => node.id === nodeId)
+          if (!source) return
+          const copy = duplicateScenarioNode(detail.graph, source)
+          updateGraph({ nodes: [...nodes, copy] })
+          setPathIds([copy.id])
+        }}
+        onDeleteNode={(nodeId) => {
+          const pathIndex = pathIds.indexOf(nodeId)
+          updateGraph(removeScenarioNode(detail.graph, nodeId))
+          setPathIds((current) => current.slice(0, Math.max(1, pathIndex)))
+        }}
+      />
+      <ScenarioTestPreview code={detail.code} onOpenTest={onOpenTest} />
+      {message ? <p className="scr-editor__message" aria-live="polite">{message}</p> : null}
     </div>
   )
 }

@@ -363,12 +363,16 @@ def _score_lexical(
 
 
 def suz_transfer_commission_fixture_q() -> Q:
-    """INT/demo SUZ articles in Latin translit — not real Belarusbank KB."""
+    """INT/demo webhook articles that must never enter operator retrieval."""
     return (
         Q(title__icontains="Komissiya za perevod")
         | Q(title__icontains="комиссия за перевод")
+        | Q(title__icontains="accepted sample")
+        | Q(title__icontains="INT-07")
         | Q(permalink__icontains="komissiya-perevod")
+        | Q(permalink__icontains="accepted-sample")
         | Q(content__icontains="Komissiya za perevod mezhdu schetami")
+        | Q(content__icontains="Valid webhook body for INT-07")
     )
 
 
@@ -381,8 +385,12 @@ def is_suz_transfer_commission_doc(document: Mapping[str, Any]) -> bool:
     return (
         "komissiya za perevod" in title
         or "комиссия за перевод" in title
+        or "accepted sample" in title
+        or "int-07" in title
         or "komissiya-perevod" in permalink
+        or "accepted-sample" in permalink
         or "komissiya za perevod mezhdu schetami" in snippet
+        or "valid webhook body for int-07" in snippet
     )
 
 

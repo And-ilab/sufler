@@ -128,6 +128,8 @@ def classify_turn(text: str) -> str | None:
     norm = normalize(text)
     if not norm:
         return "no_hint.empty"
+    if _tokens(norm)[-1] in {"а", "без", "в", "для", "и", "или", "к", "на", "не", "о", "по", "с", "у"}:
+        return "no_hint.incomplete"
     if _IDENTITY_RE.fullmatch(norm) or _PERSONAL_FACT_RE.fullmatch(norm):
         return "no_hint.identity"
     if norm in _EMPTY_INTENT:
@@ -241,12 +243,13 @@ def _progress_for(
         next_path.append(label)
     hint = str(node.get("hint_text") or "").strip()
     clarify = str(node.get("clarify_text") or "").strip()
+    next_clarify = clarify if hint and normalize(hint) != normalize(clarify) else ""
     return ScenarioProgress(
         code=scenario.code,
         title=scenario.title,
         path=next_path,
         node_id=str(node.get("id") or ""),
-        next_clarify=clarify,
+        next_clarify=next_clarify,
         hint_text=hint or clarify,
         node_type=str(node.get("type") or "answer"),
     )
@@ -568,18 +571,51 @@ def advance_scenario(
     return progress
 
 
+def _test_choice(edge: Mapping[str, Any], nodes: dict[str, dict[str, Any]]) -> dict[str, str]:
+    """Return the stored client reply, with a fallback for legacy graphs."""
+    label = str(edge.get("label") or "").strip()
+    reply = str(edge.get("reply") or "").strip()
+    if reply:
+        return {"label": label, "reply": reply}
+
+    target = nodes.get(str(edge.get("to") or ""))
+    for example in list((target or {}).get("examples") or []):
+        reply = str(example or "").strip()
+        if reply and normalize(reply) != normalize(label):
+            return {"label": label, "reply": reply}
+    return {"label": label, "reply": label}
+
+
 def run_test_dialog(code: str, lines: list[str]) -> dict[str, Any]:
-    """Sandbox walk for the admin test screen (FR-SCR-10)."""
+    """Walk a selected scenario as client turns and expose operator turns."""
     from hub.scenario_service import get_scenario
 
     scenario = get_scenario(code)
     version = scenario.current_version
     if version is None:
-        return {"steps": [], "errors": ["Нет версии сценария"], "path": []}
+        return {
+            "code": scenario.code,
+            "title": scenario.title,
+            "steps": [],
+            "errors": ["Нет версии сценария"],
+            "path": [],
+            "ok": False,
+            "version_number": 0,
+            "is_published": False,
+        }
     nodes = _nodes_by_id(version.graph or {})
     current = _start_node(nodes)
     if current is None:
-        return {"steps": [], "errors": ["Нет стартового узла"], "path": []}
+        return {
+            "code": scenario.code,
+            "title": scenario.title,
+            "steps": [],
+            "errors": ["Нет стартового узла"],
+            "path": [],
+            "ok": False,
+            "version_number": version.version_number,
+            "is_published": version.is_published,
+        }
     path = [str(current.get("label") or scenario.title)]
     steps: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -587,22 +623,50 @@ def run_test_dialog(code: str, lines: list[str]) -> dict[str, Any]:
         replica = str(line or "").strip()
         if not replica:
             continue
-        nxt = _match_edge(replica, current, nodes)
-        if nxt is None and index == 1:
+        selected_edge = ""
+        step_error = ""
+        if index == 1:
             score = _score(
                 replica,
                 [scenario.title, scenario.root_question],
                 list(current.get("examples") or []),
             )
             if score < 2:
-                errors.append(f"Шаг {index}: реплика не распознана как старт сценария")
-        elif nxt is None:
-            errors.append(f"Шаг {index}: нет ребра для «{replica}»")
+                step_error = "Реплика не распознана как вход в выбранный сценарий"
         else:
-            current = nxt
-            label = str(current.get("label") or "")
-            if path[-1] != label:
-                path.append(label)
+            previous = current
+            nxt = _match_edge(replica, previous, nodes)
+            if nxt is None:
+                choice_labels = [
+                    str(edge.get("label") or "")
+                    for edge in previous.get("edges") or []
+                    if isinstance(edge, Mapping) and str(edge.get("label") or "")
+                ]
+                expected = (
+                    f" Ожидалось: {', '.join(choice_labels)}."
+                    if choice_labels
+                    else ""
+                )
+                step_error = f"Ответ не подходит ни к одной ветке.{expected}"
+            else:
+                for edge in previous.get("edges") or []:
+                    if (
+                        isinstance(edge, Mapping)
+                        and str(edge.get("to") or "") == str(nxt.get("id") or "")
+                    ):
+                        selected_edge = str(edge.get("label") or "")
+                        break
+                current = nxt
+                label = str(current.get("label") or "")
+                if path[-1] != label:
+                    path.append(label)
+        if step_error:
+            errors.append(f"Шаг {index}: {step_error}")
+        choices = [
+            _test_choice(edge, nodes)
+            for edge in current.get("edges") or []
+            if isinstance(edge, Mapping) and str(edge.get("label") or "")
+        ]
         steps.append(
             {
                 "index": index,
@@ -611,7 +675,10 @@ def run_test_dialog(code: str, lines: list[str]) -> dict[str, Any]:
                 "label": str(current.get("label") or ""),
                 "hint_text": str(current.get("hint_text") or ""),
                 "clarify_text": str(current.get("clarify_text") or ""),
-                "ok": not errors or not errors[-1].startswith(f"Шаг {index}:"),
+                "selected_edge": selected_edge,
+                "available_choices": choices,
+                "terminal": not bool(current.get("edges")),
+                "ok": not step_error,
             }
         )
     return {
@@ -621,4 +688,6 @@ def run_test_dialog(code: str, lines: list[str]) -> dict[str, Any]:
         "errors": errors,
         "path": path,
         "ok": not errors,
+        "version_number": version.version_number,
+        "is_published": version.is_published,
     }

@@ -1,63 +1,66 @@
-import { useMemo, useState } from 'react'
 import { Button } from '../../components'
-import {
-  testDialogScenario,
-  type ScenarioChannel,
-  type ScenarioDetail,
-  type ScenarioEdge,
-  type ScenarioNode,
-  type ScenarioTestRun,
+import type {
+  ScenarioChannel,
+  ScenarioDetail,
+  ScenarioEdge,
+  ScenarioNode,
+  ScenarioNodeType,
 } from './api/scenarios'
-import { reachableScenarioNodes, scenarioStartNode } from './scenarioGraphAdapter'
 
-const STEP_TYPES = [
+const STEP_TYPES: Array<[ScenarioNodeType, string]> = [
   ['start', 'Начало сценария'],
-  ['clarify', 'Уточняющий вопрос'],
-  ['answer', 'Готовый ответ'],
-  ['branch', 'Выбор продолжения'],
+  ['clarify', 'Уточнение'],
+  ['answer', 'Ответ'],
+  ['branch', 'Развилка'],
   ['escalate', 'Передача специалисту'],
   ['end', 'Завершение'],
-] as const
+]
 
-interface ConstructorProps {
+interface ScenarioWorkspaceProps {
   detail: ScenarioDetail
-  activeNode: ScenarioNode
-  activeIndex: number
+  path: ScenarioNode[]
   canEdit: boolean
+  issueNodeIds: Set<string>
   onDetailChange: (patch: Partial<ScenarioDetail>) => void
-  onNodeChange: (patch: Partial<ScenarioNode>) => void
-  onEdgeChange: (index: number, patch: Partial<ScenarioEdge>) => void
-  onClientVariantChange: (index: number, text: string) => void
-  onAddEdge: () => void
-  onRemoveEdge: (index: number) => void
-  onSelectNode: (id: string) => void
-  onAddNode: () => void
-  onDuplicateNode: () => void
-  onDeleteNode: () => void
+  onNodeChange: (nodeId: string, patch: Partial<ScenarioNode>) => void
+  onEdgeChange: (nodeId: string, index: number, patch: Partial<ScenarioEdge>) => void
+  onReplyChange: (nodeId: string, index: number, reply: string) => void
+  onAddEdge: (nodeId: string) => void
+  onRemoveEdge: (nodeId: string, index: number) => void
+  onOpenBranch: (pathIndex: number, targetId: string) => void
+  onCreateBranch: (pathIndex: number, nodeId: string, edgeIndex: number) => void
+  onSelectPathStep: (pathIndex: number) => void
+  onDuplicateNode: (nodeId: string) => void
+  onDeleteNode: (nodeId: string) => void
 }
 
-export function ScenarioConstructor({
+function stepRole(node: ScenarioNode, index: number): string {
+  if (node.type === 'start') return 'Вход в сценарий'
+  if (!node.edges.length) return 'Завершение ветки'
+  return `Шаг ${index + 1}`
+}
+
+export function ScenarioWorkspace({
   detail,
-  activeNode,
-  activeIndex,
+  path,
   canEdit,
+  issueNodeIds,
   onDetailChange,
   onNodeChange,
   onEdgeChange,
-  onClientVariantChange,
+  onReplyChange,
   onAddEdge,
   onRemoveEdge,
-  onSelectNode,
-  onAddNode,
+  onOpenBranch,
+  onCreateBranch,
+  onSelectPathStep,
   onDuplicateNode,
   onDeleteNode,
-}: ConstructorProps) {
-  const nodes = detail.graph.nodes
-  const previous = nodes[activeIndex - 1]
-  const next = nodes[activeIndex + 1]
+}: ScenarioWorkspaceProps) {
+  const byId = new Map(detail.graph.nodes.map((node) => [node.id, node]))
 
   return (
-    <div className="scr-constructor">
+    <div className="scr-flow-editor">
       <section className="scr-basics" aria-label="Основные настройки сценария">
         <label>
           <span>Название сценария</span>
@@ -68,11 +71,11 @@ export function ScenarioConstructor({
           />
         </label>
         <label className="scr-basics__root">
-          <span>Стартовая реплика клиента</span>
+          <span>Главная входная реплика клиента</span>
           <input
             value={detail.root_question}
             disabled={!canEdit}
-            placeholder="Например: Хочу перевести деньги"
+            placeholder="Например: Хочу открыть счёт ребёнку"
             onChange={(event) => onDetailChange({ root_question: event.target.value })}
           />
         </label>
@@ -81,9 +84,7 @@ export function ScenarioConstructor({
           <select
             value={detail.channels}
             disabled={!canEdit}
-            onChange={(event) =>
-              onDetailChange({ channels: event.target.value as ScenarioChannel })
-            }
+            onChange={(event) => onDetailChange({ channels: event.target.value as ScenarioChannel })}
           >
             <option value="both">Телефония и чат</option>
             <option value="telephony">Телефония</option>
@@ -92,277 +93,211 @@ export function ScenarioConstructor({
         </label>
       </section>
 
-      <div className="scr-step-nav">
-        <Button
-          variant="ghost"
-          disabled={!previous}
-          onClick={() => previous && onSelectNode(previous.id)}
-        >
-          ← Предыдущий
-        </Button>
-        <label>
-          <span>Текущий шаг</span>
-          <select value={activeNode.id} onChange={(event) => onSelectNode(event.target.value)}>
-            {nodes.map((node, index) => (
-              <option key={node.id} value={node.id}>
-                {index + 1}. {node.label || 'Без названия'}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="scr-step-nav__count">Шаг {activeIndex + 1} из {nodes.length}</span>
-        <Button variant="ghost" disabled={!next} onClick={() => next && onSelectNode(next.id)}>
-          Следующий →
-        </Button>
+      <nav className="scr-flow-path" aria-label="Текущая ветка">
+        <span>Текущая ветка:</span>
+        {path.map((node, index) => (
+          <button type="button" key={node.id} onClick={() => onSelectPathStep(index)}>
+            {index ? '→ ' : ''}{node.label || stepRole(node, index)}
+          </button>
+        ))}
+      </nav>
+
+      <div className="scr-flow-steps">
+        {path.map((node, pathIndex) => (
+          <article
+            className={`scr-flow-step${issueNodeIds.has(node.id) ? ' has-error' : ''}`}
+            key={node.id}
+            id={`scenario-step-${node.id}`}
+          >
+            <header className="scr-flow-step__head">
+              <div>
+                <small>{stepRole(node, pathIndex)}</small>
+                <input
+                  aria-label={`Название шага ${pathIndex + 1}`}
+                  value={node.label}
+                  disabled={!canEdit}
+                  placeholder="Короткое название шага"
+                  onChange={(event) => onNodeChange(node.id, { label: event.target.value })}
+                />
+              </div>
+              <div className="scr-flow-step__actions">
+                <button type="button" disabled={!canEdit} onClick={() => onDuplicateNode(node.id)}>Дублировать</button>
+                {node.type !== 'start' ? (
+                  <button type="button" className="is-danger" disabled={!canEdit} onClick={() => onDeleteNode(node.id)}>Удалить</button>
+                ) : null}
+              </div>
+            </header>
+
+            <div className="scr-flow-step__sequence">
+              <section className="scr-conversation-block scr-conversation-block--client">
+                <header><span>1</span><div><h3>Когда запускается этот шаг</h3><p>Примеры фраз клиента, которые приводят сюда.</p></div></header>
+                <textarea
+                  rows={3}
+                  value={node.examples.join('\n')}
+                  disabled={!canEdit}
+                  placeholder={'Например: хочу открыть счёт\nНужен счёт ребёнку'}
+                  onChange={(event) => onNodeChange(node.id, {
+                    examples: event.target.value.split('\n').map((line) => line.trim()).filter(Boolean),
+                  })}
+                />
+              </section>
+
+              <section className="scr-conversation-block scr-conversation-block--operator">
+                <header><span>2</span><div><h3>Что говорит оператор</h3><p>Готовая подсказка. Можно оставить пустой и сразу задать вопрос.</p></div></header>
+                <textarea
+                  rows={4}
+                  value={node.hint_text}
+                  disabled={!canEdit}
+                  placeholder="Готовый ответ оператору"
+                  onChange={(event) => onNodeChange(node.id, { hint_text: event.target.value })}
+                />
+              </section>
+
+              <section className="scr-conversation-block scr-conversation-block--question">
+                <header>
+                  <span>3</span>
+                  <div><h3>Что спрашивает оператор</h3><p>Включите вопрос, если после него клиент выбирает продолжение.</p></div>
+                  <label className="scr-question-toggle">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(node.clarify_text)}
+                      disabled={!canEdit}
+                      onChange={(event) => onNodeChange(node.id, {
+                        clarify_text: event.target.checked ? 'Уточните, пожалуйста: ' : '',
+                      })}
+                    />
+                    <span>Задать вопрос</span>
+                  </label>
+                </header>
+                {node.clarify_text ? (
+                  <textarea
+                    rows={3}
+                    value={node.clarify_text}
+                    disabled={!canEdit}
+                    placeholder="Например: С карточкой или без карточки?"
+                    onChange={(event) => onNodeChange(node.id, { clarify_text: event.target.value })}
+                  />
+                ) : (
+                  <div className="scr-question-off">Вопрос не задан. После ответа оператора ветка может завершиться.</div>
+                )}
+              </section>
+
+              <section className="scr-conversation-block scr-conversation-block--choices">
+                <header><span>4</span><div><h3>Что может ответить клиент</h3><p>Добавьте один или несколько естественных ответов и настройте продолжение.</p></div></header>
+                <div className="scr-choice-list">
+                  {node.edges.map((edge, edgeIndex) => {
+                    const target = byId.get(edge.to)
+                    return (
+                      <div className="scr-choice-card" key={`${node.id}-${edgeIndex}`}>
+                        <div className="scr-choice-card__number">{edgeIndex + 1}</div>
+                        <label className="scr-choice-card__reply">
+                          <span>Ответ клиента</span>
+                          <input
+                            value={edge.reply ?? edge.label}
+                            disabled={!canEdit}
+                            placeholder="Например: Да, документ ребёнка есть"
+                            onChange={(event) => onReplyChange(node.id, edgeIndex, event.target.value)}
+                          />
+                        </label>
+                        <div className="scr-choice-card__next">
+                          <span>Что будет дальше</span>
+                          {target ? (
+                            <button
+                              type="button"
+                              className="scr-next-step"
+                              onClick={() => onOpenBranch(pathIndex, target.id)}
+                            >
+                              <small>Продолжение</small>
+                              <strong>{target.label || 'Шаг без названия'}</strong>
+                              <b>Открыть ниже ↓</b>
+                            </button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              disabled={!canEdit || !(edge.reply ?? edge.label).trim()}
+                              onClick={() => onCreateBranch(pathIndex, node.id, edgeIndex)}
+                            >
+                              + Создать продолжение
+                            </Button>
+                          )}
+                        </div>
+                        <details className="scr-choice-card__technical">
+                          <summary>Настройки перехода</summary>
+                          <label>
+                            <span>Название ветки</span>
+                            <input
+                              value={edge.label}
+                              disabled={!canEdit}
+                              onChange={(event) => onEdgeChange(node.id, edgeIndex, { label: event.target.value })}
+                            />
+                          </label>
+                          <label>
+                            <span>Связать с существующим шагом</span>
+                            <select
+                              value={edge.to}
+                              disabled={!canEdit}
+                              onChange={(event) => onEdgeChange(node.id, edgeIndex, { to: event.target.value })}
+                            >
+                              <option value="">Продолжение ещё не создано</option>
+                              {detail.graph.nodes.filter((item) => item.id !== node.id).map((item) => (
+                                <option value={item.id} key={item.id}>{item.label || item.id}</option>
+                              ))}
+                            </select>
+                          </label>
+                        </details>
+                        <button type="button" className="scr-choice-card__remove" disabled={!canEdit} onClick={() => onRemoveEdge(node.id, edgeIndex)}>Удалить вариант</button>
+                      </div>
+                    )
+                  })}
+                  {!node.edges.length ? (
+                    <div className="scr-choice-empty">
+                      <strong>Это завершение ветки</strong>
+                      <p>Если разговор должен продолжиться, добавьте вариант ответа клиента.</p>
+                    </div>
+                  ) : null}
+                </div>
+                <Button variant="ghost" disabled={!canEdit} onClick={() => onAddEdge(node.id)}>+ Добавить вариант ответа</Button>
+              </section>
+            </div>
+
+            <details className="scr-step-technical">
+              <summary>Технические настройки шага</summary>
+              <div>
+                <label>
+                  <span>Тип шага</span>
+                  <select value={node.type} disabled={!canEdit} onChange={(event) => onNodeChange(node.id, { type: event.target.value })}>
+                    {STEP_TYPES.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                  </select>
+                </label>
+                <label><span>ID шага</span><input value={node.id} readOnly /></label>
+                <label><span>Intent ID</span><input value={node.intent_id} disabled={!canEdit} onChange={(event) => onNodeChange(node.id, { intent_id: event.target.value })} /></label>
+              </div>
+            </details>
+          </article>
+        ))}
       </div>
 
-      <section className="scr-step-editor">
-        <header className="scr-step-editor__header">
-          <div>
-            <small>Настройка шага {activeIndex + 1}</small>
-            <input
-              aria-label="Название шага"
-              value={activeNode.label}
-              disabled={!canEdit}
-              placeholder="Понятное название шага"
-              onChange={(event) => onNodeChange({ label: event.target.value })}
-            />
-          </div>
-          <div className="scr-step-actions">
-            <Button variant="ghost" disabled={!canEdit} onClick={onAddNode}>+ Добавить</Button>
-            <Button variant="ghost" disabled={!canEdit} onClick={onDuplicateNode}>Дублировать</Button>
-            <Button
-              className="scr-danger-button"
-              variant="ghost"
-              disabled={!canEdit || nodes.length <= 1}
-              onClick={onDeleteNode}
-            >
-              Удалить
-            </Button>
-          </div>
-        </header>
-
-        <div className="scr-sequence">
-          <section>
-            <div className="scr-sequence__title"><span>1</span><div><h3>Активация шага</h3><p>Фразы клиента, по которым подходит этот шаг.</p></div></div>
-            <textarea
-              rows={3}
-              value={activeNode.examples.join('\n')}
-              disabled={!canEdit}
-              placeholder={'хочу сделать перевод\nкак отправить деньги'}
-              onChange={(event) =>
-                onNodeChange({
-                  examples: event.target.value.split('\n').map((line) => line.trim()).filter(Boolean),
-                })
-              }
-            />
-          </section>
-
-          <section>
-            <div className="scr-sequence__title"><span>2</span><div><h3>Вопрос клиенту</h3><p>Оператор увидит эту фразу как следующий вопрос.</p></div></div>
-            <textarea
-              rows={3}
-              value={activeNode.clarify_text}
-              disabled={!canEdit}
-              placeholder="Например: Карта у вас уже есть?"
-              onChange={(event) => onNodeChange({ clarify_text: event.target.value })}
-            />
-          </section>
-
-          <section>
-            <div className="scr-sequence__title"><span>3</span><div><h3>Ответ оператора</h3><p>Готовая формулировка для суфлёра.</p></div></div>
-            <textarea
-              rows={5}
-              value={activeNode.hint_text}
-              disabled={!canEdit}
-              placeholder="Введите готовый ответ оператору"
-              onChange={(event) => onNodeChange({ hint_text: event.target.value })}
-            />
-          </section>
-
-          <section>
-            <div className="scr-sequence__title"><span>4</span><div><h3>Варианты ответа клиента</h3><p>Для каждого варианта выберите продолжение.</p></div></div>
-            <div className="scr-routes">
-              {activeNode.edges.map((edge, index) => (
-                <div className="scr-route" key={`${activeNode.id}-${index}`}>
-                  <header>
-                    <strong>Вариант {index + 1}</strong>
-                    <button type="button" disabled={!canEdit} onClick={() => onRemoveEdge(index)}>
-                      Удалить
-                    </button>
-                  </header>
-                  <label>
-                    <span>Что отвечает клиент</span>
-                    <input
-                      value={edge.label}
-                      disabled={!canEdit}
-                      placeholder="Например: Карта уже есть"
-                      onChange={(event) => onClientVariantChange(index, event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    <span>Куда продолжить</span>
-                    <select
-                      value={edge.to}
-                      disabled={!canEdit}
-                      onChange={(event) => onEdgeChange(index, { to: event.target.value })}
-                    >
-                      <option value="">Выберите следующий шаг</option>
-                      {nodes.filter((node) => node.id !== activeNode.id).map((node, nodeIndex) => (
-                        <option key={node.id} value={node.id}>
-                          {nodeIndex + 1}. {node.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              ))}
-              {!activeNode.edges.length && (
-                <p className="scr-empty-route">Нет вариантов — сценарий завершится на этом шаге.</p>
-              )}
-            </div>
-            <Button variant="ghost" disabled={!canEdit} onClick={onAddEdge}>
-              + Добавить вариант
-            </Button>
-          </section>
-        </div>
-
-        <details className="scr-advanced">
-          <summary>Технические настройки</summary>
-          <div>
-            <label>
-              <span>Тип шага</span>
-              <select
-                value={activeNode.type}
-                disabled={!canEdit}
-                onChange={(event) => onNodeChange({ type: event.target.value })}
-              >
-                {STEP_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>Идентификатор шага</span>
-              <input value={activeNode.id} readOnly />
-            </label>
-            <label>
-              <span>Intent ID</span>
-              <input
-                value={activeNode.intent_id}
-                disabled={!canEdit}
-                onChange={(event) => onNodeChange({ intent_id: event.target.value })}
-              />
-            </label>
-            <label className="scr-advanced__wide">
-              <span>Системная инструкция</span>
-              <textarea
-                rows={6}
-                value={detail.system_prompt}
-                disabled={!canEdit}
-                onChange={(event) => onDetailChange({ system_prompt: event.target.value })}
-              />
-            </label>
-          </div>
-        </details>
-      </section>
+      <details className="scr-system-prompt">
+        <summary>Системная инструкция сценария</summary>
+        <textarea
+          rows={5}
+          value={detail.system_prompt}
+          disabled={!canEdit}
+          onChange={(event) => onDetailChange({ system_prompt: event.target.value })}
+        />
+      </details>
     </div>
   )
 }
 
-interface SchemeProps {
-  detail: ScenarioDetail
-  selectedId: string
-  onOpenNode: (id: string) => void
-}
-
-export function ScenarioScheme({ detail, selectedId, onOpenNode }: SchemeProps) {
-  const reachable = useMemo(() => reachableScenarioNodes(detail.graph), [detail.graph])
-  const reachableIds = new Set(reachable.map((node) => node.id))
-  const labels = new Map(reachable.map((node, index) => [node.id, `${index + 1}. ${node.label}`]))
-  const hiddenCount = detail.graph.nodes.length - reachable.length
-
+export function ScenarioTestPreview({ code, onOpenTest }: { code: string; onOpenTest?: (code: string) => void }) {
   return (
-    <section className="scr-scheme">
-      <header>
-        <div><h3>Схема разговора</h3><p>Показаны шаги, доступные от начала. Нажмите шаг, чтобы изменить его в конструкторе.</p></div>
-        {hiddenCount > 0 && <span>{hiddenCount} недоступн. шаг(а)</span>}
-      </header>
-      {!reachable.length ? <p className="app-muted">В сценарии пока нет шагов.</p> : (
-        <div className="scr-scheme__canvas">
-          {reachable.map((node, index) => (
-            <div className="scr-scheme__row" key={node.id}>
-              <button
-                type="button"
-                className={node.id === selectedId ? 'is-active' : ''}
-                onClick={() => onOpenNode(node.id)}
-              >
-                <small>{node.id === scenarioStartNode(detail.graph)?.id ? 'Начало' : `Шаг ${index + 1}`}</small>
-                <strong>{node.label}</strong>
-                <span>{node.clarify_text || node.hint_text || 'Содержимое не заполнено'}</span>
-              </button>
-              {node.edges.some((edge) => reachableIds.has(edge.to)) ? (
-                <div className="scr-scheme__links">
-                  {node.edges.filter((edge) => reachableIds.has(edge.to)).map((edge, edgeIndex) => (
-                    <button type="button" key={`${node.id}-${edgeIndex}`} onClick={() => onOpenNode(edge.to)}>
-                      <span>{edge.label || edge.keywords.join(', ') || 'Далее'}</span>
-                      <b>→ {labels.get(edge.to)}</b>
-                    </button>
-                  ))}
-                </div>
-              ) : <div className="scr-scheme__end">Завершение</div>}
-            </div>
-          ))}
-        </div>
-      )}
+    <section className="scr-preview">
+      <div>
+        <strong>Проверить разговор</strong>
+        <p>Пройдите настроенные шаги от имени клиента.</p>
+      </div>
+      <Button variant="ghost" onClick={() => onOpenTest?.(code)}>Открыть тест</Button>
     </section>
-  )
-}
-
-export function ScenarioTestPreview({ code }: { code: string }) {
-  const [script, setScript] = useState('')
-  const [result, setResult] = useState<ScenarioTestRun | null>(null)
-  const [error, setError] = useState('')
-  const [running, setRunning] = useState(false)
-
-  const run = async () => {
-    const lines = script.split('\n').map((line) => line.trim()).filter(Boolean)
-    if (!lines.length) return
-    setRunning(true)
-    setError('')
-    try {
-      setResult(await testDialogScenario(code, lines))
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Не удалось выполнить проверку')
-    } finally {
-      setRunning(false)
-    }
-  }
-
-  return (
-    <details className="scr-preview">
-      <summary>Проверить диалог</summary>
-      <p>Введите реплики клиента по одной в строке. Проверяется последняя сохранённая версия.</p>
-      <textarea
-        rows={5}
-        value={script}
-        placeholder={'Хочу перевести деньги\nКарта уже есть'}
-        onChange={(event) => setScript(event.target.value)}
-      />
-      <Button disabled={running || !script.trim()} onClick={() => void run()}>
-        {running ? 'Проверяем…' : 'Запустить проверку'}
-      </Button>
-      {error && <p className="scr-preview__error">{error}</p>}
-      {result && (
-        <div className={`scr-preview__result ${result.ok ? 'is-ok' : 'is-error'}`}>
-          <strong>{result.ok ? 'Диалог пройден' : 'Найдены проблемы'}</strong>
-          <p>{result.path.join(' → ') || 'Путь не определён'}</p>
-          {result.errors.map((item) => <span key={item}>{item}</span>)}
-          {result.steps.map((step) => (
-            <button type="button" key={step.index}>
-              <b>{step.label}</b><span>{step.input}</span><small>{step.hint_text || step.clarify_text}</small>
-            </button>
-          ))}
-        </div>
-      )}
-    </details>
   )
 }

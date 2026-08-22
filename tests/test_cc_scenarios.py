@@ -1,3 +1,5 @@
+import ast
+import importlib
 import json
 import os
 import sys
@@ -21,9 +23,13 @@ from django.test import Client, TestCase  # noqa: E402
 
 from auth.roles import ROLES_BY_CODE  # noqa: E402
 from hub.models import DialogScenario  # noqa: E402
-from hub.scenario_catalog import ALL_SCENARIOS, REFERENCE_SCENARIOS  # noqa: E402
+from hub.scenario_catalog import (  # noqa: E402
+    ALL_SCENARIOS,
+    DRAFT_SCENARIOS,
+    REFERENCE_SCENARIOS,
+)
 from hub.scenario_service import upsert_from_catalog  # noqa: E402
-from orchestrator.scenario_engine import _match_start, classify_turn  # noqa: E402
+from orchestrator.scenario_engine import _match_start, _score, classify_turn  # noqa: E402
 from orchestrator.sufler import suggest  # noqa: E402
 
 
@@ -44,6 +50,81 @@ class DialogScenarioCatalogTest(TestCase):
         item = DialogScenario.objects.get(code="CC-SCR-005")
         nodes = item.current_version.graph["nodes"]
         self.assertTrue(any(node["id"] == "card_rf" for node in nodes))
+
+    def test_every_catalog_edge_has_natural_matching_reply(self):
+        edges = [
+            edge
+            for scenario in ALL_SCENARIOS
+            for node in scenario["graph"]["nodes"]
+            for edge in node.get("edges", [])
+        ]
+        self.assertEqual(len(edges), 117)
+        for edge in edges:
+            with self.subTest(label=edge["label"]):
+                reply = edge.get("reply", "").strip()
+                self.assertTrue(reply)
+                self.assertNotIn("Выбираю вариант", reply)
+                self.assertGreater(_score(reply, edge["keywords"], []), 0)
+
+    def test_all_linear_drafts_define_explicit_clarify_replies(self):
+        catalog_path = BACKEND_ROOT / "hub" / "scenario_catalog.py"
+        tree = ast.parse(catalog_path.read_text(encoding="utf-8"))
+        calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "linear_draft"
+        ]
+        self.assertEqual(len(calls), 40)
+        self.assertTrue(
+            all(
+                any(keyword.arg == "reply" for keyword in call.keywords)
+                for call in calls
+            )
+        )
+
+        self.assertEqual(len(DRAFT_SCENARIOS), 40)
+        for scenario in DRAFT_SCENARIOS:
+            start = scenario["graph"]["nodes"][0]
+            reply = start["edges"][0]["reply"]
+            with self.subTest(code=scenario["code"]):
+                self.assertNotEqual(reply.casefold(), start["examples"][0].casefold())
+        by_code = {scenario["code"]: scenario for scenario in DRAFT_SCENARIOS}
+        self.assertEqual(
+            by_code["CC-SCR-012"]["graph"]["nodes"][0]["edges"][0]["reply"],
+            "Карту ещё не блокировал, после утери нужен перевыпуск",
+        )
+        self.assertEqual(
+            by_code["CC-SCR-015"]["graph"]["nodes"][0]["edges"][0]["reply"],
+            "Нужен лимит на оплату в интернете",
+        )
+
+    def test_reply_backfill_preserves_manual_edge_fields(self):
+        payload = REFERENCE_SCENARIOS[0]
+        item = upsert_from_catalog(payload, username="test")
+        graph = item.current_version.graph
+        edges = graph["nodes"][0]["edges"]
+        edges[0].pop("reply")
+        edges[0]["label"] = "Пользовательская подпись"
+        edges[0]["custom"] = {"keep": True}
+        edges[1]["reply"] = "Моя ручная реплика"
+        item.current_version.graph = graph
+        item.current_version.save(update_fields=["graph"])
+
+        migration = importlib.import_module(
+            "hub.migrations.0016_backfill_scenario_edge_replies"
+        )
+        from django.apps import apps
+
+        migration.backfill_scenario_edge_replies(apps, None)
+
+        item.current_version.refresh_from_db()
+        saved_edges = item.current_version.graph["nodes"][0]["edges"]
+        self.assertEqual(saved_edges[0]["reply"], "Мне нужна карточка к счёту")
+        self.assertEqual(saved_edges[0]["label"], "Пользовательская подпись")
+        self.assertEqual(saved_edges[0]["custom"], {"keep": True})
+        self.assertEqual(saved_edges[1]["reply"], "Моя ручная реплика")
 
 
 class ScenarioEngineGatingTest(TestCase):
@@ -72,6 +153,14 @@ class ScenarioEngineGatingTest(TestCase):
         result = suggest("спасибо")
         self.assertEqual(result["blocked_reason"], "no_hint_needed")
         self.assertEqual(result["hints"], [])
+
+    def test_incomplete_final_fragment_skips_hints(self):
+        for replica in ("Терминал не.", "Хочу взять деньги в."):
+            with self.subTest(replica=replica):
+                result = suggest(replica, session_id=f"incomplete-{replica}")
+                self.assertEqual(result["blocked_reason"], "no_hint_needed")
+                self.assertEqual(result["hints"], [])
+                self.assertIsNone(result["scenario"])
 
     def test_identity_and_personal_facts_skip_hints(self):
         for index, replica in enumerate(
@@ -213,6 +302,15 @@ class ScenarioEngineGatingTest(TestCase):
         self.assertEqual(result["scenario"]["code"], "CC-SCR-002")
         self.assertIn("законный представитель", result["hints"][0]["text"])
 
+    def test_question_only_scenario_does_not_repeat_operator_tip(self):
+        result = suggest(
+            "Мне нужна выписка со счёта для визы",
+            session_id="question-only-scenario",
+        )
+        self.assertEqual(result["scenario"]["code"], "CC-SCR-007")
+        self.assertIn("За какой период", result["hints"][0]["text"])
+        self.assertEqual(result["hints"][0]["operator_tip"], "")
+
     def test_transfer_to_rf_walks_card_then_mobile_bank(self):
         first = suggest(
             "надо отправить деньги в россию маме на карту сбера",
@@ -329,8 +427,66 @@ class ScenarioAdminApiTest(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertTrue(body["steps"])
-        self.assertGreaterEqual(len(body["path"]), 1)
+        self.assertEqual(len(body["steps"]), 3)
+        self.assertTrue(body["ok"])
+        self.assertGreaterEqual(len(body["path"]), 3)
+        self.assertEqual(body["steps"][0]["selected_edge"], "")
+        self.assertTrue(body["steps"][0]["available_choices"])
+        self.assertEqual(
+            body["steps"][0]["available_choices"][0],
+            {
+                "label": "Карта банка РФ",
+                "reply": "Хочу перевести деньги на карту Сбербанка",
+            },
+        )
+        self.assertEqual(body["steps"][1]["selected_edge"], "Карта банка РФ")
+        self.assertTrue(body["steps"][2]["terminal"])
+        self.assertTrue(body["steps"][2]["hint_text"])
+        self.assertGreaterEqual(body["version_number"], 1)
+
+    def test_test_run_keeps_current_node_for_unknown_branch(self):
+        client = Client()
+        client.force_login(self.user_for_role("software_administrator"))
+        response = client.post(
+            f"{self.url}CC-SCR-005/test-run/",
+            data=json.dumps(
+                {
+                    "lines": [
+                        "надо отправить деньги в россию",
+                        "совсем другой ответ",
+                    ]
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertFalse(body["ok"])
+        self.assertFalse(body["steps"][1]["ok"])
+        self.assertEqual(body["steps"][0]["node_id"], body["steps"][1]["node_id"])
+        self.assertIn("Ожидалось", body["errors"][0])
+
+    def test_scenario_graph_preserves_safe_node_position(self):
+        client = Client()
+        client.force_login(self.user_for_role("contact_center_module_administrator"))
+        detail = client.get(f"{self.url}CC-SCR-005/").json()
+        detail["graph"]["nodes"][0]["position"] = {"x": 125.4, "y": 88}
+        response = client.put(
+            f"{self.url}CC-SCR-005/",
+            data=json.dumps(
+                {
+                    "title": detail["title"],
+                    "root_question": detail["root_question"],
+                    "graph": detail["graph"],
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["graph"]["nodes"][0]["position"],
+            {"x": 125.4, "y": 88.0},
+        )
 
     def test_create_draft(self):
         client = Client()
@@ -350,3 +506,91 @@ class ScenarioAdminApiTest(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["status"], "draft")
         self.assertEqual(response.json()["code"], "CC-SCR-099")
+
+    def test_draft_save_preserves_variant_before_continuation_is_created(self):
+        client = Client()
+        client.force_login(self.user_for_role("contact_center_module_administrator"))
+        response = client.post(
+            self.url,
+            data=json.dumps(
+                {
+                    "code": "CC-SCR-098",
+                    "title": "Неполный черновик",
+                    "root_question": "Хочу проверить черновик",
+                    "graph": {
+                        "nodes": [
+                            {
+                                "id": "start",
+                                "type": "start",
+                                "label": "Начало",
+                                "edges": [
+                                    {
+                                        "to": "",
+                                        "label": "Да",
+                                        "reply": "Да, хочу продолжить",
+                                        "keywords": ["продолжить"],
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        edge = response.json()["graph"]["nodes"][0]["edges"][0]
+        self.assertEqual(edge["to"], "")
+        self.assertEqual(edge["reply"], "Да, хочу продолжить")
+
+    def test_create_and_update_preserve_edge_reply(self):
+        client = Client()
+        client.force_login(
+            self.user_for_role("contact_center_module_administrator")
+        )
+        graph = {
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "start",
+                    "label": "Старт",
+                    "edges": [
+                        {
+                            "to": "answer",
+                            "label": "Android",
+                            "reply": "У меня Android",
+                            "keywords": ["android"],
+                        }
+                    ],
+                },
+                {"id": "answer", "type": "answer", "label": "Ответ"},
+            ]
+        }
+        created = client.post(
+            self.url,
+            data=json.dumps(
+                {
+                    "code": "CC-SCR-098",
+                    "title": "Проверка reply",
+                    "graph": graph,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(
+            created.json()["graph"]["nodes"][0]["edges"][0]["reply"],
+            "У меня Android",
+        )
+
+        graph["nodes"][0]["edges"][0]["reply"] = "У меня Android-смартфон"
+        updated = client.put(
+            f"{self.url}CC-SCR-098/",
+            data=json.dumps({"title": "Проверка reply", "graph": graph}),
+            content_type="application/json",
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(
+            updated.json()["graph"]["nodes"][0]["edges"][0]["reply"],
+            "У меня Android-смартфон",
+        )

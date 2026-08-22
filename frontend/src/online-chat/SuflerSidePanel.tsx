@@ -201,12 +201,22 @@ export function SuflerSidePanel({
               onInsert={
                 disabled || !onInsert
                   ? undefined
-                  : () => onInsert(hint.text)
+                  : () => onInsert(
+                    hint.source_type === 'scenario' && hint.operator_tip
+                      ? `${hint.text}\n\n${hint.operator_tip}`
+                      : hint.text,
+                  )
               }
               defaultExpanded={index === 0}
               data-testid={`chat-hint-${hint.rank}`}
             >
-              {hint.text}
+              <span>{hint.text}</span>
+              {hint.source_type === 'scenario' && hint.operator_tip ? (
+                <span className="chat-arm__scenario-question">
+                  <strong>Затем спросите клиента</strong>
+                  {hint.operator_tip}
+                </span>
+              ) : null}
             </HintCard>
           ))}
         </div>

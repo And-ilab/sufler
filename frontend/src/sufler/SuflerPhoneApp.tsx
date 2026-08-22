@@ -380,7 +380,13 @@ export function SuflerPhoneApp({
                         defaultExpanded={index === 0}
                         data-testid={`hint-${line.turnId}-${hint.rank}`}
                       >
-                        {hint.text}
+                        <span>{hint.text}</span>
+                        {hint.source_type === 'scenario' && hint.operator_tip ? (
+                          <span className="sufler-phone__scenario-question">
+                            <strong>Затем спросите клиента</strong>
+                            {hint.operator_tip}
+                          </span>
+                        ) : null}
                       </HintCard>
                     ))}
                   </div>

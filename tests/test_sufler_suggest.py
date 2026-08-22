@@ -27,6 +27,7 @@ from ingest.models import CCProductionChunk  # noqa: E402
 from ingest.pipeline import deterministic_embedding  # noqa: E402
 from orchestrator.sufler import (  # noqa: E402
     SuflerOrchestratorError,
+    _document_supports_query,
     _safe_ru_en_text,
     suggest,
 )
@@ -186,7 +187,96 @@ class SuflerSuggestPipelineTest(TestCase):
             )
         self.assertTrue(result["hints"])
         self.assertTrue(result["hints"][0]["text"].strip())
+        self.assertEqual(result["hints"][0]["citations"], [])
         self.assertIsNone(result["blocked_reason"])
+
+    def test_unrelated_document_is_not_used_as_answer_source(self):
+        document = {
+            "title": "Комплект документов для физических лиц",
+            "content": "Для открытия счёта клиент предъявляет паспорт.",
+        }
+        self.assertFalse(
+            _document_supports_query(document, "Хочу купить биткоин")
+        )
+
+    def test_gibberish_with_generic_bank_words_returns_no_hint(self):
+        document = {
+            "rank": 1,
+            "article_id": 8801,
+            "chunk_index": 0,
+            "title": "Перечень административных процедур Беларусбанка",
+            "content": "Для работников банка действует перечень административных процедур.",
+            "snippet": "Для работников банка действует перечень административных процедур.",
+            "permalink": "https://suz.local/articles/8801",
+            "relevance_score": 0.82,
+            "relevance_percent": 82,
+        }
+        with (
+            patch(
+                "orchestrator.sufler._retrieve_documents",
+                return_value=({"documents": [document]}, "cc_production"),
+            ),
+            patch.dict(os.environ, {"SUFLER_ALLOW_UNGROUNDED": "1"}, clear=False),
+        ):
+            for index, replica in enumerate(
+                ("Хаолд из Беларусь банк", "а он с беларусь банк"),
+                start=1,
+            ):
+                with self.subTest(replica=replica):
+                    result = suggest(
+                        replica,
+                        limit=1,
+                        session_id=f"gibberish-bank-{index}",
+                        gateway=ModelGateway.from_registry(),
+                    )
+                    self.assertEqual(result["hints"], [])
+                    self.assertEqual(result["blocked_reason"], "no_hint_needed")
+
+    def test_meaningful_query_can_answer_without_unrelated_citation(self):
+        document = {
+            "rank": 1,
+            "article_id": 8802,
+            "chunk_index": 0,
+            "title": "Комплект документов для физических лиц",
+            "content": "Для открытия счёта клиент предъявляет паспорт.",
+            "snippet": "Для открытия счёта клиент предъявляет паспорт.",
+            "permalink": "https://suz.local/articles/8802",
+            "relevance_score": 0.81,
+            "relevance_percent": 81,
+        }
+        with (
+            patch(
+                "orchestrator.sufler._retrieve_documents",
+                return_value=({"documents": [document]}, "cc_production"),
+            ),
+            patch.dict(os.environ, {"SUFLER_ALLOW_UNGROUNDED": "1"}, clear=False),
+        ):
+            result = suggest(
+                "Хочу купить биткоин",
+                limit=1,
+                gateway=ModelGateway.from_registry(),
+            )
+        self.assertTrue(result["hints"])
+        self.assertEqual(result["hints"][0]["citations"], [])
+
+    def test_int_07_accepted_sample_is_never_shown_as_source(self):
+        self.add_chunk(
+            7007,
+            "INT-07 accepted sample",
+            "Valid webhook body for INT-07 success check.",
+        )
+        with patch.dict(os.environ, {"SUFLER_ALLOW_UNGROUNDED": "1"}, clear=False):
+            result = suggest(
+                "Терминал не принимает карту",
+                limit=1,
+                gateway=ModelGateway.from_registry(),
+            )
+        citation_titles = [
+            citation["title"]
+            for hint in result["hints"]
+            for citation in hint["citations"]
+        ]
+        self.assertNotIn("INT-07 accepted sample", citation_titles)
 
     def test_commission_fixtures_ignored_and_llm_answers(self):
         self.add_chunk(

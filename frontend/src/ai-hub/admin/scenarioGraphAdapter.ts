@@ -104,6 +104,42 @@ export function updateClientVariant(
   }
 }
 
+export function updateClientReply(
+  graph: ScenarioGraph,
+  nodeId: string,
+  edgeIndex: number,
+  reply: string,
+): ScenarioGraph {
+  const source = graph.nodes.find((node) => node.id === nodeId)
+  const edge = source?.edges[edgeIndex]
+  if (!source || !edge) return graph
+  const previous = (edge.reply ?? '').trim()
+  const next = reply.trim()
+
+  return {
+    nodes: graph.nodes.map((node) => {
+      if (node.id === nodeId) {
+        return {
+          ...node,
+          edges: node.edges.map((item, index) => index === edgeIndex
+            ? {
+                ...item,
+                reply,
+                keywords: next ? [next] : item.keywords,
+              }
+            : item),
+        }
+      }
+      if (node.id !== edge.to) return node
+      const examples = node.examples.filter((example) => example !== previous)
+      return {
+        ...node,
+        examples: next && !examples.includes(next) ? [...examples, next] : examples,
+      }
+    }),
+  }
+}
+
 export function updateClientVariantTarget(
   graph: ScenarioGraph,
   nodeId: string,
@@ -166,6 +202,9 @@ export function validateScenario(
       }
       if (!edge.label.trim() && !edge.keywords.length) {
         errors.push(`${name}, вариант ${edgeIndex + 1}: опишите ответ клиента.`)
+      }
+      if (!(edge.reply ?? edge.label).trim()) {
+        errors.push(`${name}, вариант ${edgeIndex + 1}: укажите естественную реплику клиента.`)
       }
     })
   })

@@ -216,6 +216,42 @@ def _llm_misses_source(answer: str, document: Mapping[str, Any]) -> bool:
     return len(source_tokens & answer_tokens) < 2
 
 
+_GENERIC_QUERY_TOKENS = {
+    "банк",
+    "бела",
+    "беларус",
+    "беларусбанк",
+    "вопрос",
+    "клиент",
+    "надо",
+    "нужн",
+    "опера",
+    "пожал",
+    "подскаж",
+    "хочу",
+}
+
+
+def _query_specific_tokens(query: str) -> set[str]:
+    return {
+        token
+        for token in _tokens(query)
+        if len(token) >= 4 and token not in _GENERIC_QUERY_TOKENS
+    }
+
+
+def _document_supports_query(document: Mapping[str, Any], query: str) -> bool:
+    """Require lexical evidence before attributing an answer to a KB file."""
+    query_tokens = _query_specific_tokens(query)
+    if not query_tokens:
+        return False
+    source_tokens = _tokens(
+        f"{document.get('title') or ''}\n"
+        f"{document.get('content') or document.get('snippet') or ''}"
+    )
+    return bool(query_tokens & source_tokens)
+
+
 def _retrieval_query(text: str, dialog_context: str = "") -> str:
     """Build RAG query from latest client line + recent dialog turns."""
     latest = (text or "").strip()
@@ -665,6 +701,8 @@ def suggest(
         query=retrieval_text,
         min_relevance=min_relevance,
     )
+    if documents and not _document_supports_query(documents[0], normalized):
+        documents = []
     latency_ms["rag"] = _elapsed_ms(rag_started)
 
     if not documents:
@@ -674,6 +712,27 @@ def suggest(
             if not qu_result.get("documents")
             else "no_relevant_knowledge"
         )
+        if len(_query_specific_tokens(normalized)) < 2:
+            latency_ms["total"] = _elapsed_ms(total_started)
+            _log_latency(
+                request_id=correlation_id,
+                latency_ms=latency_ms,
+                hint_count=0,
+                document_count=0,
+            )
+            return {
+                "query": normalized,
+                "profile": PROFILE,
+                "kb_id": kb_label,
+                "kb_slugs": selected_slugs or [],
+                "hints": [],
+                "citations_enabled": True,
+                "blocked_reason": NO_HINT_REASON,
+                "min_relevance": min_relevance,
+                "latency_ms": latency_ms,
+                "request_id": correlation_id,
+                "scenario": None,
+            }
         skip_ungrounded = grounded_only or (
             not _allow_ungrounded() and not ignored_suz_fixtures_exist()
         )

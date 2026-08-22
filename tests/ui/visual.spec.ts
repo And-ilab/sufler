@@ -110,6 +110,156 @@ test('admin sidebar exposes all groups and routable screens', async ({ page }) =
   }
 })
 
+test('scenario catalog opens step editor, follows history and tests dialog', async ({ page }) => {
+  const scenario = {
+    code: 'CC-SCR-002',
+    title: 'Счёт внуку, 6 лет',
+    root_question: 'Хочу открыть счёт внуку, ему 6 лет',
+    status: 'production',
+    channels: 'both',
+    version_number: 4,
+    is_published: true,
+    updated_at: '2026-08-22T10:00:00Z',
+    updated_by: 'admin',
+    system_prompt: '',
+    graph: {
+      nodes: [
+        {
+          id: 'start',
+          type: 'start',
+          label: 'Определить представителя',
+          hint_text: 'Счёт ребёнку открывает законный представитель.',
+          clarify_text: 'Вы являетесь законным представителем ребёнка?',
+          examples: ['хочу открыть счёт внуку'],
+          intent_id: 'CC-SCR-002',
+          edges: [{ to: 'yes', label: 'Законный представитель', reply: 'Да, я его мама и законный представитель', keywords: ['мама', 'законный'] }],
+        },
+        {
+          id: 'yes',
+          type: 'end',
+          label: 'Документы',
+          hint_text: 'Возьмите паспорт и документ ребёнка.',
+          clarify_text: '',
+          examples: ['да'],
+          intent_id: '',
+          edges: [],
+        },
+      ],
+    },
+  }
+  await page.route('**/api/admin/scenarios/**', async (route) => {
+    const url = route.request().url()
+    if (url.endsWith('/test-run/')) {
+      const lines = route.request().postDataJSON().lines as string[]
+      const second = lines.length > 1
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          code: scenario.code,
+          title: scenario.title,
+          version_number: 4,
+          is_published: true,
+          path: second ? ['Определить представителя', 'Документы'] : ['Определить представителя'],
+          errors: [],
+          ok: true,
+          steps: lines.map((input, index) => ({
+            index: index + 1,
+            input,
+            node_id: index ? 'yes' : 'start',
+            label: index ? 'Документы' : 'Определить представителя',
+            hint_text: index ? 'Возьмите паспорт и документ ребёнка.' : 'Счёт ребёнку открывает законный представитель.',
+            clarify_text: index ? '' : 'Вы являетесь законным представителем ребёнка?',
+            selected_edge: index ? 'Законный представитель' : '',
+            available_choices: index ? [] : [{ label: 'Да', reply: 'Да, я законный представитель' }],
+            terminal: Boolean(index),
+            ok: true,
+          })),
+        }),
+      })
+      return
+    }
+    if (url.includes('/CC-SCR-002/')) {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(scenario) })
+      return
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [scenario], counts: { total: 1, production: 1, draft: 0 } }),
+    })
+  })
+
+  await openStory(page, 'ai-hub-admin-shell--default')
+  await page.evaluate(() => { document.cookie = 'csrftoken=visual-test; path=/' })
+  await page.locator('a[href="/ai-hub/admin/scenario_editor"]').click()
+  await expect(page.getByTestId('scenario-bindings')).toBeVisible()
+  const card = page.getByRole('button', { name: /Открыть сценарий CC-SCR-002/ })
+  await expect(card).toBeVisible()
+  await card.click()
+  await expect(page.getByRole('heading', { name: 'Когда запускается этот шаг' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Что может ответить клиент' })).toBeVisible()
+  await expect(page.getByLabel('Ответ клиента')).toHaveValue('Да, я его мама и законный представитель')
+  await page.getByRole('button', { name: /Продолжение Документы/ }).click()
+  await expect(page.getByLabel('Название шага 2')).toHaveValue('Документы')
+
+  await page.goBack()
+  await expect(page.getByTestId('scenario-bindings')).toBeVisible()
+  await page.goForward()
+  await expect(page.getByLabel('Название шага 1')).toHaveValue('Определить представителя')
+
+  await page.getByRole('button', { name: 'Тестировать' }).click()
+  await page.getByLabel('Следующая реплика клиента').fill('Хочу открыть счёт внуку')
+  await page.getByRole('button', { name: 'Отправить' }).click()
+  await expect(page.getByLabel('Тестовый диалог')).toContainText('Счёт ребёнку открывает законный представитель.')
+  await page.getByLabel('Примеры вариантов ответа').getByRole('button', { name: 'Да, я законный представитель', exact: true }).click()
+  await expect(page.getByLabel('Тестовый диалог')).toContainText('Сценарий завершён')
+})
+
+test('scenario creation waits for required fields and opens first step', async ({ page }) => {
+  let createRequests = 0
+  await page.route('**/api/admin/scenarios/**', async (route) => {
+    if (route.request().method() === 'POST') {
+      createRequests += 1
+      const payload = route.request().postDataJSON()
+      await route.fulfill({
+        contentType: 'application/json',
+        status: 201,
+        body: JSON.stringify({
+          ...payload,
+          status: 'draft',
+          version_number: 1,
+          is_published: false,
+          updated_at: '2026-08-22T12:00:00Z',
+          updated_by: 'admin',
+          system_prompt: '',
+        }),
+      })
+      return
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [], counts: { total: 0, production: 0, draft: 0 } }),
+    })
+  })
+
+  await openStory(page, 'ai-hub-admin-shell--default')
+  await page.evaluate(() => { document.cookie = 'csrftoken=visual-test; path=/' })
+  await page.locator('a[href="/ai-hub/admin/scenario_bindings"]').click()
+  await page.getByRole('button', { name: '+ Новый сценарий' }).click()
+
+  const submit = page.getByRole('button', { name: 'Создать и настроить шаги →' })
+  await expect(submit).toBeDisabled()
+  expect(createRequests).toBe(0)
+  await page.getByLabel('Название сценария *').fill('Проверка нового сценария')
+  await page.getByLabel('Что говорит клиент в начале *').fill('Хочу уточнить условия')
+  await expect(submit).toBeEnabled()
+  await submit.click()
+
+  await expect(page.getByLabel('Название шага 1')).toHaveValue('Начало разговора')
+  await expect(page.getByRole('heading', { name: 'Что спрашивает оператор' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '+ Добавить вариант ответа' })).toBeVisible()
+  expect(createRequests).toBe(1)
+})
+
 test('model params validates and saves through API', async ({ page }) => {
   await page.route('**/api/admin/model-registry/model-params/**', async (route) => {
     const payload = route.request().postDataJSON()

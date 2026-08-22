@@ -137,21 +137,21 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
     ],
   },
   scenario_editor: {
-    title: 'Редактор сценариев',
-    subtitle: 'Реестр, карта переходов, промпты и публикация сценариев КЦ.',
-    status: '52 сценария',
+    title: 'Настройка сценария',
+    subtitle: 'Пошаговая настройка реплик клиента, ответов оператора и продолжений.',
+    status: 'Редактор',
     cards: [['Опубликовано', '47', 'Рабочий контур'], ['Черновики', '5', 'Ожидают проверки'], ['Покрытие', '94%', 'Сценарии КЦ']],
   },
   scenario_test: {
     title: 'Тест сценария',
-    subtitle: 'Песочница прохождения веток и формирование отчёта.',
+    subtitle: 'Интерактивное прохождение диалога по репликам клиента.',
     status: 'Песочница',
     cards: [['Ветки', '12 / 12', 'Пройдено'], ['Среднее время', '1.4 с', 'Ответ узла'], ['Ошибки', '0', 'Последний прогон']],
   },
   scenario_bindings: {
     title: 'Сценарии суфлёра',
-    subtitle: 'Привязка сценариев к отделам, каналам и группам навыков.',
-    status: '38 привязок',
+    subtitle: 'Выберите сценарий, чтобы посмотреть или изменить разговор по шагам.',
+    status: 'Каталог',
     cards: [['Телефония', '18', 'Активные'], ['Онлайн-чат', '14', 'Активные'], ['Внутренний КЦ', '6', 'Тестовые']],
   },
   sufler_policies: {
@@ -267,6 +267,9 @@ export function AiHubAdminApp({
   const [screen, setScreen] = useState(initialScreen ?? fallbackScreen)
   const [profile, setProfile] = useState(initialProfile ?? resolved.profile)
   const [testScenarioCode, setTestScenarioCode] = useState('')
+  const [selectedScenarioCode, setSelectedScenarioCode] = useState(
+    () => new URLSearchParams(window.location.search).get('scenario') ?? '',
+  )
   const [demoRole, setDemoRole] = useState<DemoAdminRole>(() => demoRoleFromAuth(roles))
   const [saved, setSaved] = useState(false)
   const emptyFormState = {
@@ -319,6 +322,21 @@ export function AiHubAdminApp({
     }
   }, [skipSessionBootstrap])
 
+  useEffect(() => {
+    const syncFromLocation = () => {
+      const route = resolveAdminRoute(window.location.pathname)
+      const isRoot = window.location.pathname.replace(/\/+$/, '') === '/ai-hub/admin'
+      const nextScreen = isRoot ? defaultAdminScreen(roles) : route.screen
+      const scenarioCode = new URLSearchParams(window.location.search).get('scenario') ?? ''
+      setScreen(nextScreen)
+      setProfile(route.profile)
+      setSelectedScenarioCode(scenarioCode)
+      setTestScenarioCode(nextScreen === 'scenario_test' ? scenarioCode : '')
+    }
+    window.addEventListener('popstate', syncFromLocation)
+    return () => window.removeEventListener('popstate', syncFromLocation)
+  }, [roles])
+
   const visibleNav = useMemo(
     () => demoRoleSwitcher ? ADMIN_NAV : ADMIN_NAV.filter((item) => hasRole(roles, item)),
     [demoRoleSwitcher, roles],
@@ -350,7 +368,9 @@ export function AiHubAdminApp({
     }
   }, [demoRoleSwitcher, visibleNav, screen, profile])
 
-  const copy = SCREEN_COPY[screen]
+  const scenarioCatalogVisible = screen === 'scenario_bindings'
+    || (screen === 'scenario_editor' && !selectedScenarioCode)
+  const copy = SCREEN_COPY[scenarioCatalogVisible ? 'scenario_bindings' : screen]
   const screenBadge = activeItem?.label ?? copy.title
   const profileBadge = screen === 'model_params'
     ? profile === 'cc' ? 'Профиль суфлёра КЦ' : 'Профиль ассистента'
@@ -359,6 +379,9 @@ export function AiHubAdminApp({
   const navigate = (event: MouseEvent<HTMLAnchorElement>, item: AdminNavItem) => {
     event.preventDefault()
     setScreen(item.id)
+    if (item.id === 'scenario_editor') {
+      setSelectedScenarioCode('')
+    }
     setProfile(item.profile ?? (item.id === 'llm_config_cc' ? 'cc' : 'assistant'))
     setSaved(false)
     setModelFormState({ dirty: false, valid: false, saving: false, message: '' })
@@ -565,19 +588,48 @@ export function AiHubAdminApp({
             <div className="rpt-app admin-reports-embed">
               <AsrQaScreen />
             </div>
-          ) : screen === 'scenario_editor' ? (
+          ) : screen === 'scenario_editor' && selectedScenarioCode ? (
             <ScenarioEditorScreen
               canEdit={canEdit}
+              initialCode={selectedScenarioCode}
+              onBack={() => {
+                setScreen('scenario_bindings')
+                setSelectedScenarioCode('')
+                window.history.pushState({}, '', '/ai-hub/admin/scenario_bindings')
+              }}
               onOpenTest={(code) => {
                 setTestScenarioCode(code)
                 setScreen('scenario_test')
-                window.history.pushState({}, '', '/ai-hub/admin/scenario_test')
+                window.history.pushState({}, '', `/ai-hub/admin/scenario_test?scenario=${encodeURIComponent(code)}`)
+              }}
+              onScenarioCreated={(code) => {
+                setSelectedScenarioCode(code)
+                window.history.replaceState({}, '', `/ai-hub/admin/scenario_editor?scenario=${encodeURIComponent(code)}`)
               }}
             />
           ) : screen === 'scenario_test' ? (
-            <ScenarioTestScreen canEdit={canEdit} initialCode={testScenarioCode} />
-          ) : screen === 'scenario_bindings' ? (
-            <ScenarioBindingsScreen />
+            <ScenarioTestScreen
+              canEdit={canEdit}
+              initialCode={testScenarioCode || selectedScenarioCode}
+              onEditScenario={(code) => {
+                setSelectedScenarioCode(code)
+                setScreen('scenario_editor')
+                window.history.pushState({}, '', `/ai-hub/admin/scenario_editor?scenario=${encodeURIComponent(code)}`)
+              }}
+            />
+          ) : scenarioCatalogVisible ? (
+            <ScenarioBindingsScreen
+              onOpenScenario={(code) => {
+                setSelectedScenarioCode(code)
+                setScreen('scenario_editor')
+                window.history.pushState({}, '', `/ai-hub/admin/scenario_editor?scenario=${encodeURIComponent(code)}`)
+              }}
+              onCreateScenario={() => {
+                setSelectedScenarioCode('new')
+                setScreen('scenario_editor')
+                window.history.pushState({}, '', '/ai-hub/admin/scenario_editor?scenario=new')
+              }}
+            />
           ) : (
             <>
               <section className="admin-stats" aria-label={`Сводка экрана ${copy.title}`}>

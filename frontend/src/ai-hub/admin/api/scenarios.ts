@@ -7,6 +7,7 @@ export type ScenarioNodeType = 'start' | 'clarify' | 'answer' | 'branch' | 'esca
 export interface ScenarioEdge {
   to: string
   label: string
+  reply?: string
   keywords: string[]
 }
 
@@ -19,6 +20,7 @@ export interface ScenarioNode {
   examples: string[]
   intent_id: string
   edges: ScenarioEdge[]
+  position?: { x: number; y: number }
 }
 
 export interface ScenarioGraph {
@@ -57,11 +59,19 @@ export interface ScenarioTestRun {
     label: string
     hint_text: string
     clarify_text: string
+    selected_edge: string
+    available_choices: Array<{
+      label: string
+      reply: string
+    }>
+    terminal: boolean
     ok: boolean
   }>
   errors: string[]
   path: string[]
   ok: boolean
+  version_number: number
+  is_published: boolean
 }
 
 export interface SuflerScenarioProgress {
