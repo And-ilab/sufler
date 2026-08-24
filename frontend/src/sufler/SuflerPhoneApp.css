@@ -80,6 +80,49 @@
   grid-row: 1;
 }
 
+.sufler-phone__lamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, #e3b341 55%, var(--color-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, #e3b341 16%, var(--color-surface));
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.sufler-phone__lamp:hover {
+  border-color: #d39b12;
+  background: color-mix(in srgb, #e3b341 26%, var(--color-surface));
+}
+
+.sufler-phone__lamp-icon {
+  display: grid;
+  place-items: center;
+  color: #c48a00;
+}
+
+.sufler-phone__lamp small {
+  display: block;
+  color: #9a6d00;
+  font-size: .62rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.sufler-phone__lamp strong {
+  margin-right: 6px;
+  color: #8a5f00;
+}
+
+.sufler-phone__scenario .ui-button {
+  margin-left: auto;
+}
+
 .sufler-phone__footer {
   grid-row: 4;
   border-bottom: 0;

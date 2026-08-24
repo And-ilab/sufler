@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Card, HintCard, StatusBadge } from '../components'
 import { useAiHubColorTheme } from '../ai-hub/colorTheme'
 import {
@@ -203,7 +203,20 @@ export function SuflerPhoneApp({
   const { theme: colorTheme } = useAiHubColorTheme()
   const kb = useKnowledgeBaseSelection()
   const clientHistory = useClientSummary(clientPhone)
-  const { lines, connected, error, latencyMs, scenario, ingestLive, pushAsr, setLines } = useSuflerTranscript({
+  const {
+    lines,
+    connected,
+    error,
+    latencyMs,
+    scenario,
+    suggestedScenario,
+    ingestLive,
+    pushAsr,
+    enterSuggested,
+    exitActive,
+    resetConversation,
+    setRecognitionPaused,
+  } = useSuflerTranscript({
     callId: resolvedCallId,
     demoMode,
     demoLines,
@@ -229,6 +242,10 @@ export function SuflerPhoneApp({
 
   const live = useLiveDualAsr(handleUtterance)
 
+  useEffect(() => {
+    setRecognitionPaused(live.paused)
+  }, [live.paused, setRecognitionPaused])
+
   const submitTypedLine = () => {
     const text = typedLine.trim()
     if (!text) return
@@ -236,10 +253,21 @@ export function SuflerPhoneApp({
     setTypedLine('')
   }
 
-  const startLive = () => {
-    setLines([])
+  const clearImitation = () => {
+    resetConversation()
     liveTurns.current = { client: '', operator: '' }
+    setTypedLine('')
+    setFeedbackByHint({})
+  }
+
+  const startLive = () => {
+    clearImitation()
     void live.start()
+  }
+
+  const stopLive = () => {
+    live.stop()
+    clearImitation()
   }
 
   const blocks = useMemo(() => lines, [lines])
@@ -276,6 +304,28 @@ export function SuflerPhoneApp({
           <p className="sufler-phone__eyebrow">Суфлёр · активный звонок</p>
           <h1>Телефония</h1>
         </div>
+        {suggestedScenario && !scenario?.path?.length ? (
+          <button
+            type="button"
+            className="sufler-phone__lamp"
+            data-testid="sufler-scenario-lamp"
+            onClick={() => void enterSuggested(suggestedScenario.code)}
+          >
+            <span className="sufler-phone__lamp-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18">
+                <path
+                  fill="currentColor"
+                  d="M9 21h6v-1.5H9zm3-19a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2zm0 2a5 5 0 0 1 2.9 9.1l-.4.3V15.5h-5v-2.1l-.4-.3A5 5 0 0 1 12 4z"
+                />
+              </svg>
+            </span>
+            <span>
+              <small>Похожий сценарий</small>
+              <strong>{suggestedScenario.code}</strong>
+              {suggestedScenario.title}
+            </span>
+          </button>
+        ) : null}
         <div className="sufler-phone__meta">
           <KbPicker
             catalog={kb.catalog}
@@ -289,8 +339,14 @@ export function SuflerPhoneApp({
             }
             compact
           />
-          <StatusBadge status={live.recording || connected ? 'success' : 'warning'}>
-            {live.recording ? 'Имитация' : connected ? 'ASR активен' : 'ASR офлайн'}
+          <StatusBadge status={live.paused ? 'warning' : live.recording ? 'success' : connected ? 'info' : 'warning'}>
+            {live.paused
+              ? 'Распознавание на паузе'
+              : live.recording
+                ? 'Имитация'
+                : connected
+                  ? 'Готов'
+                  : 'ASR офлайн'}
           </StatusBadge>
           <StatusBadge status="info">Консультация</StatusBadge>
           <span>{operatorName}</span>
@@ -308,6 +364,9 @@ export function SuflerPhoneApp({
               </span>
             ))}
           </span>
+          <Button variant="ghost" onClick={() => void exitActive()}>
+            Выйти из сценария
+          </Button>
         </div>
       ) : null}
 
@@ -438,12 +497,11 @@ export function SuflerPhoneApp({
                 .filter(Boolean)
                 .join(' · ')
             : connected
-              ? 'ASR активен · '
+              ? 'Готов к имитации'
               : ''}
-          {!live.recording &&
-            (latencyMs != null
-              ? `p95 подсказки ${Math.round(latencyMs)} мс`
-              : 'p95 подсказки 1.4 с')}
+          {!live.recording && latencyMs != null
+            ? ` · p95 подсказки ${Math.round(latencyMs)} мс`
+            : ''}
         </span>
         <div className="sufler-phone__live">
           {live.recording ? (
@@ -500,7 +558,13 @@ export function SuflerPhoneApp({
                   Системный звук
                 </Button>
               )}
-              <Button variant="secondary" onClick={live.stop}>
+              <Button
+                variant="ghost"
+                onClick={live.paused ? live.resume : live.pause}
+              >
+                {live.paused ? 'Продолжить' : 'Пауза'}
+              </Button>
+              <Button variant="secondary" onClick={stopLive}>
                 Стоп
               </Button>
             </>

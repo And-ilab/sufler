@@ -72,10 +72,17 @@ _EMPTY_INTENT = (
     "расскажите гороскоп на сегодня",
 )
 SESSION_TTL = timedelta(minutes=45)
-SEMANTIC_THRESHOLD = 0.86
+SEMANTIC_THRESHOLD = 0.80
 SEMANTIC_MARGIN = 0.02
-SEMANTIC_THRESHOLD_EN = 0.84
-SEMANTIC_MARGIN_EN = 0.035
+SEMANTIC_THRESHOLD_EN = 0.78
+SEMANTIC_MARGIN_EN = 0.03
+SEMANTIC_SUGGEST_THRESHOLD = 0.60
+SEMANTIC_SUGGEST_THRESHOLD_EN = 0.58
+LEXICAL_AUTO_THRESHOLD = 4
+LEXICAL_SUGGEST_THRESHOLD = 1
+UNMATCHED_HINT = (
+    "Клиент не выбрал предложенные варианты — уточните, что имеется в виду."
+)
 _semantic_cache_signature: tuple[tuple[int, str], ...] | None = None
 _semantic_cache_backend = ""
 _semantic_cache_vectors: dict[int, list[float]] = {}
@@ -103,6 +110,28 @@ class ScenarioProgress:
         }
 
 
+@dataclass(frozen=True)
+class SuggestedScenario:
+    code: str
+    title: str
+    confidence: float
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "title": self.title,
+            "confidence": round(self.confidence, 3),
+        }
+
+
+@dataclass(frozen=True)
+class ScenarioTurn:
+    progress: ScenarioProgress | None = None
+    suggested: SuggestedScenario | None = None
+    session_active: bool = False
+    unmatched: bool = False
+
+
 def normalize(text: str) -> str:
     lowered = (text or "").casefold().replace("ё", "е")
     lowered = _PUNCT_RE.sub(" ", lowered)
@@ -118,6 +147,115 @@ _MATCH_STOPWORDS = {
     "ли", "мне", "мой", "моя", "мое", "на", "нужно", "о", "от", "по",
     "с", "у", "хочу", "что", "я",
 }
+_WEAK_OVERLAP = {
+    "открыть", "оформить", "подскажите", "можно", "нужно", "счёт", "счет",
+    "карта", "карты", "деньги", "перевод", "хотеть", "взять", "сделать",
+}
+_WORD_NUMBERS = {
+    "ноль": 0, "один": 1, "одна": 1, "одно": 1, "два": 2, "две": 2,
+    "три": 3, "четыре": 4, "пять": 5, "шесть": 6, "семь": 7, "восемь": 8,
+    "девять": 9, "десять": 10, "одиннадцать": 11, "двенадцать": 12,
+    "тринадцать": 13, "четырнадцать": 14, "пятнадцать": 15, "шестнадцать": 16,
+    "семнадцать": 17, "восемнадцать": 18,
+}
+_CHILD_TOPIC = (
+    "счет", "счёт", "вклад", "ребен", "ребён", "внук", "сын", "доч",
+    "несовершеннолетн", "открыть", "маленьк", "карт",
+)
+_MINOR_PROFILE = ("несовершеннолетн", "14-лет", "внук", "ребен", "до 14")
+_MINOR_QUERY = ("маленьк", "несовершеннолетн", "ребен", "внук", "подрост", "школьн")
+_MINOR_PRODUCT = ("карт", "счет", "счёт", "вклад", "открыть")
+_NFC_PROFILE = ("nfc", "оплата телефон", "apple pay", "apple")
+_NFC_QUERY = (
+    "apple pay",
+    "apple",
+    "pay",
+    "айфон",
+    "iphone",
+    "nfc",
+    "эпл",
+    "wallet",
+    "samsung pay",
+    "google pay",
+)
+_PAYMENT_INTENT = ("оплат", "плат", "pay", "nfc", "apple", "айфон", "iphone")
+_CRYPTO_MARKERS = ("крипт", "биткоин", "эфир", "ethereum", "usdt", "binance")
+_CRYPTO_BLOCKERS = ("apple", "pay", "айфон", "iphone", "nfc", "эпл")
+# If the scenario title is about a topic, these query stems count as the same
+# theme — no need to list them in examples.
+_TOPIC_CLUSTERS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        ("рф", "росси"),
+        (
+            "москв",
+            "питер",
+            "петербург",
+            "санкт",
+            "спб",
+            "росси",
+            "рф",
+            "сбер",
+        ),
+    ),
+    (
+        ("крипт", "бирж", "биткоин"),
+        (
+            "эфир",
+            "ethereum",
+            "eth",
+            "биткоин",
+            "btc",
+            "usdt",
+            "binance",
+            "bynex",
+        ),
+    ),
+    (
+        ("автокредит", "автомобил"),
+        ("машин", "автокредит", "belgee", "белджи"),
+    ),
+)
+_TRANSFER_STEMS = ("перевод", "перевест", "отправит", "перечисл", "кинуть")
+_GENERIC_TRANSFER_OBJECT = (
+    "деньг",
+    "средств",
+    "телефон",
+    "номер",
+    "карт",
+    "счет",
+    "счёт",
+    "комисс",
+    "просто",
+    "как",
+    "когда",
+    "видн",
+)
+_RF_QUERY = (
+    "рф",
+    "росси",
+    "москв",
+    "питер",
+    "петербург",
+    "санкт",
+    "спб",
+    "сбер",
+    "за рубеж",
+    "за границ",
+    "заграниц",
+)
+_OTHER_RE = re.compile(
+    r"ни\s+то\s+ни|ни\s+та\s+ни|ни\s+одно|вообще\s+не\s+то|не\s+то\s+не\s+то|"
+    r"ни\s+карт|другая\s+карт|другой\s+вариант|не\s+подходит|никак(?:ая|ой|ое)?|"
+    r"совсем\s+друг|вообще\s+друг",
+    re.IGNORECASE,
+)
+_DECLINE_RE = re.compile(
+    r"не\s+оформл|не\s+будем\s+оформ|не\s+хочу\s+оформ|не\s+буду\s+оформ|"
+    r"не\s+надо\b|не\s+нужно\b|не\s+буду\b|не\s+хотим\b|"
+    r"передумал|отказыва|не\s+интересует|другой\s+вопрос|"
+    r"не\s+об\s+этом|не\s+про\s+это",
+    re.IGNORECASE,
+)
 
 
 _PHATIC = (*_GREETING, *_THANKS, *_HOLD, *_FAREWELL, *_ACK, *_SHORT_ACK)
@@ -151,6 +289,207 @@ def classify_turn(text: str) -> str | None:
     return "no_hint.ack"
 
 
+def _with_aliases(text: str) -> str:
+    norm = normalize(text)
+    extras: list[str] = []
+    tokens = _tokens(norm)
+    has_credit = "кредит" in tokens or "автокредит" in tokens
+    has_auto = any(
+        token.startswith(stem)
+        for token in tokens
+        for stem in ("авто", "машин", "автомобил")
+    )
+    if "автокредит" in norm or (has_credit and has_auto):
+        extras.extend(["автокредит", "кредит на автомобиль", "кредит на машину"])
+    if "маленьк" in norm:
+        extras.extend(["несовершеннолетний", "открыть счёт"])
+    if (
+        "apple pay" in norm
+        or "эпл пей" in norm
+        or ("apple" in tokens and "pay" in tokens)
+        or "айфон" in tokens
+        or "iphone" in tokens
+    ):
+        extras.extend(["оплата телефоном", "nfc", "apple pay"])
+    if not extras:
+        return text
+    return f"{text} {' '.join(extras)}"
+
+
+def _extract_ages(text: str) -> list[float]:
+    norm = normalize(text)
+    ages: list[float] = []
+    for match in re.finditer(
+        r"(\d+(?:[.,]\d+)?)\s+с\s+половиной(?:\s+(?:лет|года|год))?",
+        norm,
+    ):
+        ages.append(float(match.group(1).replace(",", ".")) + 0.5)
+    for word, value in _WORD_NUMBERS.items():
+        if re.search(rf"\b{re.escape(word)}\s+с\s+половиной", norm):
+            ages.append(float(value) + 0.5)
+    for match in re.finditer(r"\b(\d{1,2})(?:[.,](\d))?\s+(?:лет|года|год)\b", norm):
+        whole = float(match.group(1))
+        if match.group(2):
+            whole += float(match.group(2)) / 10
+        ages.append(whole)
+    for word, value in _WORD_NUMBERS.items():
+        if re.search(
+            rf"\b{re.escape(word)}(?:надцати)?(?:летн\w*|\s+(?:лет|года|год))\b",
+            norm,
+        ):
+            ages.append(float(value))
+    for match in re.finditer(r"\b(\d{1,2})\s+с\s+половиной\b", norm):
+        ages.append(float(match.group(1)) + 0.5)
+    return ages
+
+
+def _has_child_topic(text: str) -> bool:
+    norm = normalize(text)
+    return any(marker in norm for marker in _CHILD_TOPIC)
+
+
+def _contains_stem(blob: str, stems: tuple[str, ...]) -> bool:
+    norm = normalize(blob)
+    tokens = set(_tokens(norm))
+    for stem in stems:
+        if " " in stem:
+            if stem in norm:
+                return True
+            continue
+        if len(stem) <= 3:
+            if stem in tokens:
+                return True
+            continue
+        if stem in norm:
+            return True
+    return False
+
+
+def _topic_boost(text: str, profile: str) -> int:
+    """Raise the score when the replica is a specific case of the scenario theme."""
+    query = normalize(text)
+    prof = normalize(profile)
+    if not query or not prof:
+        return 0
+    boost = 0
+    for keys, values in _TOPIC_CLUSTERS:
+        if not _contains_stem(prof, keys):
+            continue
+        if not _contains_stem(query, values):
+            continue
+        is_rf = any(key in {"рф", "росси"} for key in keys)
+        if is_rf and not (
+            _contains_stem(query, _TRANSFER_STEMS)
+            and _contains_stem(prof, _TRANSFER_STEMS)
+        ):
+            continue
+        is_crypto = any(key in {"крипт", "бирж", "биткоин"} for key in keys)
+        if is_crypto and _contains_stem(query, _CRYPTO_BLOCKERS) and not _contains_stem(
+            query, _CRYPTO_MARKERS
+        ):
+            continue
+        boost = max(boost, 5)
+    if (
+        _contains_stem(prof, _MINOR_PROFILE)
+        and _contains_stem(query, _MINOR_QUERY)
+        and _contains_stem(query, _MINOR_PRODUCT)
+    ):
+        boost = max(boost, 5)
+    if _contains_stem(prof, _NFC_PROFILE) and (
+        _contains_stem(query, _NFC_QUERY)
+        or (
+            _contains_stem(query, _PAYMENT_INTENT)
+            and _contains_stem(query, ("телефон", "айфон", "iphone"))
+        )
+    ):
+        boost = max(boost, 5)
+    return boost
+
+
+def _is_generic_transfer_query(text: str) -> bool:
+    """True for «перевод по телефону» without a destination or asset."""
+    query = normalize(text)
+    if not query or not _contains_stem(query, _TRANSFER_STEMS):
+        return False
+    leftover = [
+        token
+        for token in _tokens(query)
+        if token not in _MATCH_STOPWORDS
+        and not _contains_stem(token, _TRANSFER_STEMS)
+        and not _contains_stem(token, _GENERIC_TRANSFER_OBJECT)
+    ]
+    return not leftover
+
+
+def _scenario_conflicts_query(text: str, scenario: DialogScenario) -> bool:
+    """Block an obviously wrong theme, e.g. Apple Pay vs crypto exchange."""
+    query = normalize(text)
+    blob = normalize(f"{scenario.title} {scenario.root_question} {scenario.code}")
+    if _contains_stem(query, _CRYPTO_BLOCKERS) and not _contains_stem(
+        query, _CRYPTO_MARKERS
+    ):
+        if _contains_stem(blob, ("крипт", "бирж")):
+            return True
+    if _contains_stem(query, _MINOR_QUERY) and _contains_stem(query, _MINOR_PRODUCT):
+        if _contains_stem(blob, ("крипт", "автокредит")):
+            return True
+    # «Перевод в РФ» is a destination, not any phone transfer. Embeddings
+    # otherwise pull generic «перевод по телефону» into this scenario.
+    if _contains_stem(blob, ("рф", "росси")) and _contains_stem(
+        query, _TRANSFER_STEMS
+    ):
+        if not _contains_stem(query, _RF_QUERY):
+            return True
+    if _is_generic_transfer_query(query) and _contains_stem(
+        blob, ("крипт", "бирж", "биткоин")
+    ):
+        return True
+    return False
+
+
+def _age_boost(text: str, profile: str) -> int:
+    ages = _extract_ages(text)
+    if not ages or not _has_child_topic(text):
+        return 0
+    profile_norm = normalize(profile)
+    boost = 0
+    for age in ages:
+        if age < 14 and re.search(
+            r"до\s*14|младше\s*14|\b6\s+лет|внук|ребенк|ребёнк",
+            profile_norm,
+        ):
+            boost = max(boost, 5)
+        if 13.5 <= age <= 15 and re.search(r"14|четырнадцат", profile_norm):
+            if "до 14" not in profile_norm and "младше 14" not in profile_norm:
+                boost = max(boost, 4)
+    return boost
+
+
+def _is_other_reply(text: str) -> bool:
+    return bool(_OTHER_RE.search(normalize(text)))
+
+
+def _is_decline_reply(text: str) -> bool:
+    return bool(_DECLINE_RE.search(normalize(text)))
+
+
+def _edge_is_fallback(edge: Mapping[str, Any]) -> bool:
+    return bool(edge.get("is_fallback"))
+
+
+def _start_profile(scenario: DialogScenario, start: Mapping[str, Any]) -> str:
+    return " ".join(
+        part
+        for part in [
+            scenario.title,
+            scenario.root_question,
+            str(start.get("label") or ""),
+            " ".join(str(item) for item in start.get("examples") or []),
+        ]
+        if part
+    )
+
+
 def _score(
     text: str,
     keywords: list[str],
@@ -158,7 +497,7 @@ def _score(
     *,
     allow_example_overlap: bool = True,
 ) -> int:
-    norm = normalize(text)
+    norm = normalize(_with_aliases(text))
     if not norm:
         return 0
     score = 0
@@ -211,6 +550,10 @@ def _score(
             elif allow_example_overlap and len(overlap) >= 3:
                 current = min(8, len(overlap) * 2)
             elif allow_example_overlap and len(overlap) >= 2:
+                current = 3
+            elif allow_example_overlap and any(
+                token not in _WEAK_OVERLAP and len(token) >= 6 for token in overlap
+            ):
                 current = 3
         if current > best_example:
             best_example = current
@@ -292,15 +635,52 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
     return dot / (left_norm * right_norm)
 
 
+def _graph_profile_text(graph: Mapping[str, Any] | None) -> str:
+    parts: list[str] = []
+    expansion = str((graph or {}).get("semantic_expansion") or "").strip()
+    if expansion:
+        parts.append(expansion)
+    for node in (graph or {}).get("nodes") or []:
+        if not isinstance(node, Mapping):
+            continue
+        for key in ("label", "hint_text", "clarify_text"):
+            value = str(node.get(key) or "").strip()
+            if value:
+                parts.append(value)
+        for example in node.get("examples") or []:
+            text = str(example or "").strip()
+            if text:
+                parts.append(text)
+        for edge in node.get("edges") or []:
+            if not isinstance(edge, Mapping):
+                continue
+            for key in ("label", "reply"):
+                value = str(edge.get(key) or "").strip()
+                if value:
+                    parts.append(value)
+    return ". ".join(parts)[:2400]
+
+
 def _semantic_profile(
     scenario: DialogScenario,
+    graph: Mapping[str, Any],
     start: Mapping[str, Any],
 ) -> str:
+    title = str(scenario.title or "").strip()
+    root = str(scenario.root_question or "").strip()
     parts = [
-        scenario.title,
-        scenario.root_question,
+        f"Банковский сценарий: {title}." if title else "",
+        f"Клиент обычно говорит: {root}." if root else "",
+        (
+            f"Подходят любые формулировки про ту же тему «{title}», "
+            "включая частные случаи, бренды и синонимы именно этой темы, "
+            "а не соседних продуктов."
+            if title
+            else ""
+        ),
         str(start.get("label") or ""),
         *[str(item) for item in start.get("examples") or []],
+        _graph_profile_text(graph),
     ]
     return ". ".join(part.strip() for part in parts if part and part.strip())
 
@@ -321,10 +701,12 @@ def _semantic_vectors(
     from core.embeddings import embed_texts_with_backend
 
     profiles = [
-        _semantic_profile(scenario, start)
-        for scenario, _graph, start in candidates
+        _semantic_profile(scenario, graph, start)
+        for scenario, graph, start in candidates
     ]
     vectors, backend = embed_texts_with_backend(profiles, is_query=False)
+    if backend not in {"http", "local"}:
+        return {}, backend
     _semantic_cache_signature = signature
     _semantic_cache_backend = backend
     _semantic_cache_vectors = {
@@ -380,21 +762,42 @@ def _warm_semantic_vectors(
     ).start()
 
 
-def _match_start_semantic(
+def _semantic_thresholds(text: str) -> tuple[float, float, float, float]:
+    has_cyrillic = bool(re.search(r"[а-яё]", text, re.IGNORECASE))
+    auto = _env_float(
+        "SCENARIO_SEMANTIC_THRESHOLD",
+        SEMANTIC_THRESHOLD if has_cyrillic else SEMANTIC_THRESHOLD_EN,
+    )
+    suggest = _env_float(
+        "SCENARIO_SEMANTIC_SUGGEST_THRESHOLD",
+        SEMANTIC_SUGGEST_THRESHOLD if has_cyrillic else SEMANTIC_SUGGEST_THRESHOLD_EN,
+    )
+    margin = _env_float(
+        "SCENARIO_SEMANTIC_MARGIN",
+        SEMANTIC_MARGIN if has_cyrillic else SEMANTIC_MARGIN_EN,
+    )
+    suggest_margin = _env_float(
+        "SCENARIO_SEMANTIC_SUGGEST_MARGIN",
+        0.01 if has_cyrillic else 0.015,
+    )
+    return auto, suggest, margin, suggest_margin
+
+
+def _semantic_rank(
     text: str,
     candidates: list[
         tuple[DialogScenario, dict[str, Any], dict[str, Any]]
     ],
-) -> tuple[DialogScenario, dict[str, Any], dict[str, Any]] | None:
+) -> list[tuple[float, DialogScenario, dict[str, Any], dict[str, Any]]]:
     if not _semantic_enabled():
-        return None
+        return []
     content_tokens = set(_tokens(text)) - _MATCH_STOPWORDS
-    if len(content_tokens) < 3:
-        return None
-    if _semantic_cache_signature != _semantic_signature(candidates):
-        _warm_semantic_vectors(candidates)
-        return None
+    if len(content_tokens) < 1:
+        return []
     try:
+        if _semantic_cache_signature != _semantic_signature(candidates):
+            _warm_semantic_vectors(candidates)
+            return []
         from core.embeddings import embed_query_with_backend
 
         vectors = _semantic_cache_vectors
@@ -402,10 +805,10 @@ def _match_start_semantic(
         query_vector, query_backend = embed_query_with_backend(text)
     except Exception as exc:  # noqa: BLE001 - semantic routing must fail open
         logger.warning("scenario semantic matching unavailable: %s", exc)
-        return None
+        _warm_semantic_vectors(candidates)
+        return []
     if profile_backend not in {"http", "local"} or query_backend != profile_backend:
-        return None
-
+        return []
     ranked = sorted(
         (
             (
@@ -418,37 +821,82 @@ def _match_start_semantic(
                 start,
             )
             for scenario, graph, start in candidates
+            if not _scenario_conflicts_query(text, scenario)
         ),
         key=lambda item: item[0],
         reverse=True,
     )
+    return [item for item in ranked if item[0] > 0]
+
+
+def _pick_semantic(
+    ranked: list[tuple[float, DialogScenario, dict[str, Any], dict[str, Any]]],
+    *,
+    threshold: float,
+    margin: float,
+    lexical_scores: dict[str, int] | None = None,
+) -> tuple[float, DialogScenario, dict[str, Any], dict[str, Any]] | None:
     if not ranked:
         return None
     best = ranked[0]
-    runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
-    has_cyrillic = bool(re.search(r"[а-яё]", text, re.IGNORECASE))
-    threshold = _env_float(
-        "SCENARIO_SEMANTIC_THRESHOLD",
-        SEMANTIC_THRESHOLD if has_cyrillic else SEMANTIC_THRESHOLD_EN,
-    )
-    margin = _env_float(
-        "SCENARIO_SEMANTIC_MARGIN",
-        SEMANTIC_MARGIN if has_cyrillic else SEMANTIC_MARGIN_EN,
-    )
-    if best[0] < threshold or best[0] - runner_up < margin:
+    if best[0] < threshold:
         return None
-    return best[1], best[2], best[3]
+    runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
+    if best[0] - runner_up >= margin:
+        return best
+    scores = lexical_scores or {}
+    close = [
+        item
+        for item in ranked
+        if item[0] >= threshold and best[0] - item[0] < margin
+    ]
+    if not close:
+        return None
+    picked = max(
+        close,
+        key=lambda item: (
+            scores.get(item[1].code, 0),
+            len(str(item[1].title or "").strip()),
+            item[0],
+        ),
+    )
+    if scores.get(picked[1].code, 0) <= 0:
+        return None
+    return picked
 
 
-def _match_start(
+def _match_start_semantic(
     text: str,
-    *,
-    channel: str = "",
-) -> tuple[DialogScenario, dict[str, Any], dict[str, Any]] | None:
-    best: tuple[int, DialogScenario, dict[str, Any], dict[str, Any]] | None = None
     candidates: list[
         tuple[DialogScenario, dict[str, Any], dict[str, Any]]
-    ] = []
+    ],
+) -> tuple[DialogScenario, dict[str, Any], dict[str, Any]] | None:
+    auto, _suggest, margin, _suggest_margin = _semantic_thresholds(text)
+    lexical_scores = {
+        item[1].code: item[0] for item in _lexical_start_scores(text, candidates)
+    }
+    picked = _pick_semantic(
+        _semantic_rank(text, candidates),
+        threshold=auto,
+        margin=margin,
+        lexical_scores=lexical_scores,
+    )
+    if picked is None:
+        return None
+    return picked[1], picked[2], picked[3]
+
+
+def warm_scenario_semantics(channel: str = "") -> None:
+    """Build scenario embedding cache in the background after process start."""
+    candidates = _iter_start_candidates(channel)
+    if candidates:
+        _warm_semantic_vectors(candidates)
+
+
+def _iter_start_candidates(
+    channel: str = "",
+) -> list[tuple[DialogScenario, dict[str, Any], dict[str, Any]]]:
+    candidates: list[tuple[DialogScenario, dict[str, Any], dict[str, Any]]] = []
     for scenario, graph in published_graphs():
         if not _scenario_supports_channel(scenario, channel):
             continue
@@ -457,22 +905,110 @@ def _match_start(
         if start is None:
             continue
         candidates.append((scenario, graph, start))
+    return candidates
+
+
+def _lexical_start_scores(
+    text: str,
+    candidates: list[tuple[DialogScenario, dict[str, Any], dict[str, Any]]],
+) -> list[tuple[int, DialogScenario, dict[str, Any], dict[str, Any]]]:
+    scored: list[tuple[int, DialogScenario, dict[str, Any], dict[str, Any]]] = []
+    for scenario, graph, start in candidates:
+        if _scenario_conflicts_query(text, scenario):
+            continue
         keywords = [scenario.title, scenario.root_question, scenario.code]
         score = _score(
             text,
             keywords,
             list(start.get("examples") or []),
-            allow_example_overlap=False,
+            allow_example_overlap=True,
         )
-        if score >= 4 and (best is None or score > best[0]):
-            best = (score, scenario, graph, start)
-    if best is None:
-        return _match_start_semantic(text, candidates)
-    return best[1], best[2], best[3]
+        profile = _start_profile(scenario, start)
+        score += _age_boost(text, profile)
+        score += _topic_boost(text, profile)
+        if score:
+            scored.append((score, scenario, graph, start))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return scored
 
 
-def _match_edge(text: str, node: Mapping[str, Any], nodes: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
-    best: tuple[int, dict[str, Any]] | None = None
+def _match_start(
+    text: str,
+    *,
+    channel: str = "",
+) -> tuple[DialogScenario, dict[str, Any], dict[str, Any]] | None:
+    candidates = _iter_start_candidates(channel)
+    lexical = _lexical_start_scores(text, candidates)
+    if lexical and lexical[0][0] >= LEXICAL_AUTO_THRESHOLD:
+        return lexical[0][1], lexical[0][2], lexical[0][3]
+    semantic = _match_start_semantic(text, candidates)
+    if semantic is not None:
+        return semantic
+    return None
+
+
+def _suggest_start(
+    text: str,
+    *,
+    channel: str = "",
+) -> SuggestedScenario | None:
+    if _match_start(text, channel=channel) is not None:
+        return None
+    candidates = _iter_start_candidates(channel)
+    auto, suggest, _margin, suggest_margin = _semantic_thresholds(text)
+    lexical = _lexical_start_scores(text, candidates)
+    lexical_scores = {item[1].code: item[0] for item in lexical}
+    picked = _pick_semantic(
+        _semantic_rank(text, candidates),
+        threshold=suggest,
+        margin=suggest_margin,
+        lexical_scores=lexical_scores,
+    )
+    if picked is not None and picked[0] < auto:
+        return SuggestedScenario(
+            code=picked[1].code,
+            title=picked[1].title,
+            confidence=float(picked[0]),
+        )
+    if not lexical:
+        return None
+    best_score, scenario, _graph, _start = lexical[0]
+    if LEXICAL_SUGGEST_THRESHOLD <= best_score < LEXICAL_AUTO_THRESHOLD:
+        return SuggestedScenario(
+            code=scenario.code,
+            title=scenario.title,
+            confidence=min(0.84, 0.55 + best_score / 20),
+        )
+    return None
+
+
+def _edge_examples(edge: Mapping[str, Any], target: Mapping[str, Any]) -> list[str]:
+    examples = [str(item) for item in target.get("examples") or []]
+    reply = str(edge.get("reply") or "").strip()
+    if reply:
+        examples.append(reply)
+    return examples
+
+
+def _score_edge(text: str, edge: Mapping[str, Any], target: Mapping[str, Any]) -> int:
+    keywords = list(edge.get("keywords") or [])
+    keywords.append(str(edge.get("label") or ""))
+    score = _score(text, keywords, _edge_examples(edge, target))
+    norm = normalize(text)
+    if norm in {"да", "ага", "угу"} and any(normalize(k) in {"да"} for k in keywords):
+        score = max(score, 2)
+    if norm in {"нет"} and any(normalize(k) in {"нет"} for k in keywords):
+        score = max(score, 2)
+    return score
+
+
+def _match_edge(
+    text: str,
+    node: Mapping[str, Any],
+    nodes: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    regular: tuple[int, dict[str, Any]] | None = None
+    fallback_target: dict[str, Any] | None = None
     for edge in node.get("edges") or []:
         if not isinstance(edge, Mapping):
             continue
@@ -480,19 +1016,20 @@ def _match_edge(text: str, node: Mapping[str, Any], nodes: dict[str, dict[str, A
         target = nodes.get(target_id)
         if target is None:
             continue
-        keywords = list(edge.get("keywords") or [])
-        keywords.append(str(edge.get("label") or ""))
-        examples = list(target.get("examples") or [])
-        score = _score(text, keywords, examples)
-        # Short yes/no should still move the branch.
-        norm = normalize(text)
-        if norm in {"да", "ага", "угу"} and any(normalize(k) in {"да"} for k in keywords):
-            score = max(score, 2)
-        if norm in {"нет"} and any(normalize(k) in {"нет"} for k in keywords):
-            score = max(score, 2)
-        if score >= 2 and (best is None or score > best[0]):
-            best = (score, target)
-    return best[1] if best else None
+        if _edge_is_fallback(edge):
+            fallback_target = target
+        score = _score_edge(text, edge, target)
+        if _edge_is_fallback(edge):
+            continue
+        if score >= 2 and (regular is None or score > regular[0]):
+            regular = (score, target)
+    if _is_decline_reply(text):
+        return fallback_target
+    if regular is not None:
+        return regular[1]
+    if fallback_target is not None and _is_other_reply(text):
+        return fallback_target
+    return None
 
 
 def _save_session(session_key: str, progress: ScenarioProgress, scenario: DialogScenario) -> None:
@@ -514,27 +1051,58 @@ def clear_scenario_session(session_key: str) -> None:
         DialogScenarioSession.objects.filter(session_key=key).delete()
 
 
-def advance_scenario(
-    text: str,
+def _load_session(session_key: str) -> DialogScenarioSession | None:
+    key = (session_key or "").strip()[:160]
+    if not key:
+        return None
+    session = (
+        DialogScenarioSession.objects.select_related(
+            "scenario",
+            "scenario__current_version",
+        )
+        .filter(session_key=key)
+        .first()
+    )
+    if session and session.updated_at < timezone.now() - SESSION_TTL:
+        session.delete()
+        return None
+    return session
+
+
+def enter_scenario(
+    code: str,
     *,
     session_key: str = "",
     channel: str = "",
 ) -> ScenarioProgress | None:
-    """Move along a published graph or start a new one from the replica."""
+    from hub.scenario_service import get_scenario
+
+    try:
+        scenario = get_scenario(code)
+    except Exception:  # noqa: BLE001 — operator click must fail open
+        return None
+    version = scenario.current_version
+    if version is None or not version.is_published:
+        return None
+    if not _scenario_supports_channel(scenario, channel):
+        return None
+    start = _start_node(_nodes_by_id(version.graph or {}))
+    if start is None:
+        return None
+    progress = _progress_for(scenario, start, [])
+    _save_session(session_key, progress, scenario)
+    return progress
+
+
+def resolve_scenario_turn(
+    text: str,
+    *,
+    session_key: str = "",
+    channel: str = "",
+) -> ScenarioTurn:
+    """Match a scenario turn. Off-script replies leave the graph so KB can answer."""
     key = (session_key or "").strip()[:160]
-    session = None
-    if key:
-        session = (
-            DialogScenarioSession.objects.select_related(
-                "scenario",
-                "scenario__current_version",
-            )
-            .filter(session_key=key)
-            .first()
-        )
-        if session and session.updated_at < timezone.now() - SESSION_TTL:
-            session.delete()
-            session = None
+    session = _load_session(key)
     if session and session.scenario.current_version:
         scenario = session.scenario
         nodes = _nodes_by_id(session.scenario.current_version.graph or {})
@@ -547,28 +1115,49 @@ def advance_scenario(
                     _save_session(key, progress, scenario)
                 else:
                     clear_scenario_session(key)
-                return progress
+                return ScenarioTurn(progress=progress, session_active=bool(nxt.get("edges")))
             started = _match_start(text, channel=channel)
             if started and started[0].code != scenario.code:
                 new_scenario, _graph, start = started
                 progress = _progress_for(new_scenario, start, [])
                 _save_session(key, progress, new_scenario)
-                return progress
+                return ScenarioTurn(progress=progress, session_active=True)
             if classify_turn(text):
-                return None
-            # Keep the session for a later valid branch, but never repeat the
-            # current scenario hint for an unrelated replica.
-            return None
+                return ScenarioTurn(session_active=True)
+            clear_scenario_session(key)
+            return ScenarioTurn(
+                unmatched=True,
+                suggested=SuggestedScenario(
+                    code=scenario.code,
+                    title=scenario.title,
+                    confidence=0.72,
+                ),
+            )
 
-    if classify_turn(text):
-        return None
     started = _match_start(text, channel=channel)
-    if started is None:
-        return None
-    scenario, _graph, start = started
-    progress = _progress_for(scenario, start, [])
-    _save_session(key, progress, scenario)
-    return progress
+    if started is not None:
+        scenario, _graph, start = started
+        progress = _progress_for(scenario, start, [])
+        _save_session(key, progress, scenario)
+        return ScenarioTurn(progress=progress, session_active=True)
+    suggested = _suggest_start(text, channel=channel)
+    if suggested is not None:
+        return ScenarioTurn(suggested=suggested)
+    return ScenarioTurn()
+
+
+def advance_scenario(
+    text: str,
+    *,
+    session_key: str = "",
+    channel: str = "",
+) -> ScenarioProgress | None:
+    """Move along a published graph or start a new one from the replica."""
+    return resolve_scenario_turn(
+        text,
+        session_key=session_key,
+        channel=channel,
+    ).progress
 
 
 def _test_choice(edge: Mapping[str, Any], nodes: dict[str, dict[str, Any]]) -> dict[str, str]:
@@ -630,7 +1219,10 @@ def run_test_dialog(code: str, lines: list[str]) -> dict[str, Any]:
                 replica,
                 [scenario.title, scenario.root_question],
                 list(current.get("examples") or []),
+                allow_example_overlap=True,
             )
+            score += _age_boost(replica, _start_profile(scenario, current))
+            score += _topic_boost(replica, _start_profile(scenario, current))
             if score < 2:
                 step_error = "Реплика не распознана как вход в выбранный сценарий"
         else:

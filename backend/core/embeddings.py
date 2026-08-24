@@ -87,11 +87,26 @@ def _http_embed(
     configured_timeout = float(
         os.environ.get("EMBEDDING_TIMEOUT_SECONDS") or "15"
     )
-    # A degraded embedding service must never block an operator request for
-    # several minutes. Retrieval safely falls back to lexical ranking.
-    timeout = min(max(configured_timeout, 1.0), 15.0)
+    items = list(texts)
+    # One replica must stay fast. Caching many scenario profiles may take longer.
+    per_request = 2 if len(items) > 2 else len(items) or 1
+    timeout = min(max(configured_timeout, 1.0), 20.0 if per_request <= 2 else 90.0)
+    encoded: list[list[float]] = []
+    for start in range(0, len(items) or 1, per_request):
+        chunk = items[start : start + per_request]
+        encoded.extend(_http_embed_once(base, chunk, is_query=is_query, timeout=timeout))
+    return encoded
+
+
+def _http_embed_once(
+    base: str,
+    texts: list[str],
+    *,
+    is_query: bool,
+    timeout: float,
+) -> list[list[float]]:
     payload = {
-        "texts": list(texts),
+        "texts": texts,
         "is_query": is_query,
         "model": _model_name(),
     }

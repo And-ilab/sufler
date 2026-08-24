@@ -39,6 +39,11 @@ export interface SuggestResponse {
     node_id: string
     next_clarify: string
   } | null
+  suggested_scenario?: {
+    code: string
+    title: string
+    confidence: number
+  } | null
 }
 
 function csrfToken(): string {
@@ -112,4 +117,59 @@ export async function requestSuflerSuggest(
     throw new Error(friendlySuggestError(String(raw), response.status))
   }
   return body as SuggestResponse
+}
+
+export async function enterSuflerScenario(
+  code: string,
+  options?: {
+    sessionId?: string
+    channel?: 'telephony' | 'online_chat'
+  },
+): Promise<SuggestResponse> {
+  try {
+    const { ensureDevSession } = await import('../../auth/ensureDevSession')
+    await ensureDevSession()
+  } catch {
+    /* ignore */
+  }
+  const response = await fetch('/api/v1/sufler/scenario/enter', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': csrfToken(),
+    },
+    body: JSON.stringify({
+      code,
+      ...(options?.sessionId ? { session_id: options.sessionId } : {}),
+      ...(options?.channel ? { channel: options.channel } : {}),
+    }),
+  })
+  const body = await response.json().catch(() => ({} as { error?: string }))
+  if (!response.ok) {
+    throw new Error(friendlySuggestError(String(body.error || ''), response.status))
+  }
+  return body as SuggestResponse
+}
+
+export async function exitSuflerScenario(sessionId: string): Promise<void> {
+  try {
+    const { ensureDevSession } = await import('../../auth/ensureDevSession')
+    await ensureDevSession()
+  } catch {
+    /* ignore */
+  }
+  const response = await fetch('/api/v1/sufler/scenario/exit', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': csrfToken(),
+    },
+    body: JSON.stringify({ session_id: sessionId }),
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({} as { error?: string }))
+    throw new Error(friendlySuggestError(String(body.error || ''), response.status))
+  }
 }

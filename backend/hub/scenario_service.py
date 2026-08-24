@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from copy import deepcopy
 from typing import Any, Mapping
 
@@ -10,6 +12,8 @@ from django.utils import timezone
 
 from hub.models import DialogScenario, DialogScenarioVersion
 from hub.scenario_catalog import DEFAULT_SYSTEM_PROMPT
+
+logger = logging.getLogger(__name__)
 
 
 class ScenarioAdminError(ValueError):
@@ -124,6 +128,7 @@ def _clean_graph(raw: Any) -> dict[str, Any]:
                     "label": str(edge.get("label") or "").strip(),
                     "reply": str(edge.get("reply") or "").strip(),
                     "keywords": cleaned_keywords,
+                    "is_fallback": bool(edge.get("is_fallback")),
                 }
             )
         examples = node.get("examples") or []
@@ -148,7 +153,111 @@ def _clean_graph(raw: Any) -> dict[str, Any]:
             except (TypeError, ValueError):
                 pass
         cleaned.append(clean_node)
-    return {"nodes": cleaned}
+    expansion = str(raw.get("semantic_expansion") or "").strip()
+    result = {"nodes": cleaned}
+    if expansion:
+        result["semantic_expansion"] = expansion[:4000]
+    return result
+
+
+def _graph_topic_text(graph: Mapping[str, Any] | None) -> str:
+    parts: list[str] = []
+    for node in _graph_nodes(graph):
+        for key in ("label", "hint_text", "clarify_text"):
+            value = str(node.get(key) or "").strip()
+            if value:
+                parts.append(value)
+        for example in node.get("examples") or []:
+            text = str(example or "").strip()
+            if text:
+                parts.append(text)
+        for edge in node.get("edges") or []:
+            if not isinstance(edge, Mapping):
+                continue
+            for key in ("label", "reply"):
+                value = str(edge.get(key) or "").strip()
+                if value:
+                    parts.append(value)
+    seen: set[str] = set()
+    unique: list[str] = []
+    for part in parts:
+        key = part.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(part)
+    return ". ".join(unique)[:1500]
+
+
+def _heuristic_expansion(title: str, root_question: str) -> str:
+    topic = title.strip() or root_question.strip()
+    if not topic:
+        return ""
+    return (
+        f"Тема сценария: {topic}. "
+        f"Входная реплика: {root_question.strip() or topic}. "
+        "Клиент может называть частные случаи, бренды, продукты, города, "
+        "суммы и синонимы именно этой темы, не повторяя название дословно."
+    )
+
+
+def _llm_semantic_expansion(title: str, root_question: str, topic_text: str) -> str:
+    mode = (os.environ.get("MODEL_GATEWAY_MODE") or "stub").strip().lower()
+    if mode in {"", "stub"}:
+        return ""
+    from core.model_gateway import ModelGateway
+
+    gateway = ModelGateway.from_registry()
+    response = gateway.chat(
+        "sufler_cc",
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Перечисли связанные понятия, которыми клиент может назвать "
+                    "именно эту тему: частные случаи, бренды, синонимы. "
+                    "Не добавляй соседние банковские продукты. "
+                    "Только список через запятую, без пояснений, на русском."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Название: {title}\n"
+                    f"Входная реплика: {root_question}\n"
+                    f"Текст сценария: {topic_text[:800]}"
+                ),
+            },
+        ],
+        temperature=0.2,
+        max_tokens=180,
+    )
+    choices = response.get("choices") if isinstance(response, Mapping) else None
+    if isinstance(choices, list) and choices:
+        message = choices[0].get("message") if isinstance(choices[0], Mapping) else {}
+        if isinstance(message, Mapping):
+            return str(message.get("content") or "").strip()
+    return str((response or {}).get("text") or "").strip()
+
+
+def attach_semantic_expansion(
+    title: str,
+    root_question: str,
+    graph: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Fill hidden related-concept text so embeddings understand paraphrases."""
+    cleaned = _clean_graph(graph)
+    topic_text = _graph_topic_text(cleaned)
+    expansion = ""
+    try:
+        expansion = _llm_semantic_expansion(title, root_question, topic_text)
+    except Exception as exc:  # noqa: BLE001 — publish must not depend on LLM
+        logger.warning("scenario semantic expansion skipped: %s", exc)
+    if not expansion:
+        expansion = _heuristic_expansion(title, root_question)
+    if expansion:
+        cleaned["semantic_expansion"] = expansion[:4000]
+    return cleaned
 
 
 def backfill_missing_replies(
@@ -262,6 +371,8 @@ def update_scenario(
         else (current.system_prompt if current else DEFAULT_SYSTEM_PROMPT)
     )
     if needs_version:
+        if publish:
+            graph = attach_semantic_expansion(item.title, item.root_question, graph)
         if current and not current.is_published and not publish:
             current.graph = graph
             current.system_prompt = prompt
@@ -278,9 +389,10 @@ def update_scenario(
             )
             item.current_version = version
         if publish:
+            version.graph = graph
             version.is_published = True
             version.published_at = timezone.now()
-            version.save(update_fields=["is_published", "published_at"])
+            version.save(update_fields=["graph", "is_published", "published_at"])
             item.status = DialogScenario.STATUS_PRODUCTION
     item.updated_by = username
     item.save()
@@ -327,9 +439,11 @@ def upsert_from_catalog(payload: Mapping[str, Any], *, username: str = "seed") -
         )
         item.current_version = version
     if status == DialogScenario.STATUS_PRODUCTION:
+        graph = attach_semantic_expansion(title, root, graph)
+        version.graph = graph
         version.is_published = True
         version.published_at = timezone.now()
-        version.save(update_fields=["is_published", "published_at"])
+        version.save(update_fields=["graph", "is_published", "published_at"])
         item.status = DialogScenario.STATUS_PRODUCTION
     else:
         item.status = DialogScenario.STATUS_DRAFT

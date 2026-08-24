@@ -129,8 +129,8 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_ACTIVE_MODEL_PATH: ${OLLAMA_ACTIVE_MODEL_PATH:-/tmp/sufler_active_openai_model}
       LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-}
-      EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
-      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-http}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://embedding:8090}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-180}
@@ -182,6 +182,8 @@ services:
       minio:
         condition: service_healthy
       mailpit:
+        condition: service_started
+      embedding:
         condition: service_started
     healthcheck:
       test:
@@ -311,8 +313,8 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_ACTIVE_MODEL_PATH: ${OLLAMA_ACTIVE_MODEL_PATH:-/tmp/sufler_active_openai_model}
       LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-}
-      EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
-      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-http}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://embedding:8090}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-180}

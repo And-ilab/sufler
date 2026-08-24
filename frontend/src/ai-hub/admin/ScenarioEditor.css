@@ -100,6 +100,8 @@
 .scr-choice-card__technical { grid-column: 2 / -1; border-top: 1px solid var(--color-border); }
 .scr-choice-card__technical summary, .scr-step-technical summary, .scr-system-prompt summary { padding: 8px 0 0; color: var(--color-primary); font-size: .7rem; font-weight: 750; cursor: pointer; }
 .scr-choice-card__technical > label { margin-top: 8px; }
+.scr-choice-fallback { display: flex; align-items: center; gap: 8px; }
+.scr-choice-fallback span { font-size: .75rem; }
 .scr-choice-card__remove { position: absolute; top: 5px; right: 7px; border: 0; background: transparent; color: #b13b35; font-size: .68rem; cursor: pointer; }
 .scr-choice-empty { padding: 14px; border: 1px dashed var(--color-border); border-radius: 9px; text-align: center; }
 .scr-choice-empty p { margin: 3px 0 0; color: var(--color-text-muted); font-size: .72rem; }
@@ -137,7 +139,7 @@
 .scr-chat__choices { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 16px; border-top: 1px solid var(--color-border); }
 .scr-chat__choices span { color: var(--color-text-muted); font-size: .72rem; }
 .scr-chat__choices button { padding: 6px 9px; border: 1px solid var(--color-primary); border-radius: 999px; background: transparent; color: var(--color-primary); cursor: pointer; }
-.scr-chat__composer { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 14px; border-top: 1px solid var(--color-border); }
+.scr-chat__composer { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; padding: 14px; border-top: 1px solid var(--color-border); }
 .scr-run-inspector { position: sticky; top: 12px; padding: 15px; }
 .scr-run-inspector h2 { font-size: .95rem; }
 .scr-run-inspector ol { display: grid; gap: 8px; padding: 0; list-style: none; }

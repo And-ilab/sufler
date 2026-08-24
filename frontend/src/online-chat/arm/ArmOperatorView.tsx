@@ -29,8 +29,11 @@ import {
   type SlaTone,
 } from '../api/onlineChatApi'
 import {
+  enterSuflerScenario,
+  exitSuflerScenario,
   requestSuflerSuggest,
   type SuflerHint,
+  type SuggestResponse,
 } from '../../sufler/api/suggest'
 import { KbPicker } from '../../sufler/KbPicker'
 import { useKnowledgeBaseSelection } from '../../sufler/hooks/useKnowledgeBaseSelection'
@@ -2988,6 +2991,9 @@ export function ArmOperatorView({
   const [suflerLoading, setSuflerLoading] = useState(false);
   const [suflerError, setSuflerError] = useState("");
   const [suflerScenarioPath, setSuflerScenarioPath] = useState("");
+  const [suflerSuggested, setSuflerSuggested] = useState<
+    NonNullable<SuggestResponse["suggested_scenario"]> | null
+  >(null);
   const kb = useKnowledgeBaseSelection();
   const kbSlugsKey = kb.slugs.join("|");
   const [assignmentGraceUntil, setAssignmentGraceUntil] = useState<number | null>(null);
@@ -3470,6 +3476,7 @@ export function ArmOperatorView({
       setLiveSuflerRaw([]);
       setSuflerError("");
       setSuflerScenarioPath("");
+      setSuflerSuggested(null);
       setSuflerLoading(false);
       return;
     }
@@ -3479,6 +3486,7 @@ export function ArmOperatorView({
       setLiveSuflerRaw([]);
       setSuflerLoading(false);
       setSuflerScenarioPath("");
+      setSuflerSuggested(null);
       setSuflerError("Ошибка суфлёра. Повторите попытку позже.");
       return;
     }
@@ -3488,6 +3496,7 @@ export function ArmOperatorView({
       setLiveSuflerRaw([]);
       setSuflerError("");
       setSuflerScenarioPath("");
+      setSuflerSuggested(null);
       setSuflerLoading(false);
       return;
     }
@@ -3526,8 +3535,10 @@ export function ArmOperatorView({
           setSuflerScenarioPath(
             `${result.scenario.code} · ${result.scenario.path.join(" → ")}`,
           );
+          setSuflerSuggested(null);
         } else {
           setSuflerScenarioPath("");
+          setSuflerSuggested(result.suggested_scenario ?? null);
         }
         if (!usable.length) {
           if (result.blocked_reason === "no_hint_needed" || result.blocked_reason === "service_mode") {
@@ -5166,6 +5177,52 @@ export function ArmOperatorView({
               {suflerLoading ? "загрузка…" : suflerError ? "недоступен" : "активен"}
             </Pill>
           </Row>
+          {suflerSuggested && !suflerScenarioPath ? (
+            <button
+              type="button"
+              data-testid="arm-scenario-lamp"
+              onClick={() => {
+                if (!active?.id) return;
+                void enterSuflerScenario(suflerSuggested.code, {
+                  sessionId: `chat:${active.id}`,
+                  channel: "online_chat",
+                }).then((result) => {
+                  const usable = result.hints || [];
+                  setLiveSuflerRaw(usable);
+                  setLiveSuflerHints(usable.map(mapApiHintToCard));
+                  if (result.scenario?.path?.length) {
+                    setSuflerScenarioPath(
+                      `${result.scenario.code} · ${result.scenario.path.join(" → ")}`,
+                    );
+                  }
+                  setSuflerSuggested(null);
+                  setSuflerError("");
+                }).catch(() => {
+                  setSuflerError("Не удалось войти в сценарий.");
+                });
+              }}
+              style={{
+                display: "grid",
+                gap: 3,
+                marginTop: 7,
+                padding: "8px 10px",
+                border: `1px solid color-mix(in srgb, #e3b341 55%, ${scheme.accent})`,
+                borderRadius: 9,
+                background: `color-mix(in srgb, #e3b341 16%, ${t.fill.secondary})`,
+                textAlign: "left",
+                cursor: "pointer",
+                color: "inherit",
+                font: "inherit",
+              }}
+            >
+              <Text style={{ fontSize: 10, color: "#9a6d00", fontWeight: 700, textTransform: "uppercase" }}>
+                Похожий сценарий
+              </Text>
+              <Text style={{ fontSize: 12, color: t.text.primary }}>
+                {suflerSuggested.code} · {suflerSuggested.title}
+              </Text>
+            </button>
+          ) : null}
           {suflerScenarioPath ? (
             <div
               data-testid="arm-scenario-path"
@@ -5185,6 +5242,21 @@ export function ArmOperatorView({
               <Text style={{ fontSize: 12, color: t.text.primary }}>
                 {suflerScenarioPath}
               </Text>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  if (!active?.id) return;
+                  void exitSuflerScenario(`chat:${active.id}`).then(() => {
+                    setSuflerScenarioPath("");
+                    setSuflerSuggested(null);
+                    setLiveSuflerHints([]);
+                    setLiveSuflerRaw([]);
+                  });
+                }}
+              >
+                Выйти из сценария
+              </Button>
             </div>
           ) : null}
           <div style={{ marginTop: 8 }}>

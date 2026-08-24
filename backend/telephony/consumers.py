@@ -171,6 +171,7 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
                 "request_id": result["request_id"],
                 "blocked_reason": result.get("blocked_reason"),
                 "scenario": result.get("scenario"),
+                "suggested_scenario": result.get("suggested_scenario"),
             }
         )
 

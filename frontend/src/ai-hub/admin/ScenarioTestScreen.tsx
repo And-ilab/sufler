@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button, Card } from '../../components'
 import {
   listDialogScenarios,
@@ -26,6 +26,8 @@ export function ScenarioTestScreen({
   const [result, setResult] = useState<ScenarioTestRun | null>(null)
   const [error, setError] = useState('')
   const [running, setRunning] = useState(false)
+  const [listening, setListening] = useState(false)
+  const recognitionRef = useRef<{ stop: () => void } | null>(null)
 
   useEffect(() => {
     void listDialogScenarios()
@@ -39,6 +41,10 @@ export function ScenarioTestScreen({
   useEffect(() => {
     if (initialCode) setCode(initialCode)
   }, [initialCode])
+
+  useEffect(() => () => {
+    recognitionRef.current?.stop()
+  }, [])
 
   const reset = (nextCode = code) => {
     setCode(nextCode)
@@ -63,6 +69,85 @@ export function ScenarioTestScreen({
       setError(caught instanceof Error ? caught.message : 'Не удалось выполнить ход')
     } finally {
       setRunning(false)
+    }
+  }
+
+  const stopMic = () => {
+    recognitionRef.current?.stop()
+    recognitionRef.current = null
+    setListening(false)
+  }
+
+  const startMic = () => {
+    const browserWindow = window as Window & {
+      SpeechRecognition?: new () => {
+        lang: string
+        interimResults: boolean
+        continuous: boolean
+        start: () => void
+        stop: () => void
+        onresult: ((event: {
+          resultIndex: number
+          results: ArrayLike<{ isFinal: boolean; 0?: { transcript?: string } }>
+        }) => void) | null
+        onerror: (() => void) | null
+        onend: (() => void) | null
+      }
+      webkitSpeechRecognition?: new () => {
+        lang: string
+        interimResults: boolean
+        continuous: boolean
+        start: () => void
+        stop: () => void
+        onresult: ((event: {
+          resultIndex: number
+          results: ArrayLike<{ isFinal: boolean; 0?: { transcript?: string } }>
+        }) => void) | null
+        onerror: (() => void) | null
+        onend: (() => void) | null
+      }
+    }
+    const Recognition = browserWindow.SpeechRecognition || browserWindow.webkitSpeechRecognition
+    if (!Recognition) {
+      setError('В этом браузере нет распознавания речи. Введите реплику текстом.')
+      return
+    }
+    stopMic()
+    const recognition = new Recognition()
+    recognition.lang = 'ru-RU'
+    recognition.interimResults = true
+    recognition.continuous = false
+    recognition.onresult = (event) => {
+      let finalText = ''
+      let interim = ''
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const piece = String(event.results[index]?.[0]?.transcript || '')
+        if (event.results[index].isFinal) finalText += piece
+        else interim += piece
+      }
+      const text = (finalText || interim).trim()
+      if (text) setInput(text)
+      if (finalText.trim()) {
+        stopMic()
+        void send(finalText.trim())
+      }
+    }
+    recognition.onerror = () => {
+      setListening(false)
+      recognitionRef.current = null
+    }
+    recognition.onend = () => {
+      setListening(false)
+      recognitionRef.current = null
+    }
+    recognitionRef.current = recognition
+    setListening(true)
+    setError('')
+    try {
+      recognition.start()
+    } catch {
+      setError('Не удалось включить микрофон. Разрешите доступ в браузере.')
+      stopMic()
     }
   }
 
@@ -141,6 +226,14 @@ export function ScenarioTestScreen({
               placeholder={currentStep?.terminal ? 'Диалог завершён' : 'Введите следующую реплику клиента'}
               onChange={(event) => setInput(event.target.value)}
             />
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={!code || running || Boolean(currentStep?.terminal)}
+              onClick={listening ? stopMic : startMic}
+            >
+              {listening ? 'Стоп микрофон' : 'Микрофон'}
+            </Button>
             <Button disabled={!input.trim() || running || Boolean(currentStep?.terminal)} type="submit">
               {running ? 'Проверяем…' : 'Отправить'}
             </Button>

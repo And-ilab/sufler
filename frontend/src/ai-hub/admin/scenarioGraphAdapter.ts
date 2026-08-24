@@ -187,7 +187,7 @@ export function validateScenario(
   if (!rootQuestion.trim()) errors.push('Укажите стартовую реплику клиента.')
   if (!graph.nodes.length) errors.push('Добавьте хотя бы один шаг.')
   if (graph.nodes.length && !graph.nodes.some((node) => node.type === 'start')) {
-    errors.push('Назначьте один шаг началом сценария в технических настройках.')
+    errors.push('Добавьте шаг с типом «Начало сценария».')
   }
 
   graph.nodes.forEach((node, index) => {

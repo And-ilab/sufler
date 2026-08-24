@@ -35,13 +35,22 @@ def n(
     }
 
 
-def e(to: str, label: str, *keywords: str, reply: str) -> dict[str, Any]:
-    return {
+def e(
+    to: str,
+    label: str,
+    *keywords: str,
+    reply: str,
+    is_fallback: bool = False,
+) -> dict[str, Any]:
+    payload = {
         "to": to,
         "label": label,
         "reply": reply,
         "keywords": list(keywords),
     }
+    if is_fallback:
+        payload["is_fallback"] = True
+    return payload
 
 
 def scenario(
@@ -123,6 +132,17 @@ REFERENCE_SCENARIOS: list[dict[str, Any]] = [
                 edges=[
                     e("with_card", "С карточкой", "с карточк", "с карт", "картой", "карточка", reply="Мне нужна карточка к счёту"),
                     e("without_card", "Без карточки", "без карт", "без карточк", "текущий", "депозит", reply="Мне нужен текущий счёт без карточки"),
+                    e(
+                        "other_choice",
+                        "Другой вариант",
+                        "ни то",
+                        "ни другое",
+                        "другое",
+                        "не то",
+                        "не подходит",
+                        reply="Ни то ни другое, мне нужен другой вариант",
+                        is_fallback=True,
+                    ),
                 ],
             ),
             n(
@@ -165,6 +185,17 @@ REFERENCE_SCENARIOS: list[dict[str, Any]] = [
                     "(родитель, опекун, попечитель). Клиент приходит в отделение с паспортом "
                     "и документами представителя."
                 ),
+            ),
+            n(
+                "other_choice",
+                "clarify",
+                "Другой вариант",
+                hint=(
+                    "Клиент не выбрал карточку или счёт без карточки. "
+                    "Уточните, какой продукт нужен, и продолжайте по сценарию "
+                    "или выйдите в базу знаний, если это другой вопрос."
+                ),
+                clarify="Какой продукт нужен, если не карточка и не счёт без карточки?",
             ),
             n(
                 "without_card",

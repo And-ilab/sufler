@@ -158,6 +158,7 @@ function attachPcmUtterances(
 
 export interface LiveDualAsrState {
   recording: boolean
+  paused: boolean
   micLevel: number
   systemLevel: number
   micSpeaker: DualSpeaker
@@ -180,6 +181,7 @@ export function useLiveDualAsr(
 ) {
   const [state, setState] = useState<LiveDualAsrState>({
     recording: false,
+    paused: false,
     micLevel: 0,
     systemLevel: 0,
     micSpeaker: 'client',
@@ -191,6 +193,7 @@ export function useLiveDualAsr(
     systemCapture: false,
   })
   const recordingRef = useRef(false)
+  const pausedRef = useRef(false)
   const micSpeakerRef = useRef<DualSpeaker>('client')
   const systemSpeakerRef = useRef<DualSpeaker>('operator')
   const onUtteranceRef = useRef(onUtterance)
@@ -219,6 +222,7 @@ export function useLiveDualAsr(
 
   const stop = useCallback(() => {
     recordingRef.current = false
+    pausedRef.current = false
     if (finalizeTimerRef.current != null) {
       window.clearTimeout(finalizeTimerRef.current)
       finalizeTimerRef.current = null
@@ -231,6 +235,7 @@ export function useLiveDualAsr(
     cleanupRef.current = null
     setPartial({
       recording: false,
+      paused: false,
       micLevel: 0,
       systemLevel: 0,
       caption: '',
@@ -246,7 +251,7 @@ export function useLiveDualAsr(
     const Recognition = speechCtor()
     const emitHeard = (text: string, isFinal: boolean) => {
       const cleaned = text.trim()
-      if (!cleaned) return
+      if (!cleaned || pausedRef.current) return
       setPartial({ caption: cleaned })
       onUtteranceRef.current(micSpeakerRef.current, cleaned, isFinal)
     }
@@ -318,8 +323,10 @@ export function useLiveDualAsr(
         setPartial({ error: 'Не удалось запустить распознавание микрофона' })
         return
       }
+      pausedRef.current = false
       setPartial({
         recording: true,
+        paused: false,
         error: '',
         caption: '',
         micLevel: 0,
@@ -350,6 +357,7 @@ export function useLiveDualAsr(
               // (common in local/Docker HTTP environments). In that case,
               // use the backend STT for the same microphone utterance.
               if (Date.now() - lastBrowserSpeechAtRef.current < 2000) return
+              if (pausedRef.current) return
               const speaker = micSpeakerRef.current
               void transcribeUtterance(wav, speaker)
                 .then((text) => {
@@ -401,8 +409,10 @@ export function useLiveDualAsr(
       return
     }
 
+    pausedRef.current = false
     setPartial({
       recording: true,
+      paused: false,
       error: '',
       caption: '',
       status: 'В этом браузере нет Chrome Speech Recognition. Введите реплику в поле или говорите паузами для локального STT.',
@@ -417,6 +427,7 @@ export function useLiveDualAsr(
       recordingRef,
       (level) => setState((current) => ({ ...current, micLevel: level })),
       (wav) => {
+        if (pausedRef.current) return
         const speaker = micSpeakerRef.current
         void transcribeUtterance(wav, speaker)
           .then((text) => {
@@ -473,6 +484,7 @@ export function useLiveDualAsr(
       recordingRef,
       (level) => setState((current) => ({ ...current, systemLevel: level })),
       (wav) => {
+        if (pausedRef.current) return
         const speaker: DualSpeaker = 'operator'
         setPartial({ status: 'Распознаю реплику оператора…', error: '' })
         void transcribeUtterance(wav, speaker)
@@ -549,5 +561,23 @@ export function useLiveDualAsr(
     }
   }, [setPartial])
 
-  return { ...state, start, stop, swapSpeakers, enableSystemAudio }
+  const pause = useCallback(() => {
+    if (!recordingRef.current || pausedRef.current) return
+    pausedRef.current = true
+    setPartial({
+      paused: true,
+      status: 'Распознавание на паузе',
+    })
+  }, [setPartial])
+
+  const resume = useCallback(() => {
+    if (!recordingRef.current || !pausedRef.current) return
+    pausedRef.current = false
+    setPartial({
+      paused: false,
+      status: 'Распознавание продолжено',
+    })
+  }, [setPartial])
+
+  return { ...state, start, stop, pause, resume, swapSpeakers, enableSystemAudio }
 }

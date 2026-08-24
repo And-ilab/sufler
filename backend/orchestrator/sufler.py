@@ -22,8 +22,10 @@ from hub.sufler_policy import get_sufler_policy
 from orchestrator.scenario_engine import (
     NO_HINT_REASON,
     ScenarioProgress,
-    advance_scenario,
+    SuggestedScenario,
     classify_turn,
+    enter_scenario,
+    resolve_scenario_turn,
 )
 from qu.service import (
     _tokens,
@@ -208,12 +210,42 @@ def _snippet_as_answer(document: Mapping[str, Any], query: str = "") -> str:
     return _clean_answer_text(extracted)
 
 
+# qu.service._tokens already stems to 4 letters; keep these generic.
+_ATTRIBUTION_STEMS = (
+    "офор",
+    "заяв",
+    "доку",
+    "услу",
+    "клие",
+    "отде",
+)
+
+
+def _attribution_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in _query_specific_tokens(text)
+        if not any(token.startswith(stem) for stem in _ATTRIBUTION_STEMS)
+    }
+
+
 def _llm_misses_source(answer: str, document: Mapping[str, Any]) -> bool:
-    source_tokens = _tokens(str(document.get("content") or document.get("snippet") or ""))
-    answer_tokens = _tokens(answer)
-    if not source_tokens or not answer_tokens:
+    return not _answer_uses_document(answer, document)
+
+
+def _answer_uses_document(answer: str, document: Mapping[str, Any]) -> bool:
+    """True only when the hint is actually taken from this KB file."""
+    source = _attribution_tokens(
+        f"{document.get('title') or ''}\n"
+        f"{document.get('content') or document.get('snippet') or ''}"
+    )
+    answer_tokens = _attribution_tokens(answer)
+    if not source or not answer_tokens:
+        return False
+    overlap = source & answer_tokens
+    if len(overlap) >= 2:
         return True
-    return len(source_tokens & answer_tokens) < 2
+    return any(len(token) >= 8 for token in overlap)
 
 
 _GENERIC_QUERY_TOKENS = {
@@ -242,10 +274,10 @@ def _query_specific_tokens(query: str) -> set[str]:
 
 def _document_supports_query(document: Mapping[str, Any], query: str) -> bool:
     """Require lexical evidence before attributing an answer to a KB file."""
-    query_tokens = _query_specific_tokens(query)
+    query_tokens = _attribution_tokens(query)
     if not query_tokens:
         return False
-    source_tokens = _tokens(
+    source_tokens = _attribution_tokens(
         f"{document.get('title') or ''}\n"
         f"{document.get('content') or document.get('snippet') or ''}"
     )
@@ -535,6 +567,63 @@ def _scenario_payload(progress: ScenarioProgress | None) -> dict[str, Any] | Non
     return payload
 
 
+def _suggested_payload(
+    suggested: SuggestedScenario | None,
+) -> dict[str, Any] | None:
+    if suggested is None:
+        return None
+    payload = suggested.as_dict()
+    payload["title"] = _safe_ru_en_text(str(payload.get("title") or ""))
+    return payload
+
+
+def _scenario_hint_block(progress: ScenarioProgress) -> dict[str, Any]:
+    scenario_hint = _safe_ru_en_text(progress.hint_text)
+    scenario_tip = _safe_ru_en_text(progress.next_clarify)
+    return {
+        "rank": 1,
+        "text": scenario_hint,
+        "operator_tip": scenario_tip,
+        "source_type": "scenario",
+        "relevance_score": 0.95,
+        "relevance_percent": 95,
+        "citations": [
+            {
+                "article_id": 0,
+                "chunk_index": 0,
+                "title": _safe_ru_en_text(progress.title)
+                or "Сценарий контакт-центра",
+                "permalink": "",
+            }
+        ],
+    }
+
+
+def enter_suggested_scenario(
+    code: str,
+    *,
+    session_id: str,
+    channel: str = "",
+) -> dict[str, Any]:
+    progress = enter_scenario(code, session_key=session_id, channel=channel)
+    if progress is None or not progress.hint_text:
+        raise SuflerOrchestratorError("scenario_not_available")
+    return {
+        "query": "",
+        "profile": PROFILE,
+        "kb_id": KB_ID,
+        "kb_slugs": [],
+        "hints": [_scenario_hint_block(progress)],
+        "citations_enabled": True,
+        "blocked_reason": None,
+        "min_relevance": OPERATOR_MIN_RELEVANCE,
+        "latency_ms": {"qu": 0.0, "rag": 0.0, "llm": 0.0, "total": 0.0},
+        "request_id": str(uuid.uuid4()),
+        "scenario": _scenario_payload(progress),
+        "suggested_scenario": None,
+    }
+
+
 def suggest(
     text: str,
     *,
@@ -593,20 +682,26 @@ def suggest(
             "latency_ms": latency_ms,
             "request_id": correlation_id,
             "scenario": None,
+            "suggested_scenario": None,
         }
 
     progress: ScenarioProgress | None = None
+    suggested: SuggestedScenario | None = None
+    session_active = False
     try:
-        progress = advance_scenario(
+        turn = resolve_scenario_turn(
             normalized,
             session_key=session_id,
             channel=channel_key,
         )
+        progress = turn.progress
+        suggested = turn.suggested
+        session_active = turn.session_active
     except Exception:  # noqa: BLE001 — scenario must never break suggest
         logger.exception("sufler_scenario_failed request_id=%s", correlation_id)
         progress = None
 
-    if progress is None and classify_turn(normalized):
+    if progress is None and (session_active or classify_turn(normalized)) and suggested is None:
         latency_ms["total"] = _elapsed_ms(total_started)
         _log_latency(
             request_id=correlation_id,
@@ -626,15 +721,19 @@ def suggest(
             "latency_ms": latency_ms,
             "request_id": correlation_id,
             "scenario": None,
+            "suggested_scenario": None,
         }
 
     scenario_hint = (
         _safe_ru_en_text(progress.hint_text) if progress is not None else ""
     )
-    scenario_tip = (
-        _safe_ru_en_text(progress.next_clarify) if progress is not None else ""
-    )
-    if progress and scenario_hint:
+    if progress and (scenario_hint or session_active):
+        hint_progress = progress
+        if not scenario_hint:
+            # Stay inside the scenario even if the node has an empty hint.
+            from orchestrator.scenario_engine import UNMATCHED_HINT
+
+            scenario_hint = UNMATCHED_HINT
         latency_ms["total"] = _elapsed_ms(total_started)
         _log_latency(
             request_id=correlation_id,
@@ -642,36 +741,21 @@ def suggest(
             hint_count=1,
             document_count=0,
         )
+        block = _scenario_hint_block(hint_progress)
+        block["text"] = scenario_hint
         return {
             "query": normalized,
             "profile": PROFILE,
             "kb_id": kb_label,
             "kb_slugs": selected_slugs or [],
-            "hints": [
-                {
-                    "rank": 1,
-                    "text": scenario_hint,
-                    "operator_tip": scenario_tip,
-                    "source_type": "scenario",
-                    "relevance_score": 0.95,
-                    "relevance_percent": 95,
-                    "citations": [
-                        {
-                            "article_id": 0,
-                            "chunk_index": 0,
-                            "title": _safe_ru_en_text(progress.title)
-                            or "Сценарий контакт-центра",
-                            "permalink": "",
-                        }
-                    ],
-                }
-            ],
+            "hints": [block],
             "citations_enabled": True,
             "blocked_reason": None,
             "min_relevance": min_relevance,
             "latency_ms": latency_ms,
             "request_id": correlation_id,
             "scenario": _scenario_payload(progress),
+            "suggested_scenario": None,
         }
 
     qu_started = time.perf_counter()
@@ -732,6 +816,7 @@ def suggest(
                 "latency_ms": latency_ms,
                 "request_id": correlation_id,
                 "scenario": None,
+                "suggested_scenario": _suggested_payload(suggested),
             }
         skip_ungrounded = grounded_only or (
             not _allow_ungrounded() and not ignored_suz_fixtures_exist()
@@ -756,9 +841,11 @@ def suggest(
                 "latency_ms": latency_ms,
                 "request_id": correlation_id,
                 "scenario": _scenario_payload(progress),
+                "suggested_scenario": _suggested_payload(suggested),
             }
 
     llm_started = time.perf_counter()
+    used_source = False
     active_gateway = gateway or ModelGateway.from_registry()
     try:
         llm_response = active_gateway.chat(
@@ -780,10 +867,14 @@ def suggest(
         cleaned = _clean_answer_text(answer_text)
         answer_text = complete_sentences(cleaned, max_chars=char_limit)
         operator_tip = _safe_ru_en_text(operator_tip)
-        if documents and _llm_misses_source(answer_text, documents[0]):
+        used_source = bool(documents) and _answer_uses_document(
+            answer_text, documents[0]
+        )
+        if documents and not used_source:
             grounded = _snippet_as_answer(documents[0], normalized)
             if grounded:
                 answer_text = grounded
+                used_source = True
     except Exception:  # noqa: BLE001 — fall back to KB snippets
         logger.exception("sufler_llm_failed request_id=%s", correlation_id)
         answer_text, operator_tip = "", ""
@@ -794,6 +885,9 @@ def suggest(
     if not answer_text:
         if documents:
             answer_text = _snippet_as_answer(documents[0], normalized)
+            used_source = bool(answer_text) and _answer_uses_document(
+                answer_text, documents[0]
+            )
         if not answer_text:
             answer_text = (
                 "В выбранных базах знаний нет подходящей статьи по этой реплике. "
@@ -810,9 +904,11 @@ def suggest(
         if index == 0:
             hint_text = answer_text
             tip = operator_tip
+            cite = used_source
         else:
             hint_text = _snippet_as_answer(document, normalized)
             tip = ""
+            cite = bool(hint_text) and _answer_uses_document(hint_text, document)
         hint_text = _safe_ru_en_text(hint_text)
         tip = _safe_ru_en_text(tip)
         if not hint_text:
@@ -825,7 +921,7 @@ def suggest(
                 "source_type": "knowledge_base",
                 "relevance_score": document["relevance_score"],
                 "relevance_percent": document["relevance_percent"],
-                "citations": [_citation(document)],
+                "citations": [_citation(document)] if cite else [],
             }
         )
     answer_text = _safe_ru_en_text(answer_text)
@@ -844,7 +940,11 @@ def suggest(
                     "relevance_percent": (
                         int(source["relevance_percent"]) if source else 50
                     ),
-                    "citations": [_citation(source)] if source else [],
+                    "citations": (
+                        [_citation(source)]
+                        if source and _answer_uses_document(answer_text, source)
+                        else []
+                    ),
                 }
             )
     if not hints:
@@ -867,6 +967,7 @@ def suggest(
             "latency_ms": latency_ms,
             "request_id": correlation_id,
             "scenario": _scenario_payload(progress),
+            "suggested_scenario": _suggested_payload(suggested),
         }
 
     latency_ms["total"] = _elapsed_ms(total_started)
@@ -889,4 +990,5 @@ def suggest(
         "request_id": correlation_id,
         "gateway_model": active_gateway.get_runtime_model(PROFILE),
         "scenario": _scenario_payload(progress),
+        "suggested_scenario": _suggested_payload(suggested),
     }

@@ -259,6 +259,55 @@ class SuflerSuggestPipelineTest(TestCase):
         self.assertTrue(result["hints"])
         self.assertEqual(result["hints"][0]["citations"], [])
 
+    def test_self_answer_does_not_attach_random_document(self):
+        document = {
+            "rank": 1,
+            "article_id": 9901,
+            "chunk_index": 0,
+            "title": "zaiavlenie_ob_okazanii_fp040225.docx",
+            "content": (
+                "Заявление об оказании финансовой услуги подают в отделении "
+                "по форме FP-04. При оформлении приложите паспорт."
+            ),
+            "snippet": "Заявление об оказании финансовой услуги подают в отделении.",
+            "permalink": "https://suz.local/articles/9901",
+            "relevance_score": 0.81,
+            "relevance_percent": 81,
+        }
+        gateway = ModelGateway.from_registry()
+        with (
+            patch(
+                "orchestrator.sufler._retrieve_documents",
+                return_value=({"documents": [document]}, "cc_production"),
+            ),
+            patch.object(
+                gateway,
+                "chat",
+                return_value={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "Понимаю, вы передумали оформлять автокредит. "
+                                    "В таком случае никаких дополнительных действий "
+                                    "не требуется, заявление на оформление не будет подано."
+                                )
+                            }
+                        }
+                    ]
+                },
+            ),
+            patch.dict(os.environ, {"SUFLER_ALLOW_UNGROUNDED": "1"}, clear=False),
+        ):
+            result = suggest(
+                "Нет, я передумал оформлять.",
+                limit=1,
+                gateway=gateway,
+            )
+        self.assertTrue(result["hints"])
+        self.assertIn("передумали", result["hints"][0]["text"].casefold())
+        self.assertEqual(result["hints"][0]["citations"], [])
+
     def test_int_07_accepted_sample_is_never_shown_as_source(self):
         self.add_chunk(
             7007,

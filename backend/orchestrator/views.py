@@ -14,7 +14,8 @@ from auth.roles import (
     PERM_SUFLER_CHAT,
     PERM_SUFLER_TELEPHONY,
 )
-from orchestrator.sufler import SuflerOrchestratorError, suggest
+from orchestrator.scenario_engine import clear_scenario_session
+from orchestrator.sufler import SuflerOrchestratorError, enter_suggested_scenario, suggest
 from orchestrator.test_dialog import run_test_prompt
 from orchestrator.transcribe import TranscribeError, transcribe_wav
 
@@ -128,6 +129,75 @@ def sufler_suggest(request: HttpRequest) -> JsonResponse:
     response = JsonResponse(result)
     response["X-Request-ID"] = result["request_id"]
     return response
+
+
+def _parse_scenario_session_body(body: bytes) -> tuple[str, str, str]:
+    try:
+        payload = json.loads(body or b"{}")
+    except json.JSONDecodeError as exc:
+        raise SuflerOrchestratorError(
+            "Request body must be valid JSON"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise SuflerOrchestratorError("Request body must be a JSON object")
+    session_id = _optional_string(payload, "session_id")
+    if not session_id.strip():
+        raise SuflerOrchestratorError("session_id must be a non-empty string")
+    code = _optional_string(payload, "code")
+    channel = _optional_string(payload, "channel")
+    return session_id, code, channel
+
+
+@require_http_methods(["POST"])
+@require_permissions(
+    PERM_SUFLER_TELEPHONY,
+    PERM_SUFLER_CHAT,
+    require_all=False,
+    api=True,
+)
+def sufler_scenario_enter(request: HttpRequest) -> JsonResponse:
+    """POST /api/v1/sufler/scenario/enter — operator accepts a suggested scenario."""
+    try:
+        session_id, code, channel = _parse_scenario_session_body(request.body)
+        if not code.strip():
+            raise SuflerOrchestratorError("code must be a non-empty string")
+        result = enter_suggested_scenario(
+            code,
+            session_id=session_id,
+            channel=channel,
+        )
+    except SuflerOrchestratorError as exc:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"request": [str(exc)]},
+            },
+            status=400,
+        )
+    return JsonResponse(result)
+
+
+@require_http_methods(["POST"])
+@require_permissions(
+    PERM_SUFLER_TELEPHONY,
+    PERM_SUFLER_CHAT,
+    require_all=False,
+    api=True,
+)
+def sufler_scenario_exit(request: HttpRequest) -> JsonResponse:
+    """POST /api/v1/sufler/scenario/exit — operator leaves the active scenario."""
+    try:
+        session_id, _code, _channel = _parse_scenario_session_body(request.body)
+    except SuflerOrchestratorError as exc:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"request": [str(exc)]},
+            },
+            status=400,
+        )
+    clear_scenario_session(session_id)
+    return JsonResponse({"ok": True, "scenario": None, "suggested_scenario": None})
 
 
 def _parse_test_dialog_body(body: bytes) -> tuple[str, str, bool]:

@@ -9,6 +9,7 @@ export interface ScenarioEdge {
   label: string
   reply?: string
   keywords: string[]
+  is_fallback?: boolean
 }
 
 export interface ScenarioNode {

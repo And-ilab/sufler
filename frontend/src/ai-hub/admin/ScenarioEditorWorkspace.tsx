@@ -4,17 +4,7 @@ import type {
   ScenarioDetail,
   ScenarioEdge,
   ScenarioNode,
-  ScenarioNodeType,
 } from './api/scenarios'
-
-const STEP_TYPES: Array<[ScenarioNodeType, string]> = [
-  ['start', 'Начало сценария'],
-  ['clarify', 'Уточнение'],
-  ['answer', 'Ответ'],
-  ['branch', 'Развилка'],
-  ['escalate', 'Передача специалисту'],
-  ['end', 'Завершение'],
-]
 
 interface ScenarioWorkspaceProps {
   detail: ScenarioDetail
@@ -244,6 +234,15 @@ export function ScenarioWorkspace({
                               ))}
                             </select>
                           </label>
+                          <label className="scr-choice-fallback">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(edge.is_fallback)}
+                              disabled={!canEdit}
+                              onChange={(event) => onEdgeChange(node.id, edgeIndex, { is_fallback: event.target.checked })}
+                            />
+                            <span>Другой / не подходит</span>
+                          </label>
                         </details>
                         <button type="button" className="scr-choice-card__remove" disabled={!canEdit} onClick={() => onRemoveEdge(node.id, edgeIndex)}>Удалить вариант</button>
                       </div>
@@ -259,20 +258,6 @@ export function ScenarioWorkspace({
                 <Button variant="ghost" disabled={!canEdit} onClick={() => onAddEdge(node.id)}>+ Добавить вариант ответа</Button>
               </section>
             </div>
-
-            <details className="scr-step-technical">
-              <summary>Технические настройки шага</summary>
-              <div>
-                <label>
-                  <span>Тип шага</span>
-                  <select value={node.type} disabled={!canEdit} onChange={(event) => onNodeChange(node.id, { type: event.target.value })}>
-                    {STEP_TYPES.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-                  </select>
-                </label>
-                <label><span>ID шага</span><input value={node.id} readOnly /></label>
-                <label><span>Intent ID</span><input value={node.intent_id} disabled={!canEdit} onChange={(event) => onNodeChange(node.id, { intent_id: event.target.value })} /></label>
-              </div>
-            </details>
           </article>
         ))}
       </div>

@@ -337,6 +337,7 @@ export function ScenarioEditorScreen({
               label: `Вариант ${node.edges.length + 1}`,
               reply: '',
               keywords: [],
+              is_fallback: false,
             }],
           })
         }}

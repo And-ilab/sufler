@@ -29,7 +29,16 @@ from hub.scenario_catalog import (  # noqa: E402
     REFERENCE_SCENARIOS,
 )
 from hub.scenario_service import upsert_from_catalog  # noqa: E402
-from orchestrator.scenario_engine import _match_start, _score, classify_turn  # noqa: E402
+from hub.scenario_service import attach_semantic_expansion  # noqa: E402
+from orchestrator.scenario_engine import (  # noqa: E402
+    _match_start,
+    _score,
+    _semantic_profile,
+    _topic_boost,
+    classify_turn,
+    clear_scenario_session,
+    enter_scenario,
+)
 from orchestrator.sufler import suggest  # noqa: E402
 
 
@@ -58,7 +67,7 @@ class DialogScenarioCatalogTest(TestCase):
             for node in scenario["graph"]["nodes"]
             for edge in node.get("edges", [])
         ]
-        self.assertEqual(len(edges), 117)
+        self.assertEqual(len(edges), 118)
         for edge in edges:
             with self.subTest(label=edge["label"]):
                 reply = edge.get("reply", "").strip()
@@ -357,6 +366,335 @@ class ScenarioEngineGatingTest(TestCase):
         self.assertTrue(
             any("накоп" in part.casefold() for part in yes["scenario"]["path"])
         )
+
+    def test_moscow_transfer_starts_rf_scenario(self):
+        for index, replica in enumerate(
+            (
+                "Перевести деньги в Москву?",
+                "перевод в питер",
+                "кинуть деньги в Санкт-Петербург",
+            ),
+            start=1,
+        ):
+            with self.subTest(replica=replica):
+                result = suggest(replica, session_id=f"rf-city-{index}")
+                self.assertEqual(result["scenario"]["code"], "CC-SCR-005")
+                self.assertEqual(result["hints"][0]["source_type"], "scenario")
+
+    def test_ethereum_starts_crypto_scenario_without_example_word(self):
+        result = suggest("Хочу перевести эфириум", session_id="crypto-eth")
+        self.assertEqual(result["scenario"]["code"], "CC-SCR-009")
+        self.assertEqual(result["hints"][0]["source_type"], "scenario")
+
+    def test_minor_wants_card_starts_teen_account_scenario(self):
+        result = suggest(
+            "Я маленький, хочу оформить карту.",
+            session_id="minor-card",
+        )
+        self.assertEqual(result["scenario"]["code"], "CC-SCR-001")
+        self.assertEqual(result["hints"][0]["source_type"], "scenario")
+
+    def test_apple_pay_starts_nfc_not_crypto(self):
+        for index, replica in enumerate(
+            (
+                "хочу оплачивать apple pay",
+                "Хочу оплачивать Apple Pay",
+                "можно платить айфоном",
+            ),
+            start=1,
+        ):
+            with self.subTest(replica=replica):
+                result = suggest(replica, session_id=f"apple-pay-{index}")
+                self.assertEqual(result["scenario"]["code"], "CC-SCR-003")
+                self.assertEqual(result["hints"][0]["source_type"], "scenario")
+                self.assertNotEqual(
+                    (result.get("suggested_scenario") or {}).get("code"),
+                    "CC-SCR-009",
+                )
+
+    def test_car_loan_paraphrases_start_scenario(self):
+        for index, replica in enumerate(
+            (
+                "Хочу взять автокредит",
+                "кредит на автомобиль",
+                "хочу кредит на машину",
+            ),
+            start=1,
+        ):
+            with self.subTest(replica=replica):
+                result = suggest(replica, session_id=f"car-loan-{index}")
+                self.assertEqual(result["scenario"]["code"], "CC-SCR-004")
+                self.assertEqual(result["hints"][0]["source_type"], "scenario")
+
+    def test_under_fourteen_age_paraphrase_starts_grandchild_scenario(self):
+        result = suggest(
+            "ребёнку 12 с половиной лет, хочу открыть счёт",
+            session_id="child-age-12",
+        )
+        self.assertEqual(result["scenario"]["code"], "CC-SCR-002")
+
+    def test_off_script_reply_leaves_scenario_instead_of_repeating_step(self):
+        started = suggest(
+            "хочу взять автокредит",
+            session_id="car-off-script",
+        )
+        self.assertEqual(started["scenario"]["code"], "CC-SCR-004")
+        partner = suggest(
+            "Покупаю автомобиль у партнёра банка",
+            session_id="car-off-script",
+        )
+        self.assertIn("партнёр", " ".join(partner["scenario"]["path"]).casefold())
+        declined = suggest("Нет, не оформляем.", session_id="car-off-script")
+        self.assertIsNone(declined["scenario"])
+        self.assertFalse(
+            any(hint.get("source_type") == "scenario" for hint in declined["hints"])
+        )
+        suggested = declined.get("suggested_scenario")
+        self.assertIsNotNone(suggested)
+        self.assertEqual(suggested["code"], "CC-SCR-004")
+
+    def test_explicit_no_partner_still_takes_regular_loan_branch(self):
+        suggest("хочу взять автокредит", session_id="car-no-partner")
+        suggest("Покупаю новый автомобиль в салоне", session_id="car-no-partner")
+        regular = suggest(
+            "Нет, продавец не партнёр, нужен обычный кредит",
+            session_id="car-no-partner",
+        )
+        self.assertEqual(regular["scenario"]["code"], "CC-SCR-004")
+        self.assertTrue(
+            any("приобретен" in part.casefold() for part in regular["scenario"]["path"])
+        )
+        self.assertEqual(regular["hints"][0]["source_type"], "scenario")
+
+    def test_mid_scenario_question_does_not_repeat_scenario_hint(self):
+        started = suggest(
+            "хочу взять автокредит",
+            session_id="car-no-repeat",
+        )
+        self.assertEqual(started["scenario"]["code"], "CC-SCR-004")
+        mid = suggest(
+            "Скольки лет действует льготный кредит?",
+            session_id="car-no-repeat",
+        )
+        self.assertIsNone(mid["scenario"])
+        self.assertFalse(
+            any(hint.get("source_type") == "scenario" for hint in mid["hints"])
+        )
+
+    def test_neither_option_takes_fallback_branch(self):
+        started = suggest(
+            "сыну 14, можно счёт открыть",
+            session_id="neither-card",
+        )
+        self.assertEqual(started["scenario"]["code"], "CC-SCR-001")
+        other = suggest("ни то ни другое", session_id="neither-card")
+        self.assertEqual(other["scenario"]["code"], "CC-SCR-001")
+        self.assertTrue(
+            any("друг" in part.casefold() for part in other["scenario"]["path"])
+        )
+        self.assertTrue(other["hints"])
+        self.assertEqual(other["hints"][0]["source_type"], "scenario")
+
+    def test_weak_phrase_suggests_scenario_without_auto_enter(self):
+        result = suggest("про авто", session_id="lamp-car")
+        self.assertIsNone(result["scenario"])
+        suggested = result.get("suggested_scenario")
+        self.assertIsNotNone(suggested)
+        self.assertEqual(suggested["code"], "CC-SCR-004")
+
+    def test_operator_can_enter_and_exit_suggested_scenario(self):
+        entered = enter_scenario(
+            "CC-SCR-004",
+            session_key="manual-enter",
+            channel="telephony",
+        )
+        self.assertIsNotNone(entered)
+        self.assertEqual(entered.code, "CC-SCR-004")
+        inside = suggest("новое авто в салоне", session_id="manual-enter")
+        self.assertEqual(inside["scenario"]["code"], "CC-SCR-004")
+        clear_scenario_session("manual-enter")
+        after_exit = suggest(
+            "как оформить карту на моё имя",
+            session_id="manual-enter",
+        )
+        self.assertIsNone(after_exit["scenario"])
+
+    def test_published_graph_gets_semantic_expansion_without_manual_synonyms(self):
+        item = DialogScenario.objects.get(code="CC-SCR-009")
+        expansion = (item.current_version.graph or {}).get("semantic_expansion") or ""
+        self.assertIn("криптобирж", expansion.casefold())
+        start = next(
+            node
+            for node in item.current_version.graph["nodes"]
+            if node["id"] == "start"
+        )
+        profile = _semantic_profile(item, item.current_version.graph, start)
+        self.assertIn("криптобирж", profile.casefold())
+        self.assertNotIn("эфириум", expansion.casefold())
+
+    def test_related_concept_uses_semantic_profile_not_keyword_list(self):
+        scenarios = list(DialogScenario.objects.all())
+        vectors = {
+            scenario.pk: (
+                [1.0, 0.0]
+                if scenario.code == "CC-SCR-009"
+                else [0.0, 1.0]
+            )
+            for scenario in scenarios
+        }
+        signature = ((1, "related-concept"),)
+        with (
+            patch(
+                "orchestrator.scenario_engine._semantic_signature",
+                return_value=signature,
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_signature",
+                signature,
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_backend",
+                "http",
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_vectors",
+                vectors,
+            ),
+            patch(
+                "core.embeddings.embed_query_with_backend",
+                return_value=([1.0, 0.0], "http"),
+            ),
+        ):
+            matched = _match_start("Хочу перевести эфириум")
+        self.assertIsNotNone(matched)
+        self.assertEqual(matched[0].code, "CC-SCR-009")
+
+    def test_brand_paraphrase_uses_embeddings_not_hardcoded_list(self):
+        car = DialogScenario.objects.get(code="CC-SCR-004")
+        start = next(
+            node
+            for node in car.current_version.graph["nodes"]
+            if node["id"] == "start"
+        )
+        self.assertEqual(
+            _topic_boost("хочу кредит на джили", _semantic_profile(car, car.current_version.graph, start)),
+            0,
+        )
+        scenarios = list(DialogScenario.objects.all())
+        vectors = {
+            scenario.pk: (
+                [1.0, 0.0]
+                if scenario.code == "CC-SCR-004"
+                else [0.0, 1.0]
+            )
+            for scenario in scenarios
+        }
+        signature = ((1, "brand-paraphrase"),)
+        with (
+            patch(
+                "orchestrator.scenario_engine._semantic_signature",
+                return_value=signature,
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_signature",
+                signature,
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_backend",
+                "http",
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_vectors",
+                vectors,
+            ),
+            patch(
+                "core.embeddings.embed_query_with_backend",
+                return_value=([1.0, 0.0], "http"),
+            ),
+        ):
+            matched = _match_start("хочу кредит на джили")
+        self.assertIsNotNone(matched)
+        self.assertEqual(matched[0].code, "CC-SCR-004")
+
+    def test_generic_phone_transfer_not_rf_even_with_embeddings(self):
+        scenarios = list(DialogScenario.objects.all())
+        vectors = {
+            scenario.pk: (
+                [1.0, 0.0]
+                if scenario.code == "CC-SCR-005"
+                else [0.0, 1.0]
+            )
+            for scenario in scenarios
+        }
+        signature = ((1, "generic-phone-transfer"),)
+        with (
+            patch(
+                "orchestrator.scenario_engine._semantic_signature",
+                return_value=signature,
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_signature",
+                signature,
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_backend",
+                "http",
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_vectors",
+                vectors,
+            ),
+            patch(
+                "core.embeddings.embed_query_with_backend",
+                return_value=([1.0, 0.0], "http"),
+            ),
+        ):
+            matched = _match_start("хочу просто перевод по телефону")
+        self.assertIsNone(matched)
+        with (
+            patch(
+                "orchestrator.scenario_engine._semantic_signature",
+                return_value=signature,
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_signature",
+                signature,
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_backend",
+                "http",
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_vectors",
+                {
+                    scenario.pk: (
+                        [1.0, 0.0]
+                        if scenario.code == "CC-SCR-009"
+                        else [0.0, 1.0]
+                    )
+                    for scenario in scenarios
+                },
+            ),
+            patch(
+                "core.embeddings.embed_query_with_backend",
+                return_value=([1.0, 0.0], "http"),
+            ),
+        ):
+            matched_crypto = _match_start(
+                "как перевести деньги по номеру телефона"
+            )
+        self.assertIsNone(matched_crypto)
+
+    def test_attach_semantic_expansion_uses_title_without_hardcoded_aliases(self):
+        graph = attach_semantic_expansion(
+            "Перевод на криптобиржу",
+            "Мне нужно перечислить деньги на криптобиржу?",
+            {"nodes": [{"id": "start", "type": "start", "label": "Криптобиржа"}]},
+        )
+        expansion = graph["semantic_expansion"]
+        self.assertIn("криптобирж", expansion.casefold())
+        self.assertNotIn("эфириум", expansion.casefold())
+        self.assertNotIn("binance", expansion.casefold())
 
 
 class ScenarioAdminApiTest(TestCase):
