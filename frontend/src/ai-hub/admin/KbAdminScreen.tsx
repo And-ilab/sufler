@@ -17,7 +17,6 @@ import {
   type AssistantKbDocument,
 } from './api/assistantAdmin'
 import {
-  createKnowledgeBase,
   deleteKnowledgeBase,
   deleteKnowledgeDocument,
   getKnowledgeBase,
@@ -37,7 +36,6 @@ interface KbAdminScreenProps {
 
 type KbKind = 'cc' | 'assistant'
 type UnifiedKey = `${KbKind}:${number}`
-type CreateTarget = 'assistant' | 'cc'
 
 interface UnifiedDocument {
   id: number
@@ -204,7 +202,6 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
   const [selected, setSelected] = useState<UnifiedKb | null>(null)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [createTarget, setCreateTarget] = useState<CreateTarget>('assistant')
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -370,28 +367,15 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
     const nextName = name.trim()
     const nextDescription = description.trim()
     await runKbAction(async () => {
-      if (createTarget === 'assistant') {
-        const created = await createAssistantKb({
-          name: nextName,
-          description: nextDescription,
-        })
-        setName('')
-        setDescription('')
-        setShowCreate(false)
-        await refreshList(makeKey('assistant', created.id))
-        setNotice(`БЗ «${created.name}» создана для ассистента (появится в чате).`)
-        return
-      }
-      const created = await createKnowledgeBase({
+      const created = await createAssistantKb({
         name: nextName,
         description: nextDescription,
-        scope: 'contact_center',
       })
       setName('')
       setDescription('')
       setShowCreate(false)
-      await refreshList(makeKey('cc', created.id))
-      setNotice(`БЗ «${created.name}» создана для КЦ (источник: Ручная загрузка).`)
+      await refreshList(makeKey('assistant', created.id))
+      setNotice(`БЗ «${created.name}» создана (появится в чате).`)
     }, 'Не удалось создать базу знаний')
   }
 
@@ -559,23 +543,6 @@ export function KbAdminScreen({ canEdit = true }: KbAdminScreenProps) {
                   onChange={(event) => setDescription(event.target.value)}
                 />
               </label>
-              <label>
-                <span>Куда создать</span>
-                <select
-                  value={createTarget}
-                  disabled={!canEdit || busy}
-                  onChange={(event) => setCreateTarget(event.target.value as CreateTarget)}
-                  data-testid="kb-create-target"
-                >
-                  <option value="assistant">Ассистент (чат · выпадающий список)</option>
-                  <option value="cc">КЦ / суфлёр</option>
-                </select>
-              </label>
-              <p className="kb-admin__create-hint">
-                Источник: <strong>Ручная загрузка</strong>
-                {' · '}
-                {createTarget === 'assistant' ? 'видна в чате ассистента' : 'индекс КЦ'}
-              </p>
               <Button
                 type="submit"
                 disabled={!canEdit || busy || !name.trim()}

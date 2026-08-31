@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Mapping
 import io
+import logging
 import struct
 import wave
 
@@ -14,6 +15,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from reports.models import AsrDialogueSession, AsrTranscriptUtterance
+
+logger = logging.getLogger(__name__)
 
 # Прил.1 §4.7.3.5: success < 90% → low confidence highlight / optional filter.
 ASR_LOW_CONFIDENCE_THRESHOLD = 0.90
@@ -183,6 +186,13 @@ def set_training_candidate(
         training_candidate=True
     ).exists()
     session.save(update_fields=["has_training_candidate", "updated_at"])
+    if utterance.training_candidate:
+        try:
+            from qu.admin_service import enqueue_from_asr_utterance
+
+            enqueue_from_asr_utterance(utterance, session=session)
+        except Exception:
+            logger.exception("QU enqueue from ASR candidate failed")
     return {
         "utterance": serialize_utterance(utterance),
         "session": serialize_session(session),

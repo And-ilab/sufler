@@ -70,6 +70,28 @@ interface ModuleWindowProps {
   onMinimize: () => void
 }
 
+function clampWindowSize(width: number, height: number) {
+  const maxWidth = Math.max(320, window.innerWidth - 48)
+  const maxHeight = Math.max(280, window.innerHeight - 120)
+  return {
+    width: Math.min(maxWidth, Math.max(360, width)),
+    height: Math.min(maxHeight, Math.max(420, height)),
+  }
+}
+
+function clampWindowPosition(left: number, top: number, width: number, height: number) {
+  const maxLeft = Math.max(0, window.innerWidth - Math.min(width, 80))
+  const maxTop = Math.max(0, window.innerHeight - 48)
+  return {
+    left: Math.min(maxLeft, Math.max(0, left)),
+    top: Math.min(maxTop, Math.max(0, top)),
+  }
+}
+
+type ResizeEdge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
+
+const RESIZE_EDGES: ResizeEdge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
+
 function ModuleWindow({
   module,
   username,
@@ -85,40 +107,80 @@ function ModuleWindow({
       ? { width: 960, height: 580 }
       : { width: 720, height: 720 }
   const [size, setSize] = useState(initialSize)
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const [maximized, setMaximized] = useState(false)
+  const [dragging, setDragging] = useState(false)
 
   const resizeBy = (widthDelta: number, heightDelta: number) => {
     if (maximized) return
-    const maxWidth = Math.max(320, window.innerWidth - 48)
-    const maxHeight = Math.max(280, window.innerHeight - 120)
-    setSize((current) => ({
-      width: Math.min(maxWidth, Math.max(360, current.width + widthDelta)),
-      height: Math.min(maxHeight, Math.max(420, current.height + heightDelta)),
-    }))
+    setSize((current) => clampWindowSize(current.width + widthDelta, current.height + heightDelta))
   }
 
-  const startResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (maximized) return
+  const bindPointerDrag = (
+    event: ReactPointerEvent<HTMLElement>,
+    onMove: (moveEvent: PointerEvent) => void,
+  ) => {
     event.preventDefault()
+    const handle = event.currentTarget
+    handle.setPointerCapture(event.pointerId)
+    const onPointerUp = () => {
+      handle.removeEventListener('pointermove', onMove)
+      handle.removeEventListener('pointerup', onPointerUp)
+      setDragging(false)
+    }
+    handle.addEventListener('pointermove', onMove)
+    handle.addEventListener('pointerup', onPointerUp)
+  }
+
+  const startEdgeResize = (edge: ResizeEdge) => (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (maximized) return
+    event.stopPropagation()
+    const frame = event.currentTarget.closest('.portal-module-window')
+    if (!(frame instanceof HTMLElement)) return
+    const rect = frame.getBoundingClientRect()
     const startX = event.clientX
     const startY = event.clientY
-    const startSize = size
+    const startSize = { width: rect.width, height: rect.height }
+    const startPos = { left: rect.left, top: rect.top }
+    setDragging(true)
+    bindPointerDrag(event, (moveEvent) => {
+      const dx = moveEvent.clientX - startX
+      const dy = moveEvent.clientY - startY
+      let width = startSize.width
+      let height = startSize.height
+      let left = startPos.left
+      let top = startPos.top
+      if (edge.includes('e')) width = startSize.width + dx
+      if (edge.includes('s')) height = startSize.height + dy
+      if (edge.includes('w')) width = startSize.width - dx
+      if (edge.includes('n')) height = startSize.height - dy
+      const nextSize = clampWindowSize(width, height)
+      if (edge.includes('w')) left = startPos.left + (startSize.width - nextSize.width)
+      if (edge.includes('n')) top = startPos.top + (startSize.height - nextSize.height)
+      setSize(nextSize)
+      setPosition(clampWindowPosition(left, top, nextSize.width, nextSize.height))
+    })
+  }
 
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      const maxWidth = Math.max(320, window.innerWidth - 48)
-      const maxHeight = Math.max(280, window.innerHeight - 120)
-      setSize({
-        width: Math.min(maxWidth, Math.max(360, startSize.width + moveEvent.clientX - startX)),
-        height: Math.min(maxHeight, Math.max(420, startSize.height + moveEvent.clientY - startY)),
-      })
-    }
-    const onPointerUp = () => {
-      window.removeEventListener('pointermove', onPointerMove)
-      window.removeEventListener('pointerup', onPointerUp)
-    }
-
-    window.addEventListener('pointermove', onPointerMove)
-    window.addEventListener('pointerup', onPointerUp)
+  const startMove = (event: ReactPointerEvent<HTMLElement>) => {
+    if (maximized) return
+    if ((event.target as HTMLElement).closest('.portal-module-window__controls')) return
+    const frame = event.currentTarget.closest('.portal-module-window')
+    if (!(frame instanceof HTMLElement)) return
+    const rect = frame.getBoundingClientRect()
+    const startX = event.clientX
+    const startY = event.clientY
+    const startLeft = rect.left
+    const startTop = rect.top
+    setDragging(true)
+    bindPointerDrag(event, (moveEvent) => {
+      setPosition(clampWindowPosition(
+        startLeft + moveEvent.clientX - startX,
+        startTop + moveEvent.clientY - startY,
+        size.width,
+        size.height,
+      ))
+    })
   }
 
   const title =
@@ -127,23 +189,36 @@ function ModuleWindow({
     module === 'sufler'
       ? `Консультация · ${username || 'Оператор КЦ'}`
       : `${username || 'Пользователь'} · ${roleLabel || 'Пользователь ИИ-ассистента'}`
+  const popOutTitle = `Открыть отдельно`
+  const maximizeTitle = maximized ? 'Восстановить' : 'На весь экран'
 
   return (
     <section
       className={`portal-module-window portal-module-window--${module}${
         maximized ? ' portal-module-window--maximized' : ''
+      }${position && !maximized ? ' portal-module-window--moved' : ''}${
+        dragging ? ' is-dragging' : ''
       }`}
       style={
         maximized
           ? undefined
-          : { width: `${size.width}px`, height: `${size.height}px` }
+          : {
+              width: `${size.width}px`,
+              height: `${size.height}px`,
+              ...(position
+                ? { left: `${position.left}px`, top: `${position.top}px` }
+                : {}),
+            }
       }
       role="dialog"
       aria-label={title}
       data-testid={`${module}-window`}
-      data-ai-color-theme={module === 'assistant' ? colorTheme : undefined}
+      data-ai-color-theme={colorTheme}
     >
-      <header className="portal-module-window__header">
+      <header
+        className="portal-module-window__header"
+        onPointerDown={startMove}
+      >
         <div className="portal-module-window__identity">
           <ModuleGlyph module={module} />
           <div>
@@ -163,22 +238,36 @@ function ModuleWindow({
               ≡
             </a>
           )}
-          <a href={`/${module}`} aria-label={`Открыть ${MODULE_LABELS[module]} отдельно`}>
+          <a
+            href={`/${module}`}
+            aria-label={popOutTitle}
+            title={popOutTitle}
+          >
             ↗
           </a>
-          <button type="button" onClick={onMinimize} aria-label="Свернуть окно">
+          <button
+            type="button"
+            onClick={onMinimize}
+            aria-label="Свернуть"
+            title="Свернуть"
+          >
             —
           </button>
           <button
             type="button"
             onClick={() => setMaximized((value) => !value)}
-            aria-label={maximized ? 'Восстановить окно' : 'Развернуть на весь экран'}
-            title={maximized ? 'Восстановить' : 'На весь экран'}
+            aria-label={maximizeTitle}
+            title={maximizeTitle}
             data-testid={`${module}-maximize`}
           >
             {maximized ? '❐' : '□'}
           </button>
-          <button type="button" onClick={onClose} aria-label="Закрыть окно">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Закрыть"
+            title="Закрыть"
+          >
             ×
           </button>
         </div>
@@ -200,22 +289,30 @@ function ModuleWindow({
         />
       )}
 
-      {!maximized ? (
-        <button
-          type="button"
-          className="portal-module-window__resize"
-          onPointerDown={startResize}
-          onKeyDown={(event) => {
-            if (event.key.startsWith('Arrow')) event.preventDefault()
-            const delta = event.shiftKey ? 40 : 10
-            if (event.key === 'ArrowRight') resizeBy(delta, 0)
-            if (event.key === 'ArrowLeft') resizeBy(-delta, 0)
-            if (event.key === 'ArrowDown') resizeBy(0, delta)
-            if (event.key === 'ArrowUp') resizeBy(0, -delta)
-          }}
-          aria-label={`Изменить размер окна ${MODULE_LABELS[module]}`}
-        />
-      ) : null}
+      {!maximized
+        ? RESIZE_EDGES.map((edge) => (
+            <button
+              key={edge}
+              type="button"
+              className={`portal-module-window__edge portal-module-window__edge--${edge}`}
+              onPointerDown={startEdgeResize(edge)}
+              onKeyDown={
+                edge === 'se'
+                  ? (event) => {
+                      if (event.key.startsWith('Arrow')) event.preventDefault()
+                      const delta = event.shiftKey ? 40 : 10
+                      if (event.key === 'ArrowRight') resizeBy(delta, 0)
+                      if (event.key === 'ArrowLeft') resizeBy(-delta, 0)
+                      if (event.key === 'ArrowDown') resizeBy(0, delta)
+                      if (event.key === 'ArrowUp') resizeBy(0, -delta)
+                    }
+                  : undefined
+              }
+              aria-label={`Изменить размер окна ${MODULE_LABELS[module]}`}
+              title="Потяните за край, чтобы изменить размер"
+            />
+          ))
+        : null}
     </section>
   )
 }
@@ -257,7 +354,7 @@ function PortalBackdrop({
       ? 'Переключить на цветовую схему онлайн-чата'
       : 'Вернуть текущую цветовую схему'
   return (
-    <div className="portal-launcher__backdrop">
+    <div className="portal-launcher__backdrop" data-ai-color-theme={colorTheme}>
       <header className="portal-launcher__portal-header">
         <img src="/assets/belarusbank-logo.png" alt="Беларусбанк" />
         <nav aria-label="Навигация корпоративного портала">
@@ -396,6 +493,7 @@ export function PortalLauncher({
           roleLabel={roleLabel}
           roles={roles}
           settingsEntry={settingsEntry}
+          colorTheme={colorTheme}
           onClose={() => closeModule('sufler')}
           onMinimize={() => closeModule('sufler')}
         />

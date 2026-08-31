@@ -23,17 +23,21 @@ def ollama_base_url() -> str:
 
 
 def openai_base_url() -> str:
-    return (
-        os.environ.get("OPENAI_BASE_URL") or f"{ollama_base_url()}/v1"
-    ).rstrip("/")
+    raw = (os.environ.get("OPENAI_BASE_URL") or "").strip().rstrip("/")
+    if raw and "deepseek.com" not in raw.lower():
+        return raw
+    return f"{ollama_base_url()}/v1"
+
+
+def _is_assistant_model(model_id: str) -> bool:
+    return bool(model_id) and "deepseek" not in model_id.lower()
 
 
 def _env_default_model() -> str:
-    return (
-        os.environ.get("OPENAI_MODEL")
-        or os.environ.get("OLLAMA_MODEL")
-        or ""
-    ).strip()
+    openai_model = (os.environ.get("OPENAI_MODEL") or "").strip()
+    if _is_assistant_model(openai_model):
+        return openai_model
+    return (os.environ.get("OLLAMA_MODEL") or "").strip()
 
 
 def _state_path() -> Path:
@@ -62,9 +66,9 @@ def _write_runtime_model(model_id: str) -> None:
 
 
 def active_model_id() -> str:
-    """Runtime UI selection, then env default."""
+    """Runtime UI selection, then env default. Ignore DeepSeek (sufler-only)."""
     runtime = _read_runtime_model()
-    if runtime:
+    if runtime and _is_assistant_model(runtime):
         return runtime
     return _env_default_model()
 
@@ -151,6 +155,8 @@ def get_models_status() -> dict[str, Any]:
 
     ids = {item["id"] for item in models}
     runtime = _read_runtime_model()
+    if runtime and not _is_assistant_model(runtime):
+        runtime = None
     env_default = _env_default_model()
     active: str | None = None
     if runtime and runtime in ids:

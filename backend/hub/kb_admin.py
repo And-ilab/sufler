@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import tempfile
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -16,6 +19,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from core.model_registry import ModelRegistry
+from core.text_language import safe_ru_en_text
 from hub.models import ContactCenterKnowledgeBase, KnowledgeBaseDocument
 from core.embeddings import embed_passage
 from ingest.pipeline import (
@@ -382,25 +386,48 @@ def _extract_docx_text(data: bytes) -> str:
 
 
 def _extract_doc_text(filename: str, data: bytes) -> str:
-    """Best-effort text from legacy .doc (OLE) for local seed / Hub upload."""
-    stem = Path(filename).stem.replace("_", " ").replace("-", " ")
-    chunks: list[str] = []
-    for encoding in ("utf-16-le", "cp1251", "latin-1"):
-        try:
-            decoded = data.decode(encoding, errors="ignore")
-        except Exception:
-            continue
-        # Keep runs of letters/digits/punctuation (incl. Cyrillic).
-        runs = re.findall(
-            r"[\w\u0400-\u04FF][\w\u0400-\u04FF\s.,:;!?%№«»\"'()\-/]{8,}",
-            decoded,
-            flags=re.UNICODE,
+    """Extract Word 97–2003 through antiword; never decode OLE bytes directly."""
+    executable = shutil.which("antiword")
+    if not executable:
+        raise KnowledgeBaseError(
+            "Для обработки .doc на сервере не установлен antiword. "
+            "Обратитесь к администратору или загрузите DOCX."
         )
-        chunks.extend(runs)
-    text = normalize_text(" ".join(chunks))
-    if len(text) >= 40:
-        return text
-    return normalize_text(f"{stem} {filename}")
+    suffix = Path(filename).suffix or ".doc"
+    temporary_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temporary:
+            temporary.write(data)
+            temporary_path = temporary.name
+        completed = subprocess.run(
+            [executable, "-w", "0", temporary_path],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise KnowledgeBaseError("Не удалось извлечь текст из .doc.") from exc
+    finally:
+        if temporary_path:
+            Path(temporary_path).unlink(missing_ok=True)
+    if completed.returncode != 0 or not completed.stdout:
+        details = completed.stderr.decode("utf-8", errors="ignore").strip()
+        raise KnowledgeBaseError(
+            f"Файл .doc повреждён или не поддерживается antiword: {details}"
+        )
+    try:
+        decoded = completed.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            decoded = completed.stdout.decode("cp1251")
+        except UnicodeDecodeError as exc:
+            raise KnowledgeBaseError(
+                "antiword вернул текст в неизвестной кодировке."
+            ) from exc
+    text = normalize_text(decoded)
+    if not text:
+        raise KnowledgeBaseError("Файл .doc не содержит извлекаемого текста.")
+    return _validate_extracted_text(text)
 
 
 def _extract_pdf_text(data: bytes) -> str:
@@ -414,13 +441,19 @@ def _extract_pdf_text(data: bytes) -> str:
         text = normalize_text("\n".join(pages))
         if text:
             return text
-    decoded = data.decode("latin-1", errors="ignore")
-    text = normalize_text(
-        "".join(character if character.isprintable() else " " for character in decoded)
+    raise KnowledgeBaseError(
+        "PDF не содержит извлекаемого текста. Выполните OCR или загрузите DOCX/TXT."
     )
-    if not text:
-        raise KnowledgeBaseError("pdf file contains no extractable text")
-    return text
+
+
+def _validate_extracted_text(text: str) -> str:
+    safe = safe_ru_en_text(normalize_text(text))
+    if not safe:
+        raise KnowledgeBaseError(
+            "Документ содержит повреждённый текст или символы вне русского "
+            "и английского алфавитов. Пересохраните исходник как DOCX/PDF."
+        )
+    return safe
 
 
 def extract_document_text(filename: str, data: bytes) -> str:
@@ -431,19 +464,25 @@ def extract_document_text(filename: str, data: bytes) -> str:
     if not data:
         raise KnowledgeBaseError("uploaded file is empty")
     if extension in TEXT_EXTENSIONS:
-        text = normalize_text(data.decode("utf-8", errors="ignore"))
+        try:
+            decoded = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise KnowledgeBaseError(
+                "Текстовый файл должен быть сохранён в UTF-8."
+            ) from exc
+        text = normalize_text(decoded)
         if not text:
             raise KnowledgeBaseError("text file is empty")
-        return text
+        return _validate_extracted_text(text)
     if extension == ".docx":
-        return _extract_docx_text(data)
+        return _validate_extracted_text(_extract_docx_text(data))
     if extension == ".doc":
         return _extract_doc_text(filename, data)
     if extension == ".pdf":
-        return _extract_pdf_text(data)
+        return _validate_extracted_text(_extract_pdf_text(data))
     # Binary office/image formats: keep a searchable filename marker for MVP.
     stem = Path(filename).stem.replace("_", " ").replace("-", " ")
-    return normalize_text(f"{stem} {filename}")
+    return _validate_extracted_text(normalize_text(f"{stem} {filename}"))
 
 
 @transaction.atomic

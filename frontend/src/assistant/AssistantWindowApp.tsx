@@ -58,18 +58,31 @@ export function AssistantWindowApp({
             <p className="asst-window__user">{username}</p>
           </div>
           <div className="asst-window__controls" aria-label="Управление окном">
-            <button type="button" title="Свернуть" onClick={() => setOpen(false)} data-testid="asst-minimize">
+            <button
+              type="button"
+              title="Свернуть"
+              aria-label="Свернуть"
+              onClick={() => setOpen(false)}
+              data-testid="asst-minimize"
+            >
               ─
             </button>
             <button
               type="button"
-              title={maximized ? 'Восстановить' : 'Развернуть'}
+              title={maximized ? 'Восстановить' : 'На весь экран'}
+              aria-label={maximized ? 'Восстановить' : 'На весь экран'}
               onClick={() => setMaximized((value) => !value)}
               data-testid="asst-maximize"
             >
               {maximized ? '❐' : '□'}
             </button>
-            <button type="button" title="Закрыть" onClick={() => setOpen(false)} data-testid="asst-close">
+            <button
+              type="button"
+              title="Закрыть"
+              aria-label="Закрыть"
+              onClick={() => setOpen(false)}
+              data-testid="asst-close"
+            >
               ×
             </button>
           </div>

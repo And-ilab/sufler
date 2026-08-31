@@ -411,7 +411,10 @@ function App() {
     return (
       <AiHubAdminApp
         roles={auth.roles}
-        demoRoleSwitcher={import.meta.env.DEV}
+        demoRoleSwitcher={
+          import.meta.env.DEV
+          && !auth.roles.includes('software_administrator')
+        }
       />
     )
   }

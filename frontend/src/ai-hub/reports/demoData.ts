@@ -71,6 +71,16 @@ export const CHANNEL_OPTIONS = [
   { value: 'phone', label: 'Телефония' },
 ]
 
+export const SUFLER_REPORT_IDS = new Set([
+  'usefulness',
+  'relevance',
+  'errors',
+  'rpt-08',
+  'rpt-02',
+  'rpt-07',
+  'rpt-09',
+])
+
 export const DEPARTMENT_OPTIONS = [
   { value: 'all', label: 'Все отделы' },
   { value: 'retail', label: 'Розничные продукты' },

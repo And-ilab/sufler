@@ -296,6 +296,72 @@ def _sufler_paths() -> dict[str, Any]:
                 },
             }
         },
+        "/api/v1/sufler/scenario/enter": {
+            "post": {
+                "tags": ["sufler"],
+                "operationId": "suflerScenarioEnter",
+                "summary": "Enter a suggested scenario from the operator lamp",
+                "security": session_security,
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["session_id", "code"],
+                                "properties": {
+                                    "session_id": {"type": "string"},
+                                    "code": {"type": "string"},
+                                    "channel": {"type": "string"},
+                                },
+                            }
+                        }
+                    },
+                },
+                "responses": {
+                    "200": {
+                        "description": "Active scenario hint",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SuflerSuggestResponse"
+                                }
+                            }
+                        },
+                    },
+                    **_error_responses(400, 401, 403),
+                },
+            }
+        },
+        "/api/v1/sufler/scenario/exit": {
+            "post": {
+                "tags": ["sufler"],
+                "operationId": "suflerScenarioExit",
+                "summary": "Leave the active scenario and return to knowledge base",
+                "security": session_security,
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["session_id"],
+                                "properties": {"session_id": {"type": "string"}},
+                            }
+                        }
+                    },
+                },
+                "responses": {
+                    "200": {
+                        "description": "Scenario session cleared",
+                        "content": {
+                            "application/json": {"schema": {"type": "object"}}
+                        },
+                    },
+                    **_error_responses(400, 401, 403),
+                },
+            }
+        },
         "/api/v1/sufler/test-dialog": {
             "post": {
                 "tags": ["sufler"],
@@ -494,6 +560,10 @@ def _schemas() -> dict[str, Any]:
             "type": "object",
             "properties": {
                 "text": {"type": "string"},
+                "detail_text": {
+                    "type": "string",
+                    "description": "Fuller KB article for the ⋯ expand on knowledge-base hints.",
+                },
                 "relevance": {"type": "number"},
                 "citations": {
                     "type": "array",
@@ -511,6 +581,8 @@ def _schemas() -> dict[str, Any]:
                 },
                 "request_id": {"type": "string"},
                 "latency_ms": {"type": "object"},
+                "scenario": {"type": "object", "nullable": True},
+                "suggested_scenario": {"type": "object", "nullable": True},
             },
         },
         "SuflerTestDialogRequest": {

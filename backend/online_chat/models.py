@@ -877,6 +877,8 @@ class SuflerHintFeedback(models.Model):
     relevance_percent = models.PositiveSmallIntegerField(null=True, blank=True)
     citation_title = models.CharField(max_length=255, blank=True, default="")
     request_id = models.CharField(max_length=64, blank=True, default="")
+    source = models.CharField(max_length=32, blank=True, default="chat", db_index=True)
+    call_id = models.CharField(max_length=64, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

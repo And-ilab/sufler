@@ -2,6 +2,7 @@ export interface QuPreviewDocument {
   rank: number
   article_id: number
   chunk_index: number
+  kb_slug?: string
   title: string
   permalink: string
   snippet: string
@@ -12,12 +13,21 @@ export interface QuPreviewDocument {
   matched_example: string
 }
 
+export interface QuPreviewHint {
+  text: string
+  title: string
+  permalink: string
+  article_id: number
+  relevance_percent: number
+}
+
 export interface QuPreviewResult {
   query: string
   kb_id: string
   min_relevance: number
   min_relevance_percent: number
   documents: QuPreviewDocument[]
+  hint?: QuPreviewHint | null
 }
 
 interface ApiErrorPayload {

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Button, Card, HintCard, StatusBadge } from '../components'
-import { relevanceStatusFromPercent } from '../components/hintRelevance'
+import { relevanceStatusFromPercent, type HintFeedbackChoice } from '../components/hintRelevance'
 import type { SuflerHint } from '../sufler/api/suggest'
+import { submitSuflerHintFeedback } from './api/onlineChatApi'
 import {
   ACTIVE_CLIENT,
   ACTIVE_SUMMARY_HISTORY,
@@ -14,14 +15,19 @@ export interface SuflerSidePanelProps {
   loading?: boolean
   error?: string
   latencyMs?: number | null
+  scenarioPath?: string
   clientPreview?: string
   onInsert?: (text: string) => void
   disabled?: boolean
   client?: ClientInfoData
   summary?: SummaryHistoryData
+  query?: string
+  operatorName?: string
+  requestId?: string
 }
 
 function hintTitle(hint: SuflerHint): string {
+  if (hint.source_type === 'scenario') return 'Ответ по активному сценарию'
   return hint.citations[0]?.title || `Подсказка ${hint.rank}`
 }
 
@@ -36,14 +42,19 @@ export function SuflerSidePanel({
   loading = false,
   error = '',
   latencyMs = null,
+  scenarioPath = '',
   onInsert,
   disabled = false,
   client = ACTIVE_CLIENT,
   summary = ACTIVE_SUMMARY_HISTORY,
+  query = '',
+  operatorName = '',
+  requestId = '',
 }: SuflerSidePanelProps) {
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [clientOpen, setClientOpen] = useState(false)
   const [phoneRevealed, setPhoneRevealed] = useState(false)
+  const [feedbackByHint, setFeedbackByHint] = useState<Record<number, HintFeedbackChoice>>({})
 
   return (
     <aside className="chat-arm__sufler" data-testid="sufler-side-panel" aria-label="Клиент и суфлёр">
@@ -143,6 +154,12 @@ export function SuflerSidePanel({
             {loading ? 'запрос…' : 'активен'}
           </StatusBadge>
         </header>
+        {scenarioPath ? (
+          <div className="chat-arm__scenario-path" data-testid="chat-scenario-path">
+            <strong>Активный сценарий</strong>
+            <span>{scenarioPath}</span>
+          </div>
+        ) : null}
 
         {error ? (
           <Card className="chat-arm__error" role="alert">
@@ -157,22 +174,51 @@ export function SuflerSidePanel({
           {hints.map((hint, index) => (
             <HintCard
               key={hint.rank}
+              className={hint.source_type === 'scenario' ? 'chat-arm__scenario-hint' : ''}
               title={hintTitle(hint)}
               relevance={`${hint.relevance_percent}%`}
               relevancePercent={hint.relevance_percent}
               relevanceStatus={relevanceStatusFromPercent(hint.relevance_percent)}
               suzLink={hintSuz(hint)}
-              showFeedback
+              showFeedback={hint.source_type !== 'scenario'}
+              feedbackValue={feedbackByHint[hint.rank] ?? null}
+              onFeedback={(choice) => {
+                setFeedbackByHint((current) => ({ ...current, [hint.rank]: choice }))
+                void submitSuflerHintFeedback({
+                  operator_name: operatorName,
+                  query,
+                  hint_rank: hint.rank,
+                  hint_text: hint.text,
+                  choice,
+                  relevance_percent: hint.relevance_percent,
+                  citation_title: hint.citations[0]?.title,
+                  request_id: requestId,
+                  source: 'chat',
+                }).catch(() => {})
+              }}
               hintIndex={index + 1}
               hintTotal={hints.length}
+              showMore={hint.source_type !== 'scenario'}
+              detailText={(hint.detail_text || hint.text).trim()}
               onInsert={
                 disabled || !onInsert
                   ? undefined
-                  : () => onInsert(hint.text)
+                  : () => onInsert(
+                    hint.source_type === 'scenario' && hint.operator_tip
+                      ? `${hint.text}\n\n${hint.operator_tip}`
+                      : hint.text,
+                  )
               }
+              defaultExpanded={index === 0}
               data-testid={`chat-hint-${hint.rank}`}
             >
-              {hint.text}
+              <span>{hint.text}</span>
+              {hint.source_type === 'scenario' && hint.operator_tip ? (
+                <span className="chat-arm__scenario-question">
+                  <strong>Затем спросите клиента</strong>
+                  {hint.operator_tip}
+                </span>
+              ) : null}
             </HintCard>
           ))}
         </div>

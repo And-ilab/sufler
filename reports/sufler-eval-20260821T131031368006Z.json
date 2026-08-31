@@ -1,0 +1,1586 @@
+{
+  "schema_version": "1.0",
+  "report_id": "sufler-eval-20260821T131031368006Z",
+  "suite": "sufler_eval",
+  "generated_at": "2026-08-21T13:10:31.368006+00:00",
+  "dataset": {
+    "id": "sufler-eval-100",
+    "version": "1.0.0",
+    "path": "/workspace/benchmarks/datasets/sufler_eval_100.json",
+    "case_count": 100
+  },
+  "layers": [
+    "scenario"
+  ],
+  "metrics": {
+    "layers": {
+      "scenario": {
+        "cases": 35,
+        "passed": 35,
+        "failed": 0,
+        "pass_rate_percent": 100.0,
+        "latency_ms": {
+          "p50": 14.044,
+          "p95": 17.944
+        }
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "SC-001",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "scenario",
+      "input": {
+        "text": "мне четырнадцать, хочу открыть счёт",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-001",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-001",
+          "title": "14-летний хочет открыть счёт",
+          "path": [
+            "Несовершеннолетний хочет открыть счёт"
+          ],
+          "node_id": "start",
+          "next_clarify": "С карточкой или без карточки?",
+          "node_type": "start"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 2206.211
+    },
+    {
+      "id": "SC-002",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "scenario",
+      "input": {
+        "text": "хочу открыть счёт внуку, ему 6 лет",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-002",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-002",
+          "title": "Счёт внуку, 6 лет",
+          "path": [
+            "Открытие счетов на несовершеннолетних"
+          ],
+          "node_id": "start",
+          "next_clarify": "Кто открывает счёт — вы законный представитель или иное лицо? Ребёнку уже есть 14?",
+          "node_type": "start"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 15.705
+    },
+    {
+      "id": "SC-003",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "scenario",
+      "input": {
+        "text": "как подключить оплату телефоном",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-003",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-003",
+          "title": "Оплата телефоном (NFC)",
+          "path": [
+            "Оплата телефоном · NFC"
+          ],
+          "node_id": "start",
+          "next_clarify": "Какая операционная система телефона — iOS или Android?",
+          "node_type": "start"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 11.357
+    },
+    {
+      "id": "SC-004",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "scenario",
+      "input": {
+        "text": "хочу кредит на машину",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-004",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-004",
+          "title": "Автокредит",
+          "path": [
+            "Кредит на автомобиль"
+          ],
+          "node_id": "start",
+          "next_clarify": "Автомобиль новый или с пробегом? Обычный или электро? Где покупаете — у партнёра банка?",
+          "node_type": "start"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 12.933
+    },
+    {
+      "id": "SC-005",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "scenario",
+      "input": {
+        "text": "надо отправить деньги в россию",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-005",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-005",
+          "title": "Перевод в РФ",
+          "path": [
+            "Перевод в РФ"
+          ],
+          "node_id": "start",
+          "next_clarify": "Получатель — физлицо? Какие реквизиты дал: карта, телефон СБП или SWIFT?",
+          "node_type": "start"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 12.99
+    },
+    {
+      "id": "SC-006",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "scenario",
+      "input": {
+        "text": "не помню пин от карты",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-006",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-006",
+          "title": "PIN-код карты",
+          "path": [
+            "PIN-код карты"
+          ],
+          "node_id": "start",
+          "next_clarify": "Пин-код по этой карте уже выдавали раньше?",
+          "node_type": "start"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 12.092
+    },
+    {
+      "id": "SC-007",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "scenario",
+      "input": {
+        "text": "нужна выписка со счёта для визы",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-007",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-007",
+          "title": "Выписка для визы",
+          "path": [
+            "Выписка для визы"
+          ],
+          "node_id": "start",
+          "next_clarify": "За какой период и на каком языке — русском или английском? Нужна выписка, мини-выписка или справка?",
+          "node_type": "start"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 11.258
+    },
+    {
+      "id": "SC-008",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "scenario",
+      "input": {
+        "text": "заканчивается срок вклада по стройсбережениям",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-008",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-008",
+          "title": "Стройсбережения — срок вклада",
+          "path": [
+            "Стройсбережения · срок вклада"
+          ],
+          "node_id": "start",
+          "next_clarify": "Сумму по плану уже накопили?",
+          "node_type": "start"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 12.786
+    },
+    {
+      "id": "SC-009",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "scenario",
+      "input": {
+        "text": "перечислить деньги на криптобиржу",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-009",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-009",
+          "title": "Перевод на криптобиржу",
+          "path": [
+            "Перевод на криптобиржу"
+          ],
+          "node_id": "start",
+          "next_clarify": "Клиент физлицо или юрлицо? Есть карта Visa?",
+          "node_type": "start"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 11.581
+    },
+    {
+      "id": "SC-010",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "start",
+      "layer": "scenario",
+      "input": {
+        "text": "проверить российские рубли",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-010",
+        "node_id": "start"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-010",
+          "title": "Проверка российских рублей",
+          "path": [
+            "Проверка российских рублей"
+          ],
+          "node_id": "start",
+          "next_clarify": "Купюры или монеты?",
+          "node_type": "start"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 10.67
+    },
+    {
+      "id": "SC-011",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "мне четырнадцать, хочу открыть счёт"
+        ],
+        "text": "с карточкой",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-001",
+        "node_id": "with_card"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-001",
+          "title": "14-летний хочет открыть счёт",
+          "path": [
+            "Несовершеннолетний хочет открыть счёт",
+            "С карточкой"
+          ],
+          "node_id": "with_card",
+          "next_clarify": "Базовый счёт откроете в отделении или через интернет-банк / мобильное приложение?",
+          "node_type": "clarify"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 15.77
+    },
+    {
+      "id": "SC-012",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "мне четырнадцать, хочу открыть счёт"
+        ],
+        "text": "без карточки",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-001",
+        "node_id": "without_card"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-001",
+          "title": "14-летний хочет открыть счёт",
+          "path": [
+            "Несовершеннолетний хочет открыть счёт",
+            "Без карточки"
+          ],
+          "node_id": "without_card",
+          "next_clarify": "Нужен текущий счёт или вклад?",
+          "node_type": "clarify"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 15.597
+    },
+    {
+      "id": "SC-013",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "хочу открыть счёт внуку, ему 6 лет"
+        ],
+        "text": "я бабушка, не законный представитель",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-002",
+        "node_id": "under14_other"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-002",
+          "title": "Счёт внуку, 6 лет",
+          "path": [
+            "Открытие счетов на несовершеннолетних",
+            "До 14 лет · иные лица"
+          ],
+          "node_id": "under14_other",
+          "next_clarify": "Есть документ ребёнка?",
+          "node_type": "clarify"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 14.669
+    },
+    {
+      "id": "SC-014",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "хочу открыть счёт внуку, ему 6 лет"
+        ],
+        "text": "я его мама",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-002",
+        "node_id": "legal_rep"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-002",
+          "title": "Счёт внуку, 6 лет",
+          "path": [
+            "Открытие счетов на несовершеннолетних",
+            "Законные представители"
+          ],
+          "node_id": "legal_rep",
+          "next_clarify": "Какой продукт нужен — «Растём вместе» или базовый текущий?",
+          "node_type": "clarify"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 15.183
+    },
+    {
+      "id": "SC-015",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "как подключить оплату телефоном"
+        ],
+        "text": "у меня айфон",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-003",
+        "node_id": "ios"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-003",
+          "title": "Оплата телефоном (NFC)",
+          "path": [
+            "Оплата телефоном · NFC",
+            "iOS · Apple Pay"
+          ],
+          "node_id": "ios",
+          "next_clarify": "",
+          "node_type": "answer"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 13.923
+    },
+    {
+      "id": "SC-016",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "как подключить оплату телефоном"
+        ],
+        "text": "телефон на андроид",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-003",
+        "node_id": "android"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-003",
+          "title": "Оплата телефоном (NFC)",
+          "path": [
+            "Оплата телефоном · NFC",
+            "Android"
+          ],
+          "node_id": "android",
+          "next_clarify": "Какое приложение и какая карта — Visa, Mastercard, Maestro, Белкарт или UnionPay?",
+          "node_type": "clarify"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 15.858
+    },
+    {
+      "id": "SC-017",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "хочу кредит на машину"
+        ],
+        "text": "автомобиль с пробегом",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-004",
+        "node_id": "used_auto"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-004",
+          "title": "Автокредит",
+          "path": [
+            "Кредит на автомобиль",
+            "Бывший в эксплуатации"
+          ],
+          "node_id": "used_auto",
+          "next_clarify": "",
+          "node_type": "answer"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 14.044
+    },
+    {
+      "id": "SC-018",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "хочу кредит на машину"
+        ],
+        "text": "новая машина из салона",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-004",
+        "node_id": "new_auto"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-004",
+          "title": "Автокредит",
+          "path": [
+            "Кредит на автомобиль",
+            "Новый автомобиль"
+          ],
+          "node_id": "new_auto",
+          "next_clarify": "Покупаете у организации-партнёра банка?",
+          "node_type": "clarify"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 14.779
+    },
+    {
+      "id": "SC-019",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "надо отправить деньги в россию"
+        ],
+        "text": "по номеру телефона через СБП",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-005",
+        "node_id": "phone_sbp"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-005",
+          "title": "Перевод в РФ",
+          "path": [
+            "Перевод в РФ",
+            "Телефон СБП"
+          ],
+          "node_id": "phone_sbp",
+          "next_clarify": "",
+          "node_type": "answer"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 12.405
+    },
+    {
+      "id": "SC-020",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "надо отправить деньги в россию"
+        ],
+        "text": "есть SWIFT реквизиты",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-005",
+        "node_id": "swift"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-005",
+          "title": "Перевод в РФ",
+          "path": [
+            "Перевод в РФ",
+            "SWIFT-реквизиты"
+          ],
+          "node_id": "swift",
+          "next_clarify": "",
+          "node_type": "answer"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 15.492
+    },
+    {
+      "id": "SC-021",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "не помню пин от карты"
+        ],
+        "text": "да, пин раньше был",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-006",
+        "node_id": "had_pin"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-006",
+          "title": "PIN-код карты",
+          "path": [
+            "PIN-код карты",
+            "Пин был ранее"
+          ],
+          "node_id": "had_pin",
+          "next_clarify": "Клиент забыл пин? Где удобнее сменить — ИБ, МБ, инфокиоск или отделение?",
+          "node_type": "clarify"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 18.309
+    },
+    {
+      "id": "SC-022",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "не помню пин от карты"
+        ],
+        "text": "нет, пин ещё не получал",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-006",
+        "node_id": "no_pin"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-006",
+          "title": "PIN-код карты",
+          "path": [
+            "PIN-код карты",
+            "Первичное получение PIN"
+          ],
+          "node_id": "no_pin",
+          "next_clarify": "",
+          "node_type": "answer"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 16.657
+    },
+    {
+      "id": "SC-023",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "нужна выписка со счёта для визы"
+        ],
+        "text": "на английском языке",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-007",
+        "node_id": "en"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-007",
+          "title": "Выписка для визы",
+          "path": [
+            "Выписка для визы",
+            "На английском"
+          ],
+          "node_id": "en",
+          "next_clarify": "",
+          "node_type": "answer"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 13.117
+    },
+    {
+      "id": "SC-024",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "нужна выписка со счёта для визы"
+        ],
+        "text": "нужна мини-выписка",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-007",
+        "node_id": "mini"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-007",
+          "title": "Выписка для визы",
+          "path": [
+            "Выписка для визы",
+            "Мини-выписка"
+          ],
+          "node_id": "mini",
+          "next_clarify": "",
+          "node_type": "answer"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 13.69
+    },
+    {
+      "id": "SC-025",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "заканчивается срок вклада по стройсбережениям"
+        ],
+        "text": "нет, сумму не накопил",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-008",
+        "node_id": "not_enough"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-008",
+          "title": "Стройсбережения — срок вклада",
+          "path": [
+            "Стройсбережения · срок вклада",
+            "Сумму не накопил"
+          ],
+          "node_id": "not_enough",
+          "next_clarify": "Продолжаем копить или меняем план?",
+          "node_type": "clarify"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 17.73
+    },
+    {
+      "id": "SC-026",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "заканчивается срок вклада по стройсбережениям"
+        ],
+        "text": "да, сумму накопил",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-008",
+        "node_id": "enough"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-008",
+          "title": "Стройсбережения — срок вклада",
+          "path": [
+            "Стройсбережения · срок вклада",
+            "Сумму накопил"
+          ],
+          "node_id": "enough",
+          "next_clarify": "Жильё уже нашли?",
+          "node_type": "clarify"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 16.47
+    },
+    {
+      "id": "SC-027",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "перечислить деньги на криптобиржу"
+        ],
+        "text": "я физлицо, есть карта Visa",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-009",
+        "node_id": "fl"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-009",
+          "title": "Перевод на криптобиржу",
+          "path": [
+            "Перевод на криптобиржу",
+            "Физлицо"
+          ],
+          "node_id": "fl",
+          "next_clarify": "Какой вид карточки? Visa — WhiteBird / BYNEX?",
+          "node_type": "clarify"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 17.348
+    },
+    {
+      "id": "SC-028",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "перечислить деньги на криптобиржу"
+        ],
+        "text": "карты нет",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-009",
+        "node_id": "no_card"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-009",
+          "title": "Перевод на криптобиржу",
+          "path": [
+            "Перевод на криптобиржу",
+            "Нет карты"
+          ],
+          "node_id": "no_card",
+          "next_clarify": "",
+          "node_type": "answer"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 16.086
+    },
+    {
+      "id": "SC-029",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "проверить российские рубли"
+        ],
+        "text": "это монеты",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-010",
+        "node_id": "coins"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-010",
+          "title": "Проверка российских рублей",
+          "path": [
+            "Проверка российских рублей",
+            "Монеты"
+          ],
+          "node_id": "coins",
+          "next_clarify": "",
+          "node_type": "answer"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 14.564
+    },
+    {
+      "id": "SC-030",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "branch",
+      "layer": "scenario",
+      "input": {
+        "prior_turns": [
+          "проверить российские рубли"
+        ],
+        "text": "бумажные купюры",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "scenario",
+        "scenario_code": "CC-SCR-010",
+        "node_id": "notes"
+      },
+      "actual": {
+        "routing": "scenario",
+        "classification": null,
+        "scenario": {
+          "code": "CC-SCR-010",
+          "title": "Проверка российских рублей",
+          "path": [
+            "Проверка российских рублей",
+            "Купюры"
+          ],
+          "node_id": "notes",
+          "next_clarify": "Нужна проверка подлинности или инкассо?",
+          "node_type": "clarify"
+        },
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true,
+        "scenario_code": true,
+        "node_id": true
+      },
+      "passed": true,
+      "latency_ms": 17.788
+    },
+    {
+      "id": "SC-031",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "off_topic",
+      "layer": "scenario",
+      "input": {
+        "text": "какая погода завтра в Минске",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 2.128
+    },
+    {
+      "id": "SC-032",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "off_topic",
+      "layer": "scenario",
+      "input": {
+        "text": "посоветуйте фильм на вечер",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 1.832
+    },
+    {
+      "id": "SC-033",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "off_topic",
+      "layer": "scenario",
+      "input": {
+        "text": "кто выиграл вчера футбольный матч",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 1.768
+    },
+    {
+      "id": "SC-034",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "off_topic",
+      "layer": "scenario",
+      "input": {
+        "text": "как приготовить борщ",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 2.987
+    },
+    {
+      "id": "SC-035",
+      "version": "1.0.0",
+      "bucket": "scenario",
+      "case_type": "off_topic",
+      "layer": "scenario",
+      "input": {
+        "text": "расскажите гороскоп на сегодня",
+        "language": "ru"
+      },
+      "expected": {
+        "route": "no_hint"
+      },
+      "actual": {
+        "routing": "no_hint",
+        "classification": null,
+        "scenario": null,
+        "retrieval": {
+          "documents": []
+        },
+        "hints": [],
+        "citations": [],
+        "blocked_reason": null,
+        "error": null
+      },
+      "checks": {
+        "routing": true
+      },
+      "passed": true,
+      "latency_ms": 3.529
+    }
+  ]
+}

@@ -122,7 +122,8 @@ class _TextExtractor(HTMLParser):
             return True
         if tag == "article":
             return True
-        if tag == "section" and "bx-text" in classes and "cookie" not in classes:
+        # Product pages use section.bx-text; service/news pages use div.bx-text.
+        if "bx-text" in classes and not any("cookie" in c for c in classes):
             return True
         return False
 
@@ -315,6 +316,8 @@ _CHROME_PATTERNS = [
     r"Поделиться\s+",
     r"Заказать онлайн\s+Заказать по телефону\s+",
     r"Cookie|cookie|файлы cookie",
+    r"ОАО «АСБ Беларусбанк» использует на своем сайте.*?персонализированных рекомендаций\.?",
+    r"Принять все\s+Отклонить(?:\s+Настройка обработки)?",
 ]
 
 
@@ -350,7 +353,7 @@ def extract_article(html: str, url: str) -> tuple[str, str]:
         stripped = re.sub(r"(?is)<[^>]+>", " ", stripped)
         stripped = _clean_space(stripped)
         if len(stripped) > len(text):
-            text = stripped[:12000]
+            text = stripped[:80000]
 
     text = _strip_chrome(text)
     if not title:

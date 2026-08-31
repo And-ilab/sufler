@@ -355,3 +355,158 @@ class AssistantCapability(models.Model):
 
     def __str__(self) -> str:
         return self.code
+
+
+class SuflerPolicy(models.Model):
+    """Operator hint guardrails for sufler_cc (II.3.5.2 / FR-UND-13 / FR-SUF-08/13)."""
+
+    MODE_CONSULTATION = "consultation"
+    MODE_SERVICE = "service"
+    MODE_CHOICES = (
+        (MODE_CONSULTATION, "Консультация"),
+        (MODE_SERVICE, "Услуга"),
+    )
+
+    telephony_min_relevance_percent = models.PositiveSmallIntegerField(default=20)
+    clarify_min_relevance_percent = models.PositiveSmallIntegerField(default=15)
+    max_hints = models.PositiveSmallIntegerField(default=1)
+    default_mode = models.CharField(
+        max_length=16,
+        choices=MODE_CHOICES,
+        default=MODE_CONSULTATION,
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=150, blank=True, default="")
+
+    class Meta:
+        verbose_name = "Sufler policy"
+        verbose_name_plural = "Sufler policies"
+
+    def clean(self) -> None:
+        errors: dict[str, str] = {}
+        for field_name in (
+            "telephony_min_relevance_percent",
+            "clarify_min_relevance_percent",
+        ):
+            value = int(getattr(self, field_name))
+            if not 0 <= value <= 100:
+                errors[field_name] = "Порог должен быть от 0 до 100%."
+        if not 1 <= int(self.max_hints) <= 5:
+            errors["max_hints"] = "На реплику допускается от 1 до 5 подсказок."
+        if self.default_mode not in {self.MODE_CONSULTATION, self.MODE_SERVICE}:
+            errors["default_mode"] = "Режим должен быть консультация или услуга."
+        floor = int(self.telephony_min_relevance_percent)
+        if int(self.clarify_min_relevance_percent) > floor:
+            errors["clarify_min_relevance_percent"] = (
+                "Порог уточнения не может быть выше порога подсказки."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def min_relevance_for_channel(self, channel: str) -> float:
+        """Single operator floor for telephony and online chat."""
+        _ = channel
+        return int(self.telephony_min_relevance_percent) / 100
+
+    def __str__(self) -> str:
+        return f"sufler-policy max={self.max_hints}"
+
+
+class DialogScenario(models.Model):
+    """CC dialog scenario registry (FR-SCR-01…12 / §4.5.2)."""
+
+    STATUS_DRAFT = "draft"
+    STATUS_PRODUCTION = "production"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Черновик"),
+        (STATUS_PRODUCTION, "Опубликован"),
+    )
+    CHANNEL_BOTH = "both"
+    CHANNEL_TELEPHONY = "telephony"
+    CHANNEL_CHAT = "online_chat"
+    CHANNEL_CHOICES = (
+        (CHANNEL_BOTH, "Телефония и чат"),
+        (CHANNEL_TELEPHONY, "Телефония"),
+        (CHANNEL_CHAT, "Онлайн-чат"),
+    )
+
+    code = models.CharField(max_length=32, unique=True)
+    title = models.CharField(max_length=200)
+    root_question = models.CharField(max_length=500, blank=True, default="")
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+        db_index=True,
+    )
+    channels = models.CharField(
+        max_length=32,
+        choices=CHANNEL_CHOICES,
+        default=CHANNEL_BOTH,
+    )
+    current_version = models.ForeignKey(
+        "DialogScenarioVersion",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=150, blank=True, default="")
+
+    class Meta:
+        ordering = ("code",)
+
+    def __str__(self) -> str:
+        return self.code
+
+
+class DialogScenarioVersion(models.Model):
+    """Published or draft graph/prompt snapshot (FR-SCR-03)."""
+
+    scenario = models.ForeignKey(
+        DialogScenario,
+        on_delete=models.CASCADE,
+        related_name="versions",
+    )
+    version_number = models.PositiveIntegerField(default=1)
+    graph = models.JSONField(default=dict)
+    system_prompt = models.TextField(blank=True, default="")
+    is_published = models.BooleanField(default=False)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=150, blank=True, default="")
+
+    class Meta:
+        ordering = ("-version_number",)
+        unique_together = ("scenario", "version_number")
+
+    def __str__(self) -> str:
+        return f"{self.scenario_id} v{self.version_number}"
+
+
+class DialogScenarioSession(models.Model):
+    """Live walk through a scenario for one call/chat."""
+
+    session_key = models.CharField(max_length=160, unique=True)
+    scenario = models.ForeignKey(
+        DialogScenario,
+        on_delete=models.CASCADE,
+        related_name="sessions",
+    )
+    node_id = models.CharField(max_length=64)
+    path = models.JSONField(default=list)
+    paused = models.BooleanField(default=False)
+    off_topic_count = models.PositiveSmallIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+
+    def __str__(self) -> str:
+        return f"{self.session_key} → {self.node_id}"

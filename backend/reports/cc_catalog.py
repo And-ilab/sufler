@@ -78,14 +78,16 @@ REPORT_TYPES = (
         "id": "usefulness",
         "fr": "FR-RPT-CC-08",
         "label": "Полезность подсказок суфлёра",
+        "description": "Фильтр периода. Pie: Воспользовался / Неполный / Не воспользовался. Таблица — разрез онлайн-чат / телефония.",
         "default_view": "pie",
         "group": "Суфлёр / LLM",
     },
     {
         "id": "relevance",
         "fr": "FR-RPT-CC-07",
-        "label": "Релевантность ответов",
-        "default_view": "bar",
+        "label": "Релевантность по каналам и тематикам",
+        "description": "Круговая: доли подсказок с высокой / средней / низкой релевантностью. Таблица — канал и тематика закрытия.",
+        "default_view": "pie",
         "group": "Суфлёр / LLM",
     },
     {
@@ -132,6 +134,22 @@ REPORT_TYPES = (
     },
 )
 
+SUFLER_REPORT_IDS = frozenset({"usefulness", "relevance", "errors"})
+
+_REPORT_ALIASES = {
+    "rpt-08": "usefulness",
+    "rpt-02": "relevance",
+    "rpt-07": "relevance",
+    "rpt-04": "usefulness",
+    "correctness": "usefulness",
+    "rpt-05": "performance",
+    "rpt-09": "errors",
+    "rpt-13": "topics",
+    "rpt-12": "repeats",
+    "rpt-11": "executive",
+    "rpt-10": "executive",
+}
+
 _BUILDERS: dict[str, Callable[..., dict[str, Any]]] = {
     "chat-period": report_chat_period,
     "chat-sla": report_chat_sla,
@@ -151,34 +169,54 @@ _BUILDERS: dict[str, Callable[..., dict[str, Any]]] = {
 }
 
 
+def _scope(query: Any) -> str:
+    value = str(query.get("scope") or "").strip().lower()
+    return value if value in {"sufler", "chat"} else ""
+
+
+def _catalog_for_scope(scope: str) -> list[dict[str, Any]]:
+    if scope == "sufler":
+        return [item for item in REPORT_TYPES if item["id"] in SUFLER_REPORT_IDS]
+    return list(REPORT_TYPES)
+
+
 def _parse_filters(query: Any) -> dict[str, Any]:
     filters = parse_analytics_filters(query)
-    report_id = (query.get("report") or "chat-period").strip()
+    scope = _scope(query)
+    default_report = "usefulness" if scope == "sufler" else "chat-period"
+    report_id = (query.get("report") or default_report).strip()
     known = {item["id"] for item in REPORT_TYPES}
     if report_id not in known:
-        # Aliases from older UI ids
-        aliases = {
-            "rpt-08": "usefulness",
-            "rpt-02": "relevance",
-            "rpt-07": "relevance",
-            "rpt-04": "correctness",
-            "rpt-05": "performance",
-            "rpt-09": "errors",
-            "rpt-13": "topics",
-            "rpt-12": "repeats",
-            "rpt-11": "executive",
-            "rpt-10": "executive",
-        }
-        report_id = aliases.get(report_id, "chat-period")
+        report_id = _REPORT_ALIASES.get(report_id, default_report)
+    if scope == "sufler" and report_id not in SUFLER_REPORT_IDS:
+        report_id = "usefulness"
     filters["report"] = report_id
+    filters["scope"] = scope
+    requested_channel = str(query.get("channel") or "").strip()
     messenger = filters.get("messenger") or ""
-    channel = filters.get("channel") or CHANNEL_ONLINE_CHAT
-    if channel not in {CHANNEL_ONLINE_CHAT, "", "telephony"}:
+    channel = filters.get("channel") or ("" if scope == "sufler" else CHANNEL_ONLINE_CHAT)
+    if channel in {"all", "*"}:
+        channel = ""
+    if scope == "sufler":
+        messenger = ""
+        # Hub «Статистика суфлёра» omits channel on purpose (phone + chat).
+        # parse_analytics_filters would otherwise default to online_chat and hide
+        # telephony marks such as «Не воспользовался».
+        if not requested_channel or requested_channel in {"all", "*"}:
+            channel = ""
+        elif requested_channel not in {CHANNEL_ONLINE_CHAT, "telephony", "chat"}:
+            channel = ""
+        elif requested_channel == "chat":
+            channel = CHANNEL_ONLINE_CHAT
+        else:
+            channel = requested_channel
+    elif channel not in {CHANNEL_ONLINE_CHAT, "", "telephony"}:
         messenger = channel
     topic = str(query.get("topic") or "").strip()
     status = str(query.get("status") or query.get("dialogue_status") or "").strip()
     department = str(query.get("department") or "").strip()
     filters["messenger"] = messenger
+    filters["channel"] = channel
     filters["topic"] = topic
     filters["status"] = status
     filters["department_id"] = department
@@ -196,6 +234,7 @@ def build_report_payload(query: Any) -> dict[str, Any]:
     report_id = filters["report"]
     meta = next(item for item in REPORT_TYPES if item["id"] == report_id)
     builder = _BUILDERS[report_id]
+    scope = filters.get("scope") or ""
     kwargs = {
         "messenger": filters.get("messenger") or "",
         "department_id": filters.get("department_id") or "",
@@ -205,6 +244,9 @@ def build_report_payload(query: Any) -> dict[str, Any]:
     # group_by applies only to relevance report; other builders reject unknown kwargs.
     if report_id == "relevance":
         kwargs["group_by"] = filters.get("group_by") or "channel"
+    if report_id in SUFLER_REPORT_IDS:
+        kwargs["channel"] = filters.get("channel") or ""
+        kwargs["scope"] = scope
     try:
         built = builder(date_from, date_to, **kwargs)
     except TypeError as exc:
@@ -224,13 +266,13 @@ def build_report_payload(query: Any) -> dict[str, Any]:
     summary.pop("p95_ms", None)
     return {
         "filters": filters,
-        "catalog": list(REPORT_TYPES),
+        "catalog": _catalog_for_scope(scope),
         "report": meta,
         "rows": rows,
         "chart": chart,
         "summary": summary,
         "stub": bool(built.get("stub")),
-        "source": "Онлайн-чат",
+        "source": "Суфлёр" if scope == "sufler" else "Онлайн-чат",
         "alerts": [],
     }
 

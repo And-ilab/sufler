@@ -3,6 +3,7 @@ import { BarChartView, DataTable, PieChartView } from './charts'
 import {
   CHANNEL_OPTIONS,
   CLOSE_TOPICS,
+  SUFLER_REPORT_IDS,
   type ReportViewMode,
 } from './demoData'
 import {
@@ -127,12 +128,14 @@ function ReportChartView({
   chart,
   selectedLabel,
   table,
+  onPieSelect,
 }: {
   viewMode: ReportViewMode
   reportId: string
   chart: { label: string; value: number; pct?: number }[]
   selectedLabel: string
   table: { headers: string[]; rows: string[][] }
+  onPieSelect?: (label: string) => void
 }) {
   const pieData = chart.map((item, index) => ({
     label: item.label,
@@ -153,7 +156,7 @@ function ReportChartView({
   return (
     <>
       {caption ? <p className="rpt-chart-caption">{caption}</p> : null}
-      {viewMode === 'pie' ? <PieChartView data={pieData} /> : null}
+      {viewMode === 'pie' ? <PieChartView data={pieData} onSelect={onPieSelect} /> : null}
       {viewMode === 'bar' ? (
         <BarChartView
           categories={barCategories}
@@ -168,13 +171,26 @@ function ReportChartView({
 export function CcReportsScreen({
   initialPanel = 'reports',
   domain = 'chat',
+  initialReport,
+  scope,
 }: {
   initialPanel?: 'reports' | 'builder'
   domain?: 'chat' | 'sufler' | 'all'
+  initialReport?: string
+  scope?: 'chat' | 'sufler'
 } = {}) {
+  const sufler = scope === 'sufler' || domain === 'sufler'
+  const channelOptions = CHANNEL_OPTIONS.filter((item) => item.value !== 'phone')
   const [panel, setPanel] = useState<'reports' | 'builder'>(initialPanel)
   const [catalogMeta, setCatalogMeta] = useState<CatalogReportMeta[]>([])
-  const [reportType, setReportType] = useState(domain === 'sufler' ? 'usefulness' : 'chat-period')
+  const [reportType, setReportType] = useState(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get('report') || ''
+    const fallback = initialReport || (sufler ? 'usefulness' : 'chat-period')
+    if (sufler && fromUrl && !SUFLER_REPORT_IDS.has(fromUrl)) {
+      return fallback
+    }
+    return fromUrl || fallback
+  })
   const [viewMode, setViewMode] = useState<ReportViewMode>('bar')
   const [filtersOpen, setFiltersOpen] = useState(true)
   const [periodFrom, setPeriodFrom] = useState(isoDaysAgo(13))
@@ -323,16 +339,24 @@ export function CcReportsScreen({
       }
 
       const messenger = channel === 'all' || channel === 'phone' ? '' : channel
-      const data = await fetchCcCatalog({
-        date_from: periodFrom,
-        date_to: periodTo,
-        channel: 'online_chat',
-        report: reportType,
-        messenger,
-        topic: topicEnabled && topic !== 'all' ? topic : '',
-        status: statusEnabled && dialogueStatus !== 'all' ? dialogueStatus : '',
-        group_by: reportType === 'relevance' && groupByEnabled ? groupBy : '',
-      })
+      const data = sufler
+        ? await fetchCcCatalog({
+            date_from: periodFrom,
+            date_to: periodTo,
+            report: reportType,
+            scope: 'sufler',
+            group_by: reportType === 'relevance' && groupByEnabled ? groupBy : '',
+          })
+        : await fetchCcCatalog({
+            date_from: periodFrom,
+            date_to: periodTo,
+            channel: 'online_chat',
+            report: reportType,
+            messenger,
+            topic: topicEnabled && topic !== 'all' ? topic : '',
+            status: statusEnabled && dialogueStatus !== 'all' ? dialogueStatus : '',
+            group_by: reportType === 'relevance' && groupByEnabled ? groupBy : '',
+          })
       setPayload(data)
       const nextCatalog = data.catalog || []
       const prevIds = catalogMetaRef.current.map((item) => item.id).join('|')
@@ -365,6 +389,7 @@ export function CcReportsScreen({
     reportType,
     savedTemplates,
     statusEnabled,
+    sufler,
     topic,
     topicEnabled,
   ])
@@ -380,6 +405,14 @@ export function CcReportsScreen({
     }
   }, [panel, loadReport])
 
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (reportType) {
+      url.searchParams.set('report', reportType)
+      window.history.replaceState({}, '', `${url.pathname}${url.search}`)
+    }
+  }, [reportType])
+
   const table = useMemo(() => rowsToTable((payload?.rows || []) as Record<string, unknown>[]), [payload])
   const chart = payload?.chart || []
 
@@ -392,12 +425,19 @@ export function CcReportsScreen({
     setError(null)
     try {
       const { blob, filename } = await downloadCcExport(
-        {
-          date_from: periodFrom,
-          date_to: periodTo,
-          channel: 'online_chat',
-          report: reportType,
-        },
+        sufler
+          ? {
+              date_from: periodFrom,
+              date_to: periodTo,
+              report: reportType,
+              scope: 'sufler',
+            }
+          : {
+              date_from: periodFrom,
+              date_to: periodTo,
+              channel: 'online_chat',
+              report: reportType,
+            },
         format,
       )
       triggerBrowserDownload(blob, filename)
@@ -415,6 +455,15 @@ export function CcReportsScreen({
       chart={chart}
       selectedLabel={selected.label}
       table={table}
+      onPieSelect={
+        sufler && reportType === 'usefulness'
+          ? (label) => {
+              if (label.includes('Не воспользовался')) {
+                setReportType('errors')
+              }
+            }
+          : undefined
+      }
     />
   )
 
@@ -423,7 +472,7 @@ export function CcReportsScreen({
   }
 
   return (
-    <div className="rpt-body" data-testid="cc-reports-screen">
+    <div className="rpt-body" data-testid={sufler ? 'sufler-reports-screen' : 'cc-reports-screen'}>
       <div className="rpt-brand">
         <img
           className="rpt-brand__logo"
@@ -431,18 +480,20 @@ export function CcReportsScreen({
           alt="Беларусбанк"
         />
         <div className="rpt-brand__titles">
-          <strong>Аналитика контакт-центра</strong>
+          <strong>{sufler ? 'Аналитика суфлёра' : 'Аналитика контакт-центра'}</strong>
           <span>Беларусбанк</span>
         </div>
       </div>
-      <div className="rpt-row rpt-row--end">
-        <button type="button" className="rpt-pill is-active" onClick={() => setPanel('reports')}>
-          Готовые отчёты
-        </button>
-        <button type="button" className="rpt-pill" onClick={() => setPanel('builder')}>
-          Конструктор
-        </button>
-      </div>
+      {sufler ? null : (
+        <div className="rpt-row rpt-row--end">
+          <button type="button" className="rpt-pill is-active" onClick={() => setPanel('reports')}>
+            Готовые отчёты
+          </button>
+          <button type="button" className="rpt-pill" onClick={() => setPanel('builder')}>
+            Конструктор
+          </button>
+        </div>
+      )}
 
       <div className="rpt-card">
         <div className="rpt-card__head">
@@ -471,16 +522,18 @@ export function CcReportsScreen({
                   ))}
                 </select>
               </label>
-              <label className="rpt-field">
-                Канал чата
-                <select value={channel} onChange={(e) => setChannel(e.target.value)}>
-                  {CHANNEL_OPTIONS.filter((item) => item.value !== 'phone').map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {sufler ? null : (
+                <label className="rpt-field">
+                  Канал чата
+                  <select value={channel} onChange={(e) => setChannel(e.target.value)}>
+                    {channelOptions.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label className="rpt-field">
                 Период с
                 <input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} />
@@ -489,37 +542,41 @@ export function CcReportsScreen({
                 Период по
                 <input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} />
               </label>
-              <label className={`rpt-field${topicEnabled ? '' : ' is-disabled'}`}>
-                Тематика закрытия
-                <select
-                  value={topic}
-                  disabled={!topicEnabled}
-                  onChange={(e) => setTopic(e.target.value)}
-                >
-                  <option value="all">Все тематики</option>
-                  {topicChoices.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className={`rpt-field${statusEnabled ? '' : ' is-disabled'}`}>
-                Статусы
-                <select
-                  value={dialogueStatus}
-                  disabled={!statusEnabled}
-                  onChange={(e) => setDialogueStatus(e.target.value)}
-                >
-                  <option value="all">Все</option>
-                  <option value="closed">Закрыт</option>
-                  <option value="active">В работе</option>
-                  <option value="waiting">В очереди</option>
-                  <option value="offline">Офлайн</option>
-                  <option value="lost">Потерянный</option>
-                  <option value="rejected">Отказ клиента</option>
-                </select>
-              </label>
+              {sufler ? null : (
+                <>
+                  <label className={`rpt-field${topicEnabled ? '' : ' is-disabled'}`}>
+                    Тематика закрытия
+                    <select
+                      value={topic}
+                      disabled={!topicEnabled}
+                      onChange={(e) => setTopic(e.target.value)}
+                    >
+                      <option value="all">Все тематики</option>
+                      {topicChoices.map((item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={`rpt-field${statusEnabled ? '' : ' is-disabled'}`}>
+                    Статусы
+                    <select
+                      value={dialogueStatus}
+                      disabled={!statusEnabled}
+                      onChange={(e) => setDialogueStatus(e.target.value)}
+                    >
+                      <option value="all">Все</option>
+                      <option value="closed">Закрыт</option>
+                      <option value="active">В работе</option>
+                      <option value="waiting">В очереди</option>
+                      <option value="offline">Офлайн</option>
+                      <option value="lost">Потерянный</option>
+                      <option value="rejected">Отказ клиента</option>
+                    </select>
+                  </label>
+                </>
+              )}
               <label className={`rpt-field${groupByEnabled ? '' : ' is-disabled'}`}>
                 Группировка
                 <select
@@ -539,6 +596,9 @@ export function CcReportsScreen({
                 </select>
               </label>
             </div>
+            {selected.description ? (
+              <p className="rpt-muted" style={{ margin: '8px 0 0' }}>{selected.description}</p>
+            ) : null}
           </div>
         ) : null}
       </div>

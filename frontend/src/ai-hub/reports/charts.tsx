@@ -109,7 +109,13 @@ export function BarChartView({
   )
 }
 
-export function PieChartView({ data }: { data: PieSlice[] }) {
+export function PieChartView({
+  data,
+  onSelect,
+}: {
+  data: PieSlice[]
+  onSelect?: (label: string) => void
+}) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
   const total = useMemo(() => data.reduce((sum, item) => sum + item.value, 0) || 1, [data])
 
@@ -177,13 +183,9 @@ export function PieChartView({ data }: { data: PieSlice[] }) {
       <div className="rpt-pie__legend">
         {data.map((item, index) => {
           const pct = item.pct ?? Math.round((item.value / total) * 100)
-          return (
-            <div
-              key={item.label}
-              className={`rpt-pie__legend-item${hoveredIndex === index ? ' is-hovered' : ''}${hoveredIndex != null && hoveredIndex !== index ? ' is-dimmed' : ''}`}
-              onMouseEnter={() => setHoveredIndex(index)}
-              onMouseLeave={() => setHoveredIndex(null)}
-            >
+          const className = `rpt-pie__legend-item${hoveredIndex === index ? ' is-hovered' : ''}${hoveredIndex != null && hoveredIndex !== index ? ' is-dimmed' : ''}${onSelect ? ' rpt-pie__legend-item--btn' : ''}`
+          const body = (
+            <>
               <span
                 className="rpt-pie__dot"
                 style={{ background: TONE_COLOR[item.tone || 'info'] }}
@@ -191,6 +193,30 @@ export function PieChartView({ data }: { data: PieSlice[] }) {
               <span>
                 {item.label} — {item.value} ({pct}%)
               </span>
+            </>
+          )
+          if (onSelect) {
+            return (
+              <button
+                key={item.label}
+                type="button"
+                className={className}
+                onMouseEnter={() => setHoveredIndex(index)}
+                onMouseLeave={() => setHoveredIndex(null)}
+                onClick={() => onSelect(item.label)}
+              >
+                {body}
+              </button>
+            )
+          }
+          return (
+            <div
+              key={item.label}
+              className={className}
+              onMouseEnter={() => setHoveredIndex(index)}
+              onMouseLeave={() => setHoveredIndex(null)}
+            >
+              {body}
             </div>
           )
         })}

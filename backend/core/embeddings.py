@@ -7,6 +7,7 @@ the registry baseline ``intfloat/multilingual-e5-large``.
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import os
 from functools import lru_cache
@@ -14,9 +15,14 @@ from typing import Literal, Sequence
 
 import requests
 
+logger = logging.getLogger(__name__)
+_http_stub_fallback_logged = False
+_query_cache: dict[tuple[str, str, str], tuple[list[float], str]] = {}
+_QUERY_CACHE_MAX = 512
+
 DEFAULT_DIMENSIONS = 1024
 DEFAULT_MODEL = "intfloat/multilingual-e5-large"
-SUPPORTED_MODES = frozenset({"stub", "http", "local"})
+SUPPORTED_MODES = frozenset({"stub", "http", "local", "lexical"})
 
 
 class EmbeddingError(RuntimeError):
@@ -78,9 +84,29 @@ def _http_embed(
         raise EmbeddingError(
             "EMBEDDING_BASE_URL is required when EMBEDDING_MODE=http"
         )
-    timeout = float(os.environ.get("EMBEDDING_TIMEOUT_SECONDS") or "120")
+    configured_timeout = float(
+        os.environ.get("EMBEDDING_TIMEOUT_SECONDS") or "15"
+    )
+    items = list(texts)
+    # One replica must stay fast. Caching many scenario profiles may take longer.
+    per_request = 2 if len(items) > 2 else len(items) or 1
+    timeout = min(max(configured_timeout, 1.0), 20.0 if per_request <= 2 else 90.0)
+    encoded: list[list[float]] = []
+    for start in range(0, len(items) or 1, per_request):
+        chunk = items[start : start + per_request]
+        encoded.extend(_http_embed_once(base, chunk, is_query=is_query, timeout=timeout))
+    return encoded
+
+
+def _http_embed_once(
+    base: str,
+    texts: list[str],
+    *,
+    is_query: bool,
+    timeout: float,
+) -> list[list[float]]:
     payload = {
-        "texts": list(texts),
+        "texts": texts,
         "is_query": is_query,
         "model": _model_name(),
     }
@@ -144,22 +170,58 @@ def _local_embed(
     return result
 
 
+def _embed_texts(
+    texts: Sequence[str],
+    *,
+    is_query: bool = False,
+) -> tuple[list[list[float]], str]:
+    """Embed texts and report which backend produced the vectors."""
+    if not texts:
+        return [], _mode()
+    cleaned = [str(text or "") for text in texts]
+    mode = _mode()
+    if mode == "lexical":
+        dims = _dimensions()
+        return [deterministic_embedding(text, dims) for text in cleaned], "lexical"
+    if mode == "stub":
+        dims = _dimensions()
+        return [deterministic_embedding(text, dims) for text in cleaned], "stub"
+    if mode == "http":
+        try:
+            return _http_embed(cleaned, is_query=is_query), "http"
+        except EmbeddingError:
+            global _http_stub_fallback_logged
+            if not _http_stub_fallback_logged:
+                logger.warning(
+                    "HTTP embedding unavailable; using lexical retrieval "
+                    "instead of mixing stub query vectors with stored embeddings"
+                )
+                _http_stub_fallback_logged = True
+            dims = _dimensions()
+            return (
+                [deterministic_embedding(text, dims) for text in cleaned],
+                "http-fallback",
+            )
+    return _local_embed(cleaned, is_query=is_query), "local"
+
+
 def embed_texts(
     texts: Sequence[str],
     *,
     is_query: bool = False,
 ) -> list[list[float]]:
     """Embed one or more texts according to ``EMBEDDING_MODE``."""
-    if not texts:
-        return []
-    cleaned = [str(text or "") for text in texts]
-    mode = _mode()
-    if mode == "stub":
-        dims = _dimensions()
-        return [deterministic_embedding(text, dims) for text in cleaned]
-    if mode == "http":
-        return _http_embed(cleaned, is_query=is_query)
-    return _local_embed(cleaned, is_query=is_query)
+    vectors, _backend = _embed_texts(texts, is_query=is_query)
+    return vectors
+
+
+def embed_texts_with_backend(
+    texts: Sequence[str],
+    *,
+    is_query: bool = False,
+) -> tuple[list[list[float]], str]:
+    """Embed a batch and expose the backend for fail-open semantic routing."""
+    return _embed_texts(texts, is_query=is_query)
 
 
 def embed_text(text: str, *, is_query: bool = False) -> list[float]:
@@ -168,6 +230,36 @@ def embed_text(text: str, *, is_query: bool = False) -> list[float]:
 
 def embed_query(text: str) -> list[float]:
     return embed_text(text, is_query=True)
+
+
+def embed_query_with_backend(text: str) -> tuple[list[float], str]:
+    key = (_mode(), _model_name(), str(text or ""))
+    cached = _query_cache.get(key)
+    if cached is not None:
+        return cached
+    vectors, backend = _embed_texts([text], is_query=True)
+    result = (vectors[0], backend)
+    if len(_query_cache) >= _QUERY_CACHE_MAX:
+        _query_cache.pop(next(iter(_query_cache)))
+    _query_cache[key] = result
+    return result
+
+
+def preload_query_embeddings(texts: Sequence[str]) -> None:
+    """Batch and cache query vectors for evaluations and bulk previews."""
+    keys_and_texts = [
+        ((_mode(), _model_name(), str(text or "")), str(text or ""))
+        for text in texts
+        if str(text or "")
+    ]
+    missing = [(key, text) for key, text in keys_and_texts if key not in _query_cache]
+    if not missing:
+        return
+    vectors, backend = _embed_texts([text for _key, text in missing], is_query=True)
+    for (key, _text), vector in zip(missing, vectors, strict=True):
+        if len(_query_cache) >= _QUERY_CACHE_MAX:
+            _query_cache.pop(next(iter(_query_cache)))
+        _query_cache[key] = (vector, backend)
 
 
 def embed_passage(text: str) -> list[float]:

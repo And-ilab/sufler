@@ -33,9 +33,14 @@ import {
   type SlaTone,
 } from '../api/onlineChatApi'
 import {
+  enterSuflerScenario,
+  exitSuflerScenario,
   requestSuflerSuggest,
   type SuflerHint,
+  type SuggestResponse,
 } from '../../sufler/api/suggest'
+import { KbPicker } from '../../sufler/KbPicker'
+import { useKnowledgeBaseSelection } from '../../sufler/hooks/useKnowledgeBaseSelection'
 import {
   getInternalUnreadCount,
   operatorsApi,
@@ -70,7 +75,6 @@ import {
   type SummaryHistoryData,
 } from './ClientSummaryCard'
 import { TopicSelect } from './TopicSelect'
-
 const CANVAS_MOCKUP_VERSION = 'v1.4.74'
 
 export type OperatorPresence =
@@ -1009,7 +1013,7 @@ function SuflerFeedbackChip({
         onSelect();
       }}
     >
-      {option.label}
+      {option.label}{selected ? ' ✓' : ''}
     </button>
   );
 }
@@ -1362,12 +1366,14 @@ type SuflerHintData = {
   title: string;
   preview: string;
   answerText: string;
+  detailText?: string;
   operatorTip?: string;
   relevance: string;
   relevanceTone: "success" | "neutral" | "warning";
   suzTitle: string;
   permalink?: string;
   highlighted?: boolean;
+  isScenario?: boolean;
 };
 
 /** Sufler found nothing usable in the knowledge base (non-bank chit-chat or no source). */
@@ -1425,24 +1431,29 @@ function isSuflerChitChat(text: string): boolean {
 
 function mapApiHintToCard(hint: SuflerHint, index: number): SuflerHintData {
   const citation = hint.citations?.[0];
-  const title = citation?.title?.trim() || `Подсказка ${hint.rank || index + 1}`;
+  const title = hint.source_type === "scenario"
+    ? "Ответ по активному сценарию"
+    : citation?.title?.trim() || `Подсказка ${hint.rank || index + 1}`;
   const answerText = (hint.text || "").trim();
   const preview = answerText.length > 120 ? `${answerText.slice(0, 117)}…` : answerText;
   const percent = Math.round(hint.relevance_percent ?? hint.relevance_score * 100);
   const tone: SuflerHintData["relevanceTone"] =
     percent >= 75 ? "success" : percent >= 50 ? "neutral" : "warning";
   const tip = (hint.operator_tip || "").trim();
+  const detailText = (hint.detail_text || answerText).trim();
   return {
     id: `hint-${hint.rank}-${index}`,
     title,
     preview,
     answerText,
+    detailText: detailText || undefined,
     operatorTip: tip || undefined,
     relevance: `${percent}%`,
     relevanceTone: tone,
     suzTitle: title,
     permalink: citation?.permalink?.trim() || undefined,
     highlighted: index === 0,
+    isScenario: hint.source_type === "scenario",
   };
 }
 
@@ -1656,6 +1667,8 @@ function SuflerHintCard({
   onFeedback?: (choice: SuflerFeedbackChoice) => void;
 }): JSX.Element {
   const shade = relevanceShade(t, hint.relevance);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const detailText = (hint.detailText || hint.answerText).trim();
 
   return (
     <div
@@ -1687,6 +1700,56 @@ function SuflerHintCard({
             <Text style={{ fontSize: 12, lineHeight: 1.5, color: t.text.primary, marginBottom: 12 }}>
               {hint.answerText}
             </Text>
+          ) : null}
+          {!hint.isScenario ? (
+            <button
+              type="button"
+              aria-expanded={detailOpen}
+              aria-label={detailOpen ? "Скрыть подробности из базы знаний" : "Подробнее из базы знаний"}
+              data-testid={`hint-kb-more-${hint.id}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                setDetailOpen((current) => !current);
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 28,
+                minHeight: 22,
+                marginBottom: 10,
+                padding: "0 0 2px",
+                color: detailOpen ? t.text.primary : t.text.tertiary,
+                fontSize: 16,
+                fontWeight: 800,
+                lineHeight: 1,
+                letterSpacing: "0.04em",
+                border: `1px solid ${detailOpen ? shade.borderLeft : t.stroke.tertiary}`,
+                borderRadius: 999,
+                background: detailOpen ? shade.background : t.fill.secondary,
+                cursor: "pointer",
+              }}
+            >
+              ⋯
+            </button>
+          ) : null}
+          {detailOpen && detailText ? (
+            <div
+              onClick={(event) => event.stopPropagation()}
+              style={{
+                marginBottom: 12,
+                padding: "8px 10px",
+                fontSize: 12,
+                lineHeight: 1.5,
+                color: t.text.primary,
+                whiteSpace: "pre-wrap",
+                border: `1px solid ${t.stroke.tertiary}`,
+                borderRadius: 8,
+                background: t.fill.secondary,
+              }}
+            >
+              {detailText}
+            </div>
           ) : null}
           <Row gap={6} wrap>
             <Button
@@ -1737,7 +1800,7 @@ function SuflerHintCard({
               </Callout>
             </div>
           ) : null}
-          {isExpanded ? (
+          {isExpanded && !hint.isScenario ? (
             <div onClick={(e) => e.stopPropagation()}>
               <SuflerFeedbackRow
                 t={t}
@@ -3120,6 +3183,12 @@ export function ArmOperatorView({
   const [suflerOutageNotice, setSuflerOutageNotice] = useState<
     { operatorName: string; detail: string; query: string; at: string } | null
   >(null);
+  const [suflerScenarioPath, setSuflerScenarioPath] = useState("");
+  const [suflerSuggested, setSuflerSuggested] = useState<
+    NonNullable<SuggestResponse["suggested_scenario"]> | null
+  >(null);
+  const kb = useKnowledgeBaseSelection();
+  const kbSlugsKey = kb.slugs.join("|");
   const [assignmentGraceUntil, setAssignmentGraceUntil] = useState<number | null>(null);
   const [unreadByDialog, setUnreadByDialog] = useState<Record<string, number>>({});
   const [acceptingDialogId, setAcceptingDialogId] = useState<string | null>(null);
@@ -3725,6 +3794,8 @@ export function ArmOperatorView({
       setLiveSuflerRaw([]);
       setSuflerLoading(false);
       setSuflerReportVisible(false);
+      setSuflerScenarioPath("");
+      setSuflerSuggested(null);
       setSuflerError(SUFLER_NO_KNOWLEDGE_MESSAGE);
     };
     // Sufler itself is down — warning + "Сообщить о проблеме".
@@ -3733,6 +3804,8 @@ export function ArmOperatorView({
       setLiveSuflerRaw([]);
       setSuflerLoading(false);
       setSuflerReportVisible(true);
+      setSuflerScenarioPath("");
+      setSuflerSuggested(null);
       setSuflerError(SUFLER_UNAVAILABLE_MESSAGE);
     };
     const applyIdle = () => {
@@ -3740,6 +3813,8 @@ export function ArmOperatorView({
       setLiveSuflerRaw([]);
       setSuflerLoading(false);
       setSuflerReportVisible(false);
+      setSuflerScenarioPath("");
+      setSuflerSuggested(null);
       setSuflerError("");
     };
 
@@ -3769,7 +3844,7 @@ export function ArmOperatorView({
     }
     // Key includes the fragment count so each new single-word message re-arms
     // the debounce until the client finishes the current question.
-    const turnKey = `${active.id}:${currentTurnLastId}:${currentTurnCount}`;
+    const turnKey = `${active.id}:${currentTurnLastId}:${currentTurnCount}:${kbSlugsKey}`;
     if (suflerTurnKeyRef.current === turnKey) {
       return;
     }
@@ -3796,7 +3871,11 @@ export function ArmOperatorView({
         }
       }, 25000);
       // Sufler sees ONLY the current question — never the chat history.
-      void requestSuflerSuggest(currentTurnText, 3)
+      void requestSuflerSuggest(currentTurnText, 3, {
+        channel: "online_chat",
+        sessionId: `chat:${active.id}`,
+        ...(kb.status === "ready" ? { kbSlugs: kb.slugs } : {}),
+      })
         .then((result) => {
           if (suflerTurnKeyRef.current !== requestKey) return;
           window.clearTimeout(timeoutId);
@@ -3809,6 +3888,15 @@ export function ArmOperatorView({
             setLiveSuflerHints(usable.map(mapApiHintToCard));
             setSuflerReportVisible(false);
             setSuflerError("");
+            if (result.scenario?.path?.length) {
+              setSuflerScenarioPath(
+                `${result.scenario.code} · ${result.scenario.path.join(" → ")}`,
+              );
+              setSuflerSuggested(null);
+            } else {
+              setSuflerScenarioPath("");
+              setSuflerSuggested(result.suggested_scenario ?? null);
+            }
             const articleTitles = usable
               .map((hint) => hint.citations?.[0]?.title?.trim() || "")
               .filter(Boolean)
@@ -3867,6 +3955,8 @@ export function ArmOperatorView({
     currentTurnLastId,
     currentTurnCount,
     currentTurnText,
+    kbSlugsKey,
+    kb.status,
   ]);
 
   useEffect(() => {
@@ -5697,6 +5787,102 @@ export function ArmOperatorView({
                     : "активен"}
             </Pill>
           </Row>
+          {suflerSuggested && !suflerScenarioPath ? (
+            <button
+              type="button"
+              data-testid="arm-scenario-lamp"
+              onClick={() => {
+                if (!active?.id) return;
+                void enterSuflerScenario(suflerSuggested.code, {
+                  sessionId: `chat:${active.id}`,
+                  channel: "online_chat",
+                }).then((result) => {
+                  const usable = result.hints || [];
+                  setLiveSuflerRaw(usable);
+                  setLiveSuflerHints(usable.map(mapApiHintToCard));
+                  if (result.scenario?.path?.length) {
+                    setSuflerScenarioPath(
+                      `${result.scenario.code} · ${result.scenario.path.join(" → ")}`,
+                    );
+                  }
+                  setSuflerSuggested(null);
+                  setSuflerError("");
+                }).catch(() => {
+                  setSuflerError("Не удалось войти в сценарий.");
+                });
+              }}
+              style={{
+                display: "grid",
+                gap: 3,
+                marginTop: 7,
+                padding: "8px 10px",
+                border: `1px solid color-mix(in srgb, #e3b341 55%, ${scheme.accent})`,
+                borderRadius: 9,
+                background: `color-mix(in srgb, #e3b341 16%, ${t.fill.secondary})`,
+                textAlign: "left",
+                cursor: "pointer",
+                color: "inherit",
+                font: "inherit",
+              }}
+            >
+              <Text style={{ fontSize: 10, color: "#9a6d00", fontWeight: 700, textTransform: "uppercase" }}>
+                Похожий сценарий
+              </Text>
+              <Text style={{ fontSize: 12, color: t.text.primary }}>
+                {suflerSuggested.code} · {suflerSuggested.title}
+              </Text>
+            </button>
+          ) : null}
+          {suflerScenarioPath ? (
+            <div
+              data-testid="arm-scenario-path"
+              style={{
+                display: "grid",
+                gap: 3,
+                marginTop: 7,
+                padding: "8px 10px",
+                border: `1px solid ${scheme.accent}`,
+                borderRadius: 9,
+                background: `color-mix(in srgb, ${scheme.accent} 10%, ${t.fill.secondary})`,
+              }}
+            >
+              <Text style={{ fontSize: 10, color: scheme.accent, fontWeight: 700, textTransform: "uppercase" }}>
+                Активный сценарий
+              </Text>
+              <Text style={{ fontSize: 12, color: t.text.primary }}>
+                {suflerScenarioPath}
+              </Text>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  if (!active?.id) return;
+                  void exitSuflerScenario(`chat:${active.id}`).then(() => {
+                    setSuflerScenarioPath("");
+                    setSuflerSuggested(null);
+                    setLiveSuflerHints([]);
+                    setLiveSuflerRaw([]);
+                  });
+                }}
+              >
+                Выйти из сценария
+              </Button>
+            </div>
+          ) : null}
+          <div style={{ marginTop: 8 }}>
+            <KbPicker
+              catalog={kb.catalog}
+              selected={kb.selected}
+              status={kb.status}
+              allSelected={kb.allSelected}
+              someSelected={kb.someSelected}
+              onToggleAll={kb.toggleAll}
+              onToggle={(id, checked) =>
+                kb.setSelected((current) => ({ ...current, [id]: checked }))
+              }
+              compact
+            />
+          </div>
           {suflerError ? (
             <Callout
               tone={suflerReportVisible ? "warning" : "info"}
@@ -5752,6 +5938,7 @@ export function ArmOperatorView({
                     relevance_percent: raw?.relevance_percent,
                     citation_title: hint.suzTitle,
                     request_id: suflerRequestId,
+                    source: "chat",
                   }).catch(() => {});
                 }}
               />

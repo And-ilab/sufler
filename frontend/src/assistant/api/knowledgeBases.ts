@@ -23,8 +23,8 @@ export async function fetchAssistantKnowledgeBases(): Promise<AssistantKbOption[
   const body = (await response.json()) as { items?: AssistantKbApiItem[] }
   return (body.items ?? []).map((item) => ({
     id: String(item.id),
-    slug: item.slug,
-    label: (item.name || item.slug).trim(),
+    slug: (item.slug || String(item.id)).trim(),
+    label: (item.name || item.slug || String(item.id)).trim(),
     documentCount: item.document_count ?? 0,
   }))
 }

@@ -122,14 +122,20 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-local}
       OPENAI_MODEL: ${OPENAI_MODEL:-qwen2.5:3b}
       OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-600}
+      SUFLER_ALLOW_UNGROUNDED: ${SUFLER_ALLOW_UNGROUNDED:-1}
+      SUFLER_LLM_BASE_URL: ${SUFLER_LLM_BASE_URL:-}
+      SUFLER_LLM_API_KEY: ${SUFLER_LLM_API_KEY:-}
+      SUFLER_LLM_MODEL: ${SUFLER_LLM_MODEL:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_ACTIVE_MODEL_PATH: ${OLLAMA_ACTIVE_MODEL_PATH:-/tmp/sufler_active_openai_model}
       LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-}
-      EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
-      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-http}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://embedding:8090}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-180}
+      VOSK_MODEL_PATH: ${VOSK_MODEL_PATH:-/app/var/vosk-model-small-ru-0.22}
+      VOSK_MODEL_DOWNLOAD: ${VOSK_MODEL_DOWNLOAD:-1}
       ASSISTANT_MAX_TOKENS: ${ASSISTANT_MAX_TOKENS:-256}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -161,7 +167,7 @@ services:
     command:
       - sh
       - -c
-      - python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000
+      - python -m pip install -q vosk && python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000
     ports:
       - "${BACKEND_PORT_HOST:-8001}:8000"
     volumes:
@@ -176,6 +182,8 @@ services:
       minio:
         condition: service_healthy
       mailpit:
+        condition: service_started
+      embedding:
         condition: service_started
     healthcheck:
       test:
@@ -205,6 +213,35 @@ services:
       timeout: 5s
       retries: 10
       start_period: 5s
+
+  embedding:
+    build:
+      context: ../backend/services/embedding
+      dockerfile: Dockerfile
+    image: ${EMBEDDING_IMAGE:-sufler-embedding:local}
+    restart: unless-stopped
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
+      HF_HOME: /models/hf-cache
+      TRANSFORMERS_CACHE: /models/hf-cache
+      SENTENCE_TRANSFORMERS_HOME: /models/hf-cache
+    volumes:
+      - ${EMBEDDING_MODELS_DIR:-../models}:/models
+    ports:
+      - "${EMBEDDING_PORT_HOST:-8090}:8090"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 20
+      start_period: 240s
 
   celery-worker:
     build:
@@ -269,14 +306,20 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-local}
       OPENAI_MODEL: ${OPENAI_MODEL:-qwen2.5:3b}
       OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-600}
+      SUFLER_ALLOW_UNGROUNDED: ${SUFLER_ALLOW_UNGROUNDED:-1}
+      SUFLER_LLM_BASE_URL: ${SUFLER_LLM_BASE_URL:-}
+      SUFLER_LLM_API_KEY: ${SUFLER_LLM_API_KEY:-}
+      SUFLER_LLM_MODEL: ${SUFLER_LLM_MODEL:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_ACTIVE_MODEL_PATH: ${OLLAMA_ACTIVE_MODEL_PATH:-/tmp/sufler_active_openai_model}
       LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-}
-      EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
-      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-http}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://embedding:8090}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-180}
+      VOSK_MODEL_PATH: ${VOSK_MODEL_PATH:-/app/var/vosk-model-small-ru-0.22}
+      VOSK_MODEL_DOWNLOAD: ${VOSK_MODEL_DOWNLOAD:-1}
       ASSISTANT_MAX_TOKENS: ${ASSISTANT_MAX_TOKENS:-256}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -381,6 +424,10 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-local}
       OPENAI_MODEL: ${OPENAI_MODEL:-qwen2.5:3b}
       OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-600}
+      SUFLER_ALLOW_UNGROUNDED: ${SUFLER_ALLOW_UNGROUNDED:-1}
+      SUFLER_LLM_BASE_URL: ${SUFLER_LLM_BASE_URL:-}
+      SUFLER_LLM_API_KEY: ${SUFLER_LLM_API_KEY:-}
+      SUFLER_LLM_MODEL: ${SUFLER_LLM_MODEL:-}
       EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}

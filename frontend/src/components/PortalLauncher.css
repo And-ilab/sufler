@@ -389,6 +389,15 @@
   z-index: 40;
 }
 
+.portal-module-window--moved {
+  right: auto;
+  bottom: auto;
+}
+
+.portal-module-window.is-dragging {
+  user-select: none;
+}
+
 .portal-module-window__header {
   position: relative;
   display: flex;
@@ -399,6 +408,17 @@
   padding: 0 var(--space-3);
   color: var(--color-white);
   background: var(--color-primary);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.portal-module-window--maximized .portal-module-window__header {
+  cursor: default;
+}
+
+.portal-module-window.is-dragging:not(.portal-module-window--maximized) .portal-module-window__header {
+  cursor: grabbing;
 }
 
 .portal-module-window--assistant .portal-module-window__header {
@@ -429,6 +449,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  cursor: default;
 }
 
 .portal-module-window__controls > button,
@@ -602,14 +623,78 @@
   background: var(--color-surface);
 }
 
-.portal-module-window__resize {
+.portal-module-window__edge {
   position: absolute;
+  z-index: 6;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  touch-action: none;
+}
+
+.portal-module-window__edge--n {
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.portal-module-window__edge--s {
+  bottom: 0;
+  left: 10px;
+  right: 10px;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.portal-module-window__edge--e {
+  top: 10px;
+  right: 0;
+  bottom: 10px;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.portal-module-window__edge--w {
+  top: 10px;
+  left: 0;
+  bottom: 10px;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.portal-module-window__edge--ne,
+.portal-module-window__edge--nw,
+.portal-module-window__edge--se,
+.portal-module-window__edge--sw {
+  width: 14px;
+  height: 14px;
+}
+
+.portal-module-window__edge--ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.portal-module-window__edge--nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.portal-module-window__edge--sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.portal-module-window__edge--se {
   right: 0;
   bottom: 0;
   width: 24px;
   height: 24px;
-  padding: 0;
-  border: 0;
   background:
     linear-gradient(
       135deg,
@@ -619,7 +704,6 @@
       transparent 59%
     );
   cursor: nwse-resize;
-  touch-action: none;
 }
 
 @media (max-width: 760px) {

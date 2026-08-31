@@ -24,6 +24,7 @@ from auth.roles import (
     PERM_SUFLER_TELEPHONY,
     has_permission,
 )
+from orchestrator.scenario_engine import clear_scenario_session
 from orchestrator.sufler import SuflerOrchestratorError, suggest
 
 
@@ -58,6 +59,11 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
                 "asr": "active",
             }
         )
+
+    async def disconnect(self, close_code: int) -> None:
+        call_id = str(getattr(self, "call_id", "") or "")
+        if call_id:
+            await sync_to_async(clear_scenario_session, thread_sensitive=True)(call_id)
 
     async def receive(self, text_data: str | None = None, bytes_data=None) -> None:
         if not text_data:
@@ -111,13 +117,30 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
         )
 
         if is_final and speaker == "client":
-            await self._emit_hints(text.strip(), turn_id=turn_id)
+            kb_slugs = payload.get("kb_slugs")
+            await self._emit_hints(text.strip(), turn_id=turn_id, kb_slugs=kb_slugs)
 
-    async def _emit_hints(self, text: str, *, turn_id: str) -> None:
+    async def _emit_hints(
+        self,
+        text: str,
+        *,
+        turn_id: str,
+        kb_slugs: Any = None,
+    ) -> None:
+        slugs = None
+        if isinstance(kb_slugs, list):
+            slugs = [
+                item.strip()
+                for item in kb_slugs
+                if isinstance(item, str) and item.strip()
+            ]
         try:
             result = await sync_to_async(suggest, thread_sensitive=True)(
                 text,
-                limit=3,
+                limit=5,
+                kb_slugs=slugs,
+                session_id=str(getattr(self, "call_id", "") or ""),
+                channel="telephony",
             )
         except SuflerOrchestratorError as exc:
             await self.send_json(
@@ -143,10 +166,12 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
                 "type": "hints",
                 "turn_id": turn_id,
                 "query": result["query"],
-                "hints": result["hints"][:3],
+                "hints": result["hints"][:5],
                 "latency_ms": result["latency_ms"],
                 "request_id": result["request_id"],
                 "blocked_reason": result.get("blocked_reason"),
+                "scenario": result.get("scenario"),
+                "suggested_scenario": result.get("suggested_scenario"),
             }
         )
 

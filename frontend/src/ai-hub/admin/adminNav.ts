@@ -27,9 +27,11 @@ export type AdminScreen =
   | 'external'
   | 'cc_reports'
   | 'asr_qa'
+  | 'sufler_stats'
+  | 'sufler_training'
 
 export type AdminProfile = 'assistant' | 'cc'
-export type DemoAdminRole = 'kb_admin' | 'cc_admin' | 'doc_admin' | 'auditor'
+export type DemoAdminRole = 'software_admin' | 'kb_admin' | 'cc_admin' | 'doc_admin' | 'auditor'
 
 export interface AdminNavItem {
   id: AdminScreen
@@ -42,6 +44,7 @@ export interface AdminNavItem {
 }
 
 const ALL_DEMO_ROLES: readonly DemoAdminRole[] = [
+  'software_admin',
   'kb_admin',
   'cc_admin',
   'doc_admin',
@@ -100,14 +103,17 @@ export const ADMIN_NAV: readonly AdminNavItem[] = [
   { id: 'data_sources', label: 'Источники данных', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
   { id: 'assistant_tools', label: 'Инструменты ассистента', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_ADMINS, demoRoles: ['kb_admin', 'auditor'] },
   { id: 'monitoring', label: 'Мониторинг ассистента', group: 'АССИСТЕНТ', roleCodes: ASSISTANT_REPORTS_ROLES, demoRoles: ['kb_admin', 'auditor'] },
-  { id: 'llm_config_cc', label: 'Конфигурация LLM КЦ', group: 'СУФЛЁР / КЦ', featured: true, roleCodes: CC_ADMINS, demoRoles: ['cc_admin', 'kb_admin', 'auditor'] },
-  { id: 'model_params', label: 'Параметры модели (КЦ)', group: 'СУФЛЁР / КЦ', profile: 'cc', roleCodes: CC_ADMINS, demoRoles: ['cc_admin', 'kb_admin', 'auditor'] },
-  { id: 'scenario_editor', label: 'Редактор сценариев', group: 'СУФЛЁР / КЦ', roleCodes: CC_ADMINS, demoRoles: ['cc_admin', 'kb_admin', 'auditor'] },
-  { id: 'scenario_test', label: 'Тест сценария', group: 'СУФЛЁР / КЦ', roleCodes: CC_ADMINS, demoRoles: ['cc_admin', 'kb_admin', 'auditor'] },
-  { id: 'scenario_bindings', label: 'Сценарии суфлёра', group: 'СУФЛЁР / КЦ', roleCodes: CC_ADMINS, demoRoles: ['cc_admin', 'kb_admin', 'auditor'] },
-  { id: 'sufler_policies', label: 'Политики суфлёра', group: 'СУФЛЁР / КЦ', roleCodes: CC_ADMINS, demoRoles: ['cc_admin', 'kb_admin', 'auditor'] },
-  { id: 'cc_reports', label: 'Отчётность КЦ', group: 'СУФЛЁР / КЦ', roleCodes: CC_REPORTS_ROLES, demoRoles: ['cc_admin', 'auditor'] },
-  { id: 'asr_qa', label: 'QA записей ASR', group: 'СУФЛЁР / КЦ', roleCodes: CC_REPORTS_ROLES, demoRoles: ['cc_admin', 'auditor'] },
+  { id: 'llm_config_cc', label: 'Конфигурация LLM КЦ', group: 'СУФЛЁР / КЦ', featured: true, roleCodes: CC_ADMINS, demoRoles: ['software_admin', 'cc_admin', 'kb_admin', 'auditor'] },
+  { id: 'model_params', label: 'Параметры модели (КЦ)', group: 'СУФЛЁР / КЦ', profile: 'cc', roleCodes: CC_ADMINS, demoRoles: ['software_admin', 'cc_admin', 'kb_admin', 'auditor'] },
+  { id: 'scenario_editor', label: 'Редактор сценариев', group: 'СУФЛЁР / КЦ', roleCodes: CC_ADMINS, demoRoles: ['software_admin', 'cc_admin', 'kb_admin', 'auditor'] },
+  { id: 'scenario_test', label: 'Тест сценария', group: 'СУФЛЁР / КЦ', roleCodes: CC_ADMINS, demoRoles: ['software_admin', 'cc_admin', 'kb_admin', 'auditor'] },
+  { id: 'scenario_bindings', label: 'Сценарии суфлёра', group: 'СУФЛЁР / КЦ', roleCodes: CC_ADMINS, demoRoles: ['software_admin', 'cc_admin', 'kb_admin', 'auditor'] },
+  { id: 'sufler_policies', label: 'Политики суфлёра', group: 'СУФЛЁР / КЦ', roleCodes: [...new Set([...CC_ADMINS, ...QU_ADMINS])], demoRoles: ['software_admin', 'cc_admin', 'kb_admin', 'auditor'] },
+  { id: 'kb_admin', label: 'Базы знаний', group: 'СУФЛЁР / КЦ', profile: 'cc', roleCodes: [...new Set([...CC_ADMINS, ...ASSISTANT_ADMINS])], demoRoles: ['software_admin', 'cc_admin', 'kb_admin', 'auditor'] },
+  { id: 'sufler_stats', label: 'Статистика суфлёра', group: 'СУФЛЁР / КЦ', roleCodes: CC_REPORTS_ROLES, demoRoles: ['software_admin', 'cc_admin', 'auditor'] },
+  { id: 'sufler_training', label: 'Модуль обучения', group: 'СУФЛЁР / КЦ', roleCodes: [...new Set([...QU_ADMINS, ...CC_ADMINS])], demoRoles: ['software_admin', 'cc_admin', 'kb_admin', 'auditor'] },
+  { id: 'cc_reports', label: 'Отчётность КЦ', group: 'СУФЛЁР / КЦ', roleCodes: CC_REPORTS_ROLES, demoRoles: ['software_admin', 'cc_admin', 'auditor'] },
+  { id: 'asr_qa', label: 'QA записей ASR', group: 'СУФЛЁР / КЦ', roleCodes: CC_REPORTS_ROLES, demoRoles: ['software_admin', 'cc_admin', 'auditor'] },
   {
     id: 'ocr',
     label: 'OCR',
@@ -130,11 +136,11 @@ export function adminRoute(item: AdminNavItem): string {
   if (item.id === 'model_params' && item.profile === 'cc') {
     return '/ai-hub/admin/model_params/cc'
   }
-  if (item.id === 'cc_reports') {
-    return '/admin/reports'
+  if (item.id === 'kb_admin' && item.profile === 'cc') {
+    return '/ai-hub/admin/kb_admin/cc'
   }
-  if (item.id === 'asr_qa') {
-    return '/ai-hub/reports/asr'
+  if (item.id === 'sufler_training') {
+    return '/ai-hub/admin/sufler_training?tab=moderation'
   }
   return `/ai-hub/admin/${item.id}`
 }
@@ -148,7 +154,9 @@ export function resolveAdminRoute(pathname: string): {
   const screen = candidate && ADMIN_SCREEN_IDS.includes(candidate)
     ? candidate
     : 'llm_config_assistant'
-  const profile = screen === 'model_params' && parts[3] === 'cc' ? 'cc' : 'assistant'
+  const profile = (screen === 'model_params' || screen === 'kb_admin') && parts[3] === 'cc'
+    ? 'cc'
+    : 'assistant'
   return { screen, profile }
 }
 

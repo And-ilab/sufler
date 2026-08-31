@@ -1,83 +1,84 @@
-"""CPU embedding HTTP service for Sufler RAG (E5 multilingual, 1024-d)."""
+"""CPU embedding HTTP service for multilingual-e5-large (1024-d)."""
 
 from __future__ import annotations
 
 import os
-from functools import lru_cache
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from sentence_transformers import SentenceTransformer
 
-DEFAULT_MODEL = os.environ.get(
-    "EMBEDDING_MODEL",
-    "intfloat/multilingual-e5-large",
-)
-EXPECTED_DIMS = int(os.environ.get("EMBEDDING_DIMENSIONS", "1024"))
+MODEL_NAME = (os.environ.get("EMBEDDING_MODEL") or "intfloat/multilingual-e5-large").strip()
+try:
+    DIMENSIONS = int(os.environ.get("EMBEDDING_DIMENSIONS") or "1024")
+except ValueError:
+    DIMENSIONS = 1024
 
-app = FastAPI(title="Sufler Embedding Service", version="0.1.0")
-
-
-class EmbedRequest(BaseModel):
-    texts: list[str] = Field(min_length=1)
-    is_query: bool = False
-    model: str | None = None
+_model: SentenceTransformer | None = None
 
 
-class EmbedResponse(BaseModel):
-    embeddings: list[list[float]]
-    model: str
-    dimensions: int
-
-
-def _prefix(text: str, *, is_query: bool) -> str:
-    stripped = text.strip()
+def _with_e5_prefix(text: str, *, is_query: bool) -> str:
+    stripped = (text or "").strip()
     lowered = stripped.casefold()
     if lowered.startswith("query:") or lowered.startswith("passage:"):
         return stripped
-    return f"{'query' if is_query else 'passage'}: {stripped}"
+    prefix = "query: " if is_query else "passage: "
+    return f"{prefix}{stripped}"
 
 
-@lru_cache(maxsize=1)
-def _load_model(model_name: str):
-    from sentence_transformers import SentenceTransformer
+def get_model() -> SentenceTransformer:
+    global _model
+    if _model is None:
+        _model = SentenceTransformer(MODEL_NAME)
+    return _model
 
-    return SentenceTransformer(model_name)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    get_model()
+    yield
+
+
+app = FastAPI(title="Sufler embeddings", lifespan=lifespan)
+
+
+class EmbedRequest(BaseModel):
+    texts: list[str] = Field(default_factory=list)
+    is_query: bool = False
+    model: str | None = None
 
 
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "model": DEFAULT_MODEL,
-        "dimensions": EXPECTED_DIMS,
+        "ok": True,
+        "model": MODEL_NAME,
+        "dimensions": DIMENSIONS,
+        "ready": _model is not None,
     }
 
 
-@app.post("/embed", response_model=EmbedResponse)
-def embed(request: EmbedRequest) -> EmbedResponse:
-    model_name = (request.model or DEFAULT_MODEL).strip() or DEFAULT_MODEL
-    try:
-        model = _load_model(model_name)
-        vectors = model.encode(
-            [_prefix(text, is_query=request.is_query) for text in request.texts],
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
-    except Exception as exc:  # noqa: BLE001 — surface load/encode errors
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    embeddings = [[float(value) for value in row] for row in vectors]
-    if embeddings and len(embeddings[0]) != EXPECTED_DIMS:
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                f"Model returned dim={len(embeddings[0])}, "
-                f"expected {EXPECTED_DIMS}"
-            ),
-        )
-    return EmbedResponse(
-        embeddings=embeddings,
-        model=model_name,
-        dimensions=EXPECTED_DIMS,
+@app.post("/embed")
+def embed(request: EmbedRequest) -> dict[str, Any]:
+    if request.model and request.model != MODEL_NAME:
+        raise HTTPException(status_code=400, detail="unsupported_model")
+    model = get_model()
+    prefixed = [_with_e5_prefix(text, is_query=request.is_query) for text in request.texts]
+    raw = model.encode(
+        prefixed,
+        normalize_embeddings=True,
+        show_progress_bar=False,
     )
+    embeddings: list[list[float]] = []
+    for row in raw:
+        values = [float(value) for value in row]
+        if len(values) != DIMENSIONS:
+            raise HTTPException(
+                status_code=500,
+                detail=f"expected_dim_{DIMENSIONS}_got_{len(values)}",
+            )
+        embeddings.append(values)
+    return {"embeddings": embeddings, "model": MODEL_NAME}

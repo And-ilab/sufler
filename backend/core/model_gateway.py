@@ -31,6 +31,7 @@ PROFILE_TO_SLOT = {
     "docs_ocr": "llm_docs_ocr",
 }
 SUPPORTED_MODES = frozenset({"stub", "openai"})
+SUFLER_PROFILE = "sufler_cc"
 RESERVED_PARAMETERS = frozenset({"model", "messages", "stream"})
 STUB_RESPONSES = {
     "sufler_cc": (
@@ -114,6 +115,34 @@ def _validate_messages(
     if not validated:
         raise ModelGatewayConfigurationError("messages cannot be empty")
     return validated
+
+
+def _is_deepseek_url(url: str) -> bool:
+    return "deepseek.com" in (url or "").lower()
+
+
+def _ollama_openai_base() -> str:
+    raw = (os.environ.get("OLLAMA_BASE_URL") or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    return raw if raw.endswith("/v1") else f"{raw}/v1"
+
+
+def _sufler_base_url(fallback: str = "") -> str:
+    dedicated = (os.environ.get("SUFLER_LLM_BASE_URL") or "").strip()
+    if dedicated:
+        return dedicated.rstrip("/")
+    openai = (os.environ.get("OPENAI_BASE_URL") or fallback or "").strip()
+    return openai.rstrip("/") if openai else ""
+
+
+def _assistant_base_url(fallback: str = "") -> str:
+    openai = (os.environ.get("OPENAI_BASE_URL") or fallback or "").strip()
+    if _is_deepseek_url(openai):
+        return _ollama_openai_base()
+    if openai:
+        return openai.rstrip("/")
+    return _ollama_openai_base()
 
 
 def _validate_parameters(parameters: Mapping[str, Any]) -> dict[str, Any]:
@@ -231,41 +260,89 @@ class ModelGateway:
             self._registry.get_slot(slot_name),
         )
 
+    def get_runtime_model(self, profile: str) -> str:
+        """Return the model identifier actually sent to the active provider."""
+        return self._resolve_model(self.get_profile(profile))
+
     def _mode_for(self, profile: GatewayProfile) -> str:
+        if profile.profile == SUFLER_PROFILE:
+            if (os.environ.get("SUFLER_LLM_BASE_URL") or "").strip() or _is_deepseek_url(
+                os.environ.get("OPENAI_BASE_URL") or self._base_url or ""
+            ):
+                return "openai"
+            return self._mode_override or profile.gateway_mode
+        if _is_deepseek_url(
+            self._base_url or os.environ.get("OPENAI_BASE_URL") or ""
+        ):
+            if _assistant_base_url(self._base_url or ""):
+                return "openai"
+            return profile.gateway_mode
         return self._mode_override or profile.gateway_mode
 
+    def _base_url_for(self, profile: GatewayProfile) -> str:
+        if profile.profile == SUFLER_PROFILE:
+            return _sufler_base_url(self._base_url or "")
+        return _assistant_base_url(self._base_url or "")
+
+    def _api_key_for(self, profile: GatewayProfile) -> str:
+        if profile.profile == SUFLER_PROFILE:
+            dedicated = (os.environ.get("SUFLER_LLM_API_KEY") or "").strip()
+            if dedicated:
+                return dedicated
+            return self._api_key or os.environ.get("OPENAI_API_KEY") or ""
+        assistant_base = self._base_url_for(profile)
+        if _is_deepseek_url(
+            os.environ.get("OPENAI_BASE_URL") or self._base_url or ""
+        ) and not _is_deepseek_url(assistant_base):
+            return "ollama"
+        return self._api_key or os.environ.get("OPENAI_API_KEY") or ""
+
     def _openai_endpoint(self, profile: GatewayProfile) -> str:
-        if not self._base_url:
+        base_url = self._base_url_for(profile)
+        if not base_url:
             raise ModelGatewayConfigurationError(
                 "OPENAI_BASE_URL is required in openai mode"
+                if profile.profile == SUFLER_PROFILE
+                else "OLLAMA_BASE_URL is required for assistant openai mode"
             )
         if profile.model.startswith("stub:"):
             raise ModelGatewayConfigurationError(
                 f"Profile {profile.profile!r} requires a real model "
                 "in openai mode"
             )
-        return f"{self._base_url.rstrip('/')}/chat/completions"
+        return f"{base_url.rstrip('/')}/chat/completions"
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, profile: GatewayProfile | None = None) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
+        api_key = self._api_key_for(profile) if profile else (self._api_key or "")
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         return headers
 
     def _resolve_model(self, profile: GatewayProfile) -> str:
-        """Runtime UI selection → env OPENAI_MODEL → registry slot name."""
+        """Sufler uses SUFLER_LLM_*; assistant uses Ollama/UI, never DeepSeek."""
+        if profile.profile == SUFLER_PROFILE:
+            dedicated = (os.environ.get("SUFLER_LLM_MODEL") or "").strip()
+            if dedicated:
+                return dedicated
+            if _is_deepseek_url(self._base_url_for(profile)):
+                openai_model = (os.environ.get("OPENAI_MODEL") or "").strip()
+                if openai_model and "deepseek" in openai_model.lower():
+                    return openai_model
+                return "deepseek-chat"
+            return profile.model
         try:
             from assistant.local_llm import active_model_id
 
             runtime = (active_model_id() or "").strip()
-            if runtime:
+            if runtime and "deepseek" not in runtime.lower():
                 return runtime
         except Exception:
             pass
-        for key in ("OPENAI_MODEL", "OLLAMA_MODEL"):
-            override = (os.environ.get(key) or "").strip()
-            if override:
-                return override
+        for key in ("OLLAMA_MODEL", "OPENAI_MODEL"):
+            candidate = (os.environ.get(key) or "").strip()
+            if candidate and "deepseek" not in candidate.lower():
+                return candidate
         return profile.model
 
     def _payload(
@@ -304,12 +381,15 @@ class ModelGateway:
             )
 
         endpoint = self._openai_endpoint(configured)
+        timeout = self._timeout_seconds
+        if configured.profile == SUFLER_PROFILE:
+            timeout = min(timeout, 45.0)
         try:
             response = requests.post(
                 endpoint,
-                headers=self._headers(),
+                headers=self._headers(configured),
                 json=payload,
-                timeout=self._timeout_seconds,
+                timeout=timeout,
             )
             response.raise_for_status()
             result = response.json()
@@ -514,7 +594,7 @@ class ModelGateway:
             try:
                 with requests.post(
                     endpoint,
-                    headers=self._headers(),
+                    headers=self._headers(profile),
                     json=dict(payload),
                     timeout=self._timeout_seconds,
                     stream=True,

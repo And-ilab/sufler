@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  enterSuflerScenario,
+  exitSuflerScenario,
   requestSuflerSuggest,
+  clearSuflerScenario,
+  resumeSuflerScenario,
   type SuflerHint,
+  type SuggestResponse,
 } from '../api/suggest'
+import { emptySuflerHintMessage, NO_SUZ_HINT_MESSAGE } from '../emptyHintCopy'
+
+export type SuflerScenarioProgress = NonNullable<SuggestResponse['scenario']>
 
 export interface TranscriptLine {
   id: string
@@ -11,6 +19,9 @@ export interface TranscriptLine {
   isFinal: boolean
   turnId: string
   hints?: SuflerHint[]
+  hintStatus?: 'loading' | 'ready' | 'empty'
+  hintMessage?: string
+  requestId?: string
 }
 
 interface UseSuflerTranscriptOptions {
@@ -18,6 +29,7 @@ interface UseSuflerTranscriptOptions {
   callId?: string
   demoMode?: boolean
   demoLines?: TranscriptLine[]
+  getKbSlugs?: () => string[] | undefined
 }
 
 type WsInbound =
@@ -40,6 +52,9 @@ type WsInbound =
       hints: SuflerHint[]
       latency_ms?: Record<string, number>
       request_id?: string
+      blocked_reason?: string | null
+      scenario?: SuflerScenarioProgress | null
+      suggested_scenario?: SuggestResponse['suggested_scenario']
     }
   | { type: 'error'; message: string; turn_id?: string }
   | { type: 'pong' }
@@ -50,44 +65,102 @@ function wsUrl(callId: string): string {
   return `${protocol}//${host}/ws/sufler/${callId}/`
 }
 
+function hintMessageFor(blocked: string | null | undefined, hasHints: boolean): string {
+  return emptySuflerHintMessage(blocked, hasHints)
+}
+
+function keepScenario(
+  previous: SuflerScenarioProgress | null,
+  next: SuflerScenarioProgress | null,
+): SuflerScenarioProgress | null {
+  if (next) return next
+  if (previous?.completed || previous?.paused) return previous
+  return null
+}
+
+function dialogContextFrom(lines: TranscriptLine[]): string {
+  return lines
+    .map((line) => `${line.speaker === 'client' ? 'Клиент' : 'Оператор'}: ${line.text}`)
+    .join('\n')
+}
+
 export function useSuflerTranscript({
   enabled = true,
   callId = 'live',
   demoMode = false,
   demoLines = [],
+  getKbSlugs,
 }: UseSuflerTranscriptOptions) {
   const [lines, setLines] = useState<TranscriptLine[]>(demoMode ? demoLines : [])
   const [connected, setConnected] = useState(demoMode)
   const [error, setError] = useState('')
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
+  const [scenario, setScenario] = useState<SuflerScenarioProgress | null>(null)
+  const [suggestedScenario, setSuggestedScenario] = useState<
+    NonNullable<SuggestResponse['suggested_scenario']> | null
+  >(null)
   const socketRef = useRef<WebSocket | null>(null)
+  const linesRef = useRef<TranscriptLine[]>(demoMode ? demoLines : [])
+  const pausedRef = useRef(false)
+  const resetGenRef = useRef(0)
+  const inboundEnabledRef = useRef(true)
 
   const upsertLine = useCallback((line: TranscriptLine) => {
     setLines((current) => {
       const index = current.findIndex(
         (item) => item.turnId === line.turnId && item.speaker === line.speaker,
       )
-      if (index === -1) return [...current, line]
-      const next = [...current]
-      next[index] = { ...next[index], ...line, hints: line.hints ?? next[index].hints }
+      const next =
+        index === -1
+          ? [...current, line]
+          : current.map((item, itemIndex) =>
+              itemIndex === index
+                ? { ...item, ...line, hints: line.hints ?? item.hints }
+                : item,
+            )
+      linesRef.current = next
       return next
     })
   }, [])
 
-  const attachHints = useCallback((turnId: string, hints: SuflerHint[]) => {
-    setLines((current) =>
-      current.map((line) =>
-        line.turnId === turnId && line.speaker === 'client'
-          ? { ...line, hints }
-          : line,
-      ),
-    )
-  }, [])
+  const attachHints = useCallback(
+    (
+      turnId: string,
+      hints: SuflerHint[],
+      hintMessage = '',
+      requestId = '',
+      suppressEmptyMessage = false,
+    ) => {
+      setLines((current) => {
+        const next = current.map((line) =>
+          line.turnId === turnId && line.speaker === 'client'
+            ? {
+                ...line,
+                hints,
+                requestId: requestId || line.requestId,
+                hintStatus: (hints.length ? 'ready' : 'empty') as TranscriptLine['hintStatus'],
+                hintMessage: hints.length
+                  ? ''
+                  : suppressEmptyMessage
+                    ? ''
+                    : hintMessage || NO_SUZ_HINT_MESSAGE,
+              }
+            : line,
+        )
+        linesRef.current = next
+        return next
+      })
+    },
+    [],
+  )
 
   useEffect(() => {
     if (!enabled || demoMode) {
       setConnected(demoMode)
-      if (demoMode) setLines(demoLines)
+      if (demoMode) {
+        linesRef.current = demoLines
+        setLines(demoLines)
+      }
       return
     }
 
@@ -113,24 +186,43 @@ export function useSuflerTranscript({
         return
       }
       if (payload.type === 'transcript') {
+        if (pausedRef.current || !inboundEnabledRef.current) return
         upsertLine({
           id: `${payload.turn_id}-${payload.speaker}`,
           speaker: payload.speaker,
           text: payload.text,
           isFinal: payload.is_final,
           turnId: payload.turn_id,
+          ...(payload.is_final && payload.speaker === 'client'
+            ? {
+                hintStatus: 'loading' as const,
+                hintMessage: 'Подсказки загружаются…',
+              }
+            : {}),
         })
         return
       }
       if (payload.type === 'hints') {
-        attachHints(payload.turn_id, payload.hints.slice(0, 5))
+        if (pausedRef.current || !inboundEnabledRef.current) return
+        setScenario((current) => keepScenario(current, payload.scenario ?? null))
+        setSuggestedScenario(payload.suggested_scenario ?? null)
+        attachHints(
+          payload.turn_id,
+          payload.hints.slice(0, 5),
+          hintMessageFor(payload.blocked_reason, payload.hints.length > 0),
+          payload.request_id,
+          payload.blocked_reason === 'no_hint_needed'
+            || payload.blocked_reason === 'service_mode',
+        )
         if (payload.latency_ms?.total != null) {
           setLatencyMs(payload.latency_ms.total)
         }
         return
       }
       if (payload.type === 'error') {
-        setError(payload.message)
+        if (payload.turn_id) {
+          attachHints(payload.turn_id, [], NO_SUZ_HINT_MESSAGE)
+        }
       }
     }
 
@@ -140,6 +232,65 @@ export function useSuflerTranscript({
     }
   }, [attachHints, callId, demoLines, demoMode, enabled, upsertLine])
 
+  const ingestLive = useCallback(
+    (message: {
+      type: 'asr.partial' | 'asr.final'
+      speaker: 'client' | 'operator'
+      text: string
+      turn_id: string
+    }) => {
+      inboundEnabledRef.current = true
+      const nextLine: TranscriptLine = {
+        id: `${message.turn_id}-${message.speaker}`,
+        speaker: message.speaker,
+        text: message.text,
+        isFinal: message.type === 'asr.final',
+        turnId: message.turn_id,
+      }
+      if (message.type === 'asr.final' && message.speaker === 'client') {
+        nextLine.hintStatus = 'loading'
+        nextLine.hintMessage = 'Подсказки загружаются…'
+      }
+      upsertLine(nextLine)
+      if (message.type !== 'asr.final' || message.speaker !== 'client') return
+      if (pausedRef.current) return
+      const requestGen = resetGenRef.current
+      const dialogContext = linesRef.current
+        .map((line) =>
+          `${line.speaker === 'client' ? 'Клиент' : 'Оператор'}: ${line.text}`,
+        )
+        .join('\n')
+      void requestSuflerSuggest(message.text, 5, {
+        dialogContext,
+        channel: 'telephony',
+        sessionId: callId,
+        ...(getKbSlugs && getKbSlugs() !== undefined
+          ? { kbSlugs: getKbSlugs() }
+          : {}),
+      })
+        .then((result) => {
+          if (requestGen !== resetGenRef.current) return
+          const hints = result.hints.slice(0, 5)
+          setScenario((current) => keepScenario(current, result.scenario ?? null))
+          setSuggestedScenario(result.suggested_scenario ?? null)
+          attachHints(
+            message.turn_id,
+            hints,
+            hintMessageFor(result.blocked_reason, hints.length > 0),
+            result.request_id,
+            result.blocked_reason === 'no_hint_needed'
+              || result.blocked_reason === 'service_mode',
+          )
+          setLatencyMs(result.latency_ms.total)
+        })
+        .catch(() => {
+          if (requestGen !== resetGenRef.current) return
+          attachHints(message.turn_id, [], NO_SUZ_HINT_MESSAGE)
+        })
+    },
+    [attachHints, callId, getKbSlugs, upsertLine],
+  )
+
   const pushAsr = useCallback(
     (message: {
       type: 'asr.partial' | 'asr.final'
@@ -148,40 +299,117 @@ export function useSuflerTranscript({
       turn_id: string
     }) => {
       if (demoMode) {
-        upsertLine({
-          id: `${message.turn_id}-${message.speaker}`,
-          speaker: message.speaker,
-          text: message.text,
-          isFinal: message.type === 'asr.final',
-          turnId: message.turn_id,
-        })
-        if (message.type === 'asr.final' && message.speaker === 'client') {
-          void requestSuflerSuggest(message.text, 5)
-            .then((result) => {
-              attachHints(message.turn_id, result.hints.slice(0, 5))
-              setLatencyMs(result.latency_ms.total)
-            })
-            .catch((requestError: unknown) => {
-              setError(
-                requestError instanceof Error
-                  ? requestError.message
-                  : 'Suggest failed',
-              )
-            })
-        }
+        ingestLive(message)
         return
       }
-      socketRef.current?.send(JSON.stringify(message))
+      const slugs = getKbSlugs?.()
+      socketRef.current?.send(
+        JSON.stringify(
+          slugs === undefined ? message : { ...message, kb_slugs: slugs },
+        ),
+      )
     },
-    [attachHints, demoMode, upsertLine],
+    [demoMode, getKbSlugs, ingestLive],
   )
+
+  const replaceLines = useCallback(
+    (next: TranscriptLine[] | ((current: TranscriptLine[]) => TranscriptLine[])) => {
+      setLines((current) => {
+        const resolved = typeof next === 'function' ? next(current) : next
+        linesRef.current = resolved
+        return resolved
+      })
+    },
+    [],
+  )
+
+  const applySuggestResult = useCallback(
+    (result: SuggestResponse, turnId?: string) => {
+      const hints = result.hints.slice(0, 5)
+      setScenario((current) => keepScenario(current, result.scenario ?? null))
+      setSuggestedScenario(result.suggested_scenario ?? null)
+      if (turnId) {
+        attachHints(
+          turnId,
+          hints,
+          hintMessageFor(result.blocked_reason, hints.length > 0),
+          result.request_id,
+          result.blocked_reason === 'no_hint_needed'
+            || result.blocked_reason === 'service_mode',
+        )
+      }
+      if (result.latency_ms?.total != null) {
+        setLatencyMs(result.latency_ms.total)
+      }
+    },
+    [attachHints],
+  )
+
+  const enterSuggested = useCallback(
+    async (code: string) => {
+      const lastClient = [...linesRef.current]
+        .reverse()
+        .find((line) => line.speaker === 'client' && line.isFinal)
+      const result = await enterSuflerScenario(code, {
+        sessionId: callId,
+        channel: 'telephony',
+      })
+      applySuggestResult(result, lastClient?.turnId)
+    },
+    [applySuggestResult, callId],
+  )
+
+  const exitActive = useCallback(async () => {
+    const result = await exitSuflerScenario(callId)
+    setScenario(result.scenario ?? null)
+    setSuggestedScenario(result.suggested_scenario ?? null)
+  }, [callId])
+
+  const resumeActive = useCallback(
+    async (mode: 'start' | 'checkpoint' | 'step', nodeId?: string) => {
+      const lastClient = [...linesRef.current]
+        .reverse()
+        .find((line) => line.speaker === 'client' && line.isFinal)
+      const result = await resumeSuflerScenario(callId, mode, {
+        channel: 'telephony',
+        nodeId,
+        dialogContext: dialogContextFrom(linesRef.current),
+      })
+      applySuggestResult(result, lastClient?.turnId)
+    },
+    [applySuggestResult, callId],
+  )
+
+  const resetConversation = useCallback(() => {
+    resetGenRef.current += 1
+    inboundEnabledRef.current = false
+    linesRef.current = []
+    setLines([])
+    setScenario(null)
+    setSuggestedScenario(null)
+    setError('')
+    setLatencyMs(null)
+    void clearSuflerScenario(callId)
+  }, [callId])
+
+  const setRecognitionPaused = useCallback((paused: boolean) => {
+    pausedRef.current = paused
+  }, [])
 
   return {
     lines,
     connected,
     error,
     latencyMs,
+    scenario,
+    suggestedScenario,
+    ingestLive,
     pushAsr,
-    setLines,
+    setLines: replaceLines,
+    enterSuggested,
+    exitActive,
+    resumeActive,
+    resetConversation,
+    setRecognitionPaused,
   }
 }

@@ -17,8 +17,10 @@ django.setup()
 from django.contrib.auth import get_user_model  # noqa: E402
 from django.contrib.auth.models import Group  # noqa: E402
 from django.test import Client, TestCase, override_settings  # noqa: E402
+from django.utils import timezone  # noqa: E402
 
 from auth.roles import ROLES_BY_CODE  # noqa: E402
+from online_chat.models import SuflerHintFeedback  # noqa: E402
 
 
 class CcReportsApiTest(TestCase):
@@ -128,6 +130,43 @@ class CcReportsApiTest(TestCase):
         self.assertIn("catalog", catalog_body)
         self.assertTrue(any(item["id"] == "chat-sla" for item in catalog_body["catalog"]))
 
+        sufler = client.get(
+            "/api/reports/cc/catalog/",
+            {
+                "report": "chat-period",
+                "scope": "sufler",
+                "date_from": "2026-07-01",
+                "date_to": "2026-07-07",
+            },
+        )
+        self.assertEqual(sufler.status_code, 200)
+        sufler_body = sufler.json()
+        self.assertEqual(sufler_body["report"]["id"], "usefulness")
+        self.assertEqual(sufler_body["source"], "Суфлёр")
+        self.assertEqual(sufler_body["filters"]["channel"], "")
+        catalog_ids = {item["id"] for item in sufler_body["catalog"]}
+        self.assertEqual(
+            catalog_ids,
+            {"usefulness", "relevance", "errors"},
+        )
+        self.assertNotIn("chat-sla", catalog_ids)
+        self.assertNotIn("chat-period", catalog_ids)
+
+        errors = client.get(
+            "/api/reports/cc/catalog/",
+            {
+                "report": "errors",
+                "scope": "sufler",
+                "date_from": "2026-08-05",
+                "date_to": "2026-08-20",
+            },
+        )
+        self.assertEqual(errors.status_code, 200)
+        errors_body = errors.json()
+        self.assertEqual(errors_body["report"]["id"], "errors")
+        self.assertGreater(len(errors_body["rows"]), 0)
+        self.assertTrue(errors_body["stub"])
+
         builder = client.get("/api/reports/cc/builder/")
         self.assertEqual(builder.status_code, 200)
         self.assertIn("templates", builder.json())
@@ -140,3 +179,66 @@ class CcReportsApiTest(TestCase):
         )
         self.assertEqual(preview.status_code, 200)
         self.assertIn("rows", preview.json())
+
+    def test_sufler_stats_include_telephony_without_channel_filter(self):
+        client = Client()
+        client.force_login(self.user_for_role("contact_center_analyst"))
+        SuflerHintFeedback.objects.create(
+            query="Со скольки лет можно взять?",
+            hint_text="С 14 лет при согласии законного представителя.",
+            choice="not_used",
+            operator_name="dev-role-01",
+            source="telephony",
+            relevance_percent=62,
+        )
+        day = timezone.now().date().isoformat()
+        errors = client.get(
+            "/api/reports/cc/catalog/",
+            {
+                "report": "errors",
+                "scope": "sufler",
+                "date_from": day,
+                "date_to": day,
+            },
+        )
+        self.assertEqual(errors.status_code, 200)
+        body = errors.json()
+        self.assertEqual(body["filters"]["channel"], "")
+        self.assertFalse(body["stub"])
+        self.assertGreaterEqual(body["summary"].get("cases", 0), 1)
+        examples = " ".join(str(row.get("example") or "") for row in body["rows"])
+        self.assertIn("Со скольки лет можно взять?", examples)
+
+        chat_only = client.get(
+            "/api/reports/cc/catalog/",
+            {
+                "report": "errors",
+                "scope": "sufler",
+                "channel": "online_chat",
+                "date_from": day,
+                "date_to": day,
+            },
+        )
+        self.assertEqual(chat_only.status_code, 200)
+        chat_body = chat_only.json()
+        chat_examples = " ".join(
+            str(row.get("example") or "") for row in chat_body["rows"]
+        )
+        self.assertNotIn("Со скольки лет можно взять?", chat_examples)
+
+        relevance = client.get(
+            "/api/reports/cc/catalog/",
+            {
+                "report": "relevance",
+                "scope": "sufler",
+                "date_from": day,
+                "date_to": day,
+            },
+        )
+        self.assertEqual(relevance.status_code, 200)
+        rel_body = relevance.json()
+        self.assertEqual(rel_body["report"]["default_view"], "pie")
+        self.assertGreaterEqual(len(rel_body["chart"]), 1)
+        self.assertTrue(
+            any("Средняя" in str(item.get("label") or "") for item in rel_body["chart"])
+        )
