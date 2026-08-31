@@ -28,6 +28,9 @@ from ingest.pipeline import deterministic_embedding  # noqa: E402
 from orchestrator.sufler import (  # noqa: E402
     SuflerOrchestratorError,
     _document_supports_query,
+    _kb_hint_payload,
+    _looks_like_source_dump,
+    _parse_llm_hint,
     _safe_ru_en_text,
     suggest,
 )
@@ -79,6 +82,8 @@ class SuflerSuggestPipelineTest(TestCase):
         self.assertGreaterEqual(len(result["hints"]), 1)
         hint = result["hints"][0]
         self.assertTrue(hint["text"].strip())
+        self.assertEqual(hint["source_type"], "knowledge_base")
+        self.assertTrue(str(hint.get("detail_text") or "").strip())
         self.assertNotIn("Подсказка оператору", hint["text"])
         self.assertIn("оформить", hint["text"].casefold())
         self.assertTrue(hint["citations"])
@@ -94,6 +99,54 @@ class SuflerSuggestPipelineTest(TestCase):
         )
         self.assertEqual(result["gateway_model"], "qwen2.5-1.5b-instruct")
         self.assertIsNone(result["blocked_reason"])
+
+    def test_parse_llm_hint_keeps_longer_detail(self):
+        answer, tip, detail = _parse_llm_hint(
+            "ОТВЕТ:\n"
+            "Для ребёнка 6 лет карта оформляется только как дополнительная.\n"
+            "ПОДРОБНЕЕ:\n"
+            "Для ребёнка 6 лет карта оформляется только как дополнительная "
+            "к счёту законного представителя. Выпуск и обслуживание карты "
+            "учащегося бесплатные. Оформить можно в отделении с паспортом.\n"
+            "СОВЕТ:\n"
+            "Сверьте возраст в статье."
+        )
+        self.assertIn("дополнительная", answer)
+        self.assertIn("бесплатн", detail)
+        self.assertGreater(len(detail), len(answer))
+        self.assertIn("Сверьте", tip)
+
+    def test_kb_detail_is_spoken_not_source_dump(self):
+        raw = (
+            "Дата сбора: 2026-08-26\n"
+            "Источник: https://belarusbank.by/ru/cards/uchenik-belcart/\n"
+            "karta-nesovershennoletnego-belarusbank.txt\n"
+            "Для ребёнка 6 лет карта оформляется только как дополнительная "
+            "к счёту законного представителя. В рамках продукта «Карта учащегося» "
+            "выпуск и обслуживание карточки осуществляются бесплатно. "
+            "Оформить можно в отделении с паспортом законного представителя."
+        )
+        self.assertTrue(_looks_like_source_dump(raw))
+        payload = _kb_hint_payload(
+            rank=1,
+            text="Для ребёнка 6 лет карта оформляется только как дополнительная к счёту законного представителя.",
+            operator_tip="",
+            document={
+                "title": "Карта учащегося",
+                "content": raw,
+                "snippet": raw,
+            },
+            relevance_score=0.85,
+            relevance_percent=85,
+            citations=[],
+            query="обслуживание карты бесплатное?",
+        )
+        detail = payload["detail_text"]
+        self.assertTrue(detail.strip())
+        self.assertNotIn("Дата сбора", detail)
+        self.assertNotIn("https://", detail)
+        self.assertNotIn(".txt", detail)
+        self.assertNotIn("belarusbank.by", detail.casefold())
 
     def test_empty_text_rejected(self):
         with self.assertRaises(SuflerOrchestratorError):
@@ -219,7 +272,7 @@ class SuflerSuggestPipelineTest(TestCase):
             patch.dict(os.environ, {"SUFLER_ALLOW_UNGROUNDED": "1"}, clear=False),
         ):
             for index, replica in enumerate(
-                ("Хаолд из Беларусь банк", "а он с беларусь банк"),
+                ("Хаолд из Беларусь банк", "а он с беларусь банк", "Можете хочу."),
                 start=1,
             ):
                 with self.subTest(replica=replica):

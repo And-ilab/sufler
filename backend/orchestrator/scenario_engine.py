@@ -8,8 +8,8 @@ import os
 import re
 import threading
 from datetime import timedelta
-from dataclasses import dataclass
-from typing import Any, Mapping
+from dataclasses import dataclass, field
+from typing import Any, Mapping, Sequence
 
 from django.utils import timezone
 
@@ -99,6 +99,9 @@ class ScenarioProgress:
     next_clarify: str
     hint_text: str
     node_type: str
+    steps: list[dict[str, str]] = field(default_factory=list)
+    upcoming: list[dict[str, str]] = field(default_factory=list)
+    choices: list[dict[str, str]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -107,6 +110,30 @@ class ScenarioProgress:
             "path": list(self.path),
             "node_id": self.node_id,
             "next_clarify": self.next_clarify,
+            "steps": [
+                {
+                    "node_id": str(item.get("node_id") or ""),
+                    "label": str(item.get("label") or ""),
+                }
+                for item in self.steps
+                if str(item.get("label") or "").strip()
+            ],
+            "upcoming": [
+                {
+                    "node_id": str(item.get("node_id") or ""),
+                    "label": str(item.get("label") or ""),
+                }
+                for item in self.upcoming
+                if str(item.get("label") or "").strip()
+            ],
+            "choices": [
+                {
+                    "label": str(item.get("label") or ""),
+                    "reply": str(item.get("reply") or item.get("label") or ""),
+                }
+                for item in self.choices
+                if str(item.get("label") or item.get("reply") or "").strip()
+            ],
         }
 
 
@@ -130,6 +157,7 @@ class ScenarioTurn:
     suggested: SuggestedScenario | None = None
     session_active: bool = False
     unmatched: bool = False
+    paused_progress: ScenarioProgress | None = None
 
 
 def normalize(text: str) -> str:
@@ -165,6 +193,20 @@ _CHILD_TOPIC = (
 _MINOR_PROFILE = ("несовершеннолетн", "14-лет", "внук", "ребен", "до 14")
 _MINOR_QUERY = ("маленьк", "несовершеннолетн", "ребен", "внук", "подрост", "школьн")
 _MINOR_PRODUCT = ("карт", "счет", "счёт", "вклад", "открыть")
+_TEEN_SELF_PROFILE = ("14-лет", "четырнадцат")
+_CHILD_OTHER_PROFILE = ("внук", "6 лет", "другое лицо", "иное лицо")
+_OTHER_PERSON_STEMS = ("внук", "внучк", "бабушк", "дедушк")
+_SELF_MINOR_RE = re.compile(
+    r"\bя\s+(?:маленьк|несовершеннолетн|подрост|школьн)|"
+    r"\bмне\s+четырнадцат|"
+    r"от\s+своего\s+лица|"
+    r"\bсам[аи]?\s+(?:хочу|откры|несовершеннолетн)",
+    re.IGNORECASE,
+)
+_OTHER_PERSON_RE = re.compile(
+    r"другое\s+лицо|иное\s+лицо|не\s+себе|на\s+имя",
+    re.IGNORECASE,
+)
 _NFC_PROFILE = ("nfc", "оплата телефон", "apple pay", "apple")
 _NFC_QUERY = (
     "apple pay",
@@ -259,6 +301,50 @@ _DECLINE_RE = re.compile(
 
 
 _PHATIC = (*_GREETING, *_THANKS, *_HOLD, *_FAREWELL, *_ACK, *_SHORT_ACK)
+_VAGUE_REPLIES = {"обычно", "вообще", "типа", "как-то"}
+_AUX_FILLER = {
+    "можете",
+    "можно",
+    "можешь",
+    "могу",
+    "мог",
+    "могла",
+    "могли",
+    "хотел",
+    "хотела",
+    "хотим",
+    "хотят",
+    "хотеть",
+    "надо",
+    "нужно",
+    "нужен",
+    "нужна",
+    "нужны",
+    "скажите",
+    "подскажите",
+    "пожалуйста",
+}
+_BANK_PRODUCT_STEMS = (
+    "автокредит",
+    "автомобил",
+    "выписк",
+    "вклад",
+    "виз",
+    "карт",
+    "кредит",
+    "крипт",
+    "пин",
+    "перевод",
+    "перевест",
+    "посольств",
+    "справк",
+    "счет",
+    "счёт",
+)
+_CIVIC_PASSPORT_RE = re.compile(
+    r"где\s+(?:мне\s+)?(?:взять|получить|сделать|оформить)\s+паспорт",
+    re.IGNORECASE,
+)
 
 
 def classify_turn(text: str) -> str | None:
@@ -272,11 +358,22 @@ def classify_turn(text: str) -> str | None:
         return "no_hint.identity"
     if norm in _EMPTY_INTENT:
         return "no_hint.smalltalk"
+    if _is_non_bank_passport_question(text):
+        return "no_hint.smalltalk"
     leftover = f" {norm} "
     for phrase in sorted(_PHATIC, key=len, reverse=True):
         leftover = leftover.replace(f" {phrase} ", " ")
     leftover_tokens = _tokens(leftover)
     if leftover_tokens:
+        content = [
+            token
+            for token in leftover_tokens
+            if token not in _AUX_FILLER and token not in _MATCH_STOPWORDS
+        ]
+        if not content:
+            return "no_hint.incomplete"
+        if all(token in _VAGUE_REPLIES for token in content):
+            return "no_hint.incomplete"
         return None
     if any(item in norm for item in _GREETING):
         return "no_hint.greeting"
@@ -301,8 +398,10 @@ def _with_aliases(text: str) -> str:
     )
     if "автокредит" in norm or (has_credit and has_auto):
         extras.extend(["автокредит", "кредит на автомобиль", "кредит на машину"])
-    if "маленьк" in norm:
-        extras.extend(["несовершеннолетний", "открыть счёт"])
+    if _is_self_minor_query(text):
+        extras.extend(["я несовершеннолетний", "открыть счёт себе"])
+    elif _is_other_person_child_query(text):
+        extras.extend(["счёт внуку", "другое лицо", "на имя ребёнка"])
     if (
         "apple pay" in norm
         or "эпл пей" in norm
@@ -365,6 +464,51 @@ def _contains_stem(blob: str, stems: tuple[str, ...]) -> bool:
     return False
 
 
+def _is_teen_self_profile(profile: str) -> bool:
+    """CC-SCR-001: the minor is the speaker, not a grandchild case."""
+    return _contains_stem(profile, _TEEN_SELF_PROFILE) and not _contains_stem(
+        profile, ("внук",)
+    )
+
+
+def _is_child_other_profile(profile: str) -> bool:
+    """CC-SCR-002: an adult / other person opens for a young child."""
+    return _contains_stem(profile, _CHILD_OTHER_PROFILE)
+
+
+def _is_self_minor_query(text: str) -> bool:
+    """Client speaks as themselves being under 18 and wants a product."""
+    query = normalize(text)
+    if not query or not _contains_stem(query, _MINOR_PRODUCT):
+        return False
+    if _contains_stem(query, _OTHER_PERSON_STEMS) or _OTHER_PERSON_RE.search(query):
+        return False
+    if _SELF_MINOR_RE.search(query):
+        return True
+    if re.search(r"\bмне\b", query) and not _contains_stem(
+        query, ("ребен", "сын", "доч")
+    ):
+        if any(age < 18 for age in _extract_ages(query)):
+            return True
+    return False
+
+
+def _is_other_person_child_query(text: str) -> bool:
+    """Client is another person opening an account for a child."""
+    query = normalize(text)
+    if not query or not _contains_stem(query, _MINOR_PRODUCT):
+        return False
+    if _is_self_minor_query(text):
+        return False
+    if _contains_stem(query, _OTHER_PERSON_STEMS) or _OTHER_PERSON_RE.search(query):
+        return True
+    if _contains_stem(query, ("ребен", "сын", "доч")) and any(
+        age < 14 for age in _extract_ages(query)
+    ):
+        return True
+    return False
+
+
 def _topic_boost(text: str, profile: str) -> int:
     """Raise the score when the replica is a specific case of the scenario theme."""
     query = normalize(text)
@@ -389,7 +533,13 @@ def _topic_boost(text: str, profile: str) -> int:
         ):
             continue
         boost = max(boost, 5)
-    if (
+    if _is_self_minor_query(text):
+        if _is_teen_self_profile(prof):
+            boost = max(boost, 6)
+    elif _is_other_person_child_query(text):
+        if _is_child_other_profile(prof):
+            boost = max(boost, 6)
+    elif (
         _contains_stem(prof, _MINOR_PROFILE)
         and _contains_stem(query, _MINOR_QUERY)
         and _contains_stem(query, _MINOR_PRODUCT)
@@ -421,8 +571,19 @@ def _is_generic_transfer_query(text: str) -> bool:
     return not leftover
 
 
+def _is_non_bank_passport_question(text: str) -> bool:
+    """«Где взять паспорт» is civic, not a bank product."""
+    if _contains_stem(text, _BANK_PRODUCT_STEMS):
+        return False
+    if _contains_stem(text, ("паспортн", "фамили")):
+        return False
+    return bool(_CIVIC_PASSPORT_RE.search(normalize(text)))
+
+
 def _scenario_conflicts_query(text: str, scenario: DialogScenario) -> bool:
     """Block an obviously wrong theme, e.g. Apple Pay vs crypto exchange."""
+    if _is_non_bank_passport_question(text):
+        return True
     query = normalize(text)
     blob = normalize(f"{scenario.title} {scenario.root_question} {scenario.code}")
     if _contains_stem(query, _CRYPTO_BLOCKERS) and not _contains_stem(
@@ -433,6 +594,14 @@ def _scenario_conflicts_query(text: str, scenario: DialogScenario) -> bool:
     if _contains_stem(query, _MINOR_QUERY) and _contains_stem(query, _MINOR_PRODUCT):
         if _contains_stem(blob, ("крипт", "автокредит")):
             return True
+    if _is_self_minor_query(text) and _contains_stem(blob, ("внук", "6 лет")):
+        return True
+    if (
+        _is_other_person_child_query(text)
+        and _contains_stem(blob, ("14-лет",))
+        and not _contains_stem(blob, ("внук",))
+    ):
+        return True
     # «Перевод в РФ» is a destination, not any phone transfer. Embeddings
     # otherwise pull generic «перевод по телефону» into this scenario.
     if _contains_stem(blob, ("рф", "росси")) and _contains_stem(
@@ -513,12 +682,13 @@ def _score(
         if len(key_tokens) == 1:
             keyword_token = key_tokens[0]
             matched = keyword_token in token_set
-            if not matched and len(keyword_token) >= 4:
+            if not matched and len(keyword_token) >= 3:
                 matched = any(
-                    token.startswith(keyword_token)
-                    or (
-                        len(token) >= 4
-                        and keyword_token.startswith(token)
+                    len(token) >= 3
+                    and token != "обычно"
+                    and (
+                        token.startswith(keyword_token)
+                        or keyword_token.startswith(token)
                     )
                     for token in token_set
                 )
@@ -575,26 +745,105 @@ def _start_node(nodes: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
     return next(iter(nodes.values()), None)
 
 
+def _normalize_path_steps(path: Sequence[Any] | None) -> list[dict[str, str]]:
+    steps: list[dict[str, str]] = []
+    for item in path or []:
+        if isinstance(item, Mapping):
+            node_id = str(item.get("id") or item.get("node_id") or "")
+            label = str(item.get("label") or "").strip()
+        else:
+            node_id = ""
+            label = str(item or "").strip()
+        if not label:
+            continue
+        steps.append({"node_id": node_id, "label": label})
+    return steps
+
+
+def _graph_for_scenario(scenario: DialogScenario) -> dict[str, dict[str, Any]]:
+    version = getattr(scenario, "current_version", None)
+    if version is None:
+        return {}
+    return _nodes_by_id(version.graph or {})
+
+
+def _outgoing_choices(node: Mapping[str, Any]) -> list[dict[str, str]]:
+    choices: list[dict[str, str]] = []
+    for edge in node.get("edges") or []:
+        if not isinstance(edge, Mapping) or _edge_is_fallback(edge):
+            continue
+        label = str(edge.get("label") or "").strip()
+        reply = str(edge.get("reply") or "").strip()
+        if not label and not reply:
+            continue
+        choices.append({"label": label, "reply": reply or label})
+    return choices
+
+
+def _upcoming_steps(
+    node: Mapping[str, Any],
+    nodes: Mapping[str, Mapping[str, Any]],
+    *,
+    walked_ids: set[str] | None = None,
+) -> list[dict[str, str]]:
+    upcoming: list[dict[str, str]] = []
+    seen = set(walked_ids or [])
+    current_id = str(node.get("id") or "")
+    if current_id:
+        seen.add(current_id)
+    cursor: Mapping[str, Any] | None = node
+    for _ in range(32):
+        if cursor is None:
+            break
+        nxt = None
+        for edge in cursor.get("edges") or []:
+            if not isinstance(edge, Mapping) or _edge_is_fallback(edge):
+                continue
+            dest_id = str(edge.get("to") or "")
+            dest = nodes.get(dest_id)
+            if dest is not None and dest_id not in seen:
+                nxt = dest
+                break
+        if nxt is None:
+            break
+        dest_id = str(nxt.get("id") or "")
+        label = str(nxt.get("label") or "").strip()
+        seen.add(dest_id)
+        if label:
+            upcoming.append({"node_id": dest_id, "label": label})
+        cursor = nxt
+    return upcoming
+
+
 def _progress_for(
     scenario: DialogScenario,
     node: Mapping[str, Any],
-    path: list[str],
+    path: Sequence[Any] | None,
+    nodes: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> ScenarioProgress:
     label = str(node.get("label") or scenario.title)
-    next_path = list(path)
-    if not next_path or next_path[-1] != label:
-        next_path.append(label)
+    node_id = str(node.get("id") or "")
+    steps = _normalize_path_steps(path)
+    if not steps or steps[-1]["label"] != label:
+        steps.append({"node_id": node_id, "label": label})
+    elif node_id:
+        steps[-1]["node_id"] = node_id
     hint = str(node.get("hint_text") or "").strip()
     clarify = str(node.get("clarify_text") or "").strip()
     next_clarify = clarify if hint and normalize(hint) != normalize(clarify) else ""
+    graph_nodes = dict(nodes) if nodes is not None else _graph_for_scenario(scenario)
+    walked_ids = {str(item.get("node_id") or "") for item in steps if item.get("node_id")}
     return ScenarioProgress(
         code=scenario.code,
         title=scenario.title,
-        path=next_path,
-        node_id=str(node.get("id") or ""),
+        path=[item["label"] for item in steps],
+        node_id=node_id,
         next_clarify=next_clarify,
         hint_text=hint or clarify,
         node_type=str(node.get("type") or "answer"),
+        steps=steps,
+        upcoming=_upcoming_steps(node, graph_nodes, walked_ids=walked_ids),
+        choices=_outgoing_choices(node),
     )
 
 
@@ -636,14 +885,17 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
 
 
 def _graph_profile_text(graph: Mapping[str, Any] | None) -> str:
+    """Use expansion + start node only — later hints pollute embeddings."""
     parts: list[str] = []
     expansion = str((graph or {}).get("semantic_expansion") or "").strip()
     if expansion:
         parts.append(expansion)
-    for node in (graph or {}).get("nodes") or []:
+    start = _start_node(_nodes_by_id(graph or {}))
+    nodes = [start] if start is not None else []
+    for node in nodes:
         if not isinstance(node, Mapping):
             continue
-        for key in ("label", "hint_text", "clarify_text"):
+        for key in ("label", "clarify_text"):
             value = str(node.get(key) or "").strip()
             if value:
                 parts.append(value)
@@ -651,13 +903,6 @@ def _graph_profile_text(graph: Mapping[str, Any] | None) -> str:
             text = str(example or "").strip()
             if text:
                 parts.append(text)
-        for edge in node.get("edges") or []:
-            if not isinstance(edge, Mapping):
-                continue
-            for key in ("label", "reply"):
-                value = str(edge.get(key) or "").strip()
-                if value:
-                    parts.append(value)
     return ". ".join(parts)[:2400]
 
 
@@ -835,16 +1080,21 @@ def _pick_semantic(
     threshold: float,
     margin: float,
     lexical_scores: dict[str, int] | None = None,
+    text: str = "",
 ) -> tuple[float, DialogScenario, dict[str, Any], dict[str, Any]] | None:
     if not ranked:
         return None
     best = ranked[0]
     if best[0] < threshold:
         return None
+    scores = lexical_scores or {}
     runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
     if best[0] - runner_up >= margin:
+        if scores.get(best[1].code, 0) <= 0 and not _has_start_signal(
+            text, best[1], best[3]
+        ):
+            return None
         return best
-    scores = lexical_scores or {}
     close = [
         item
         for item in ranked
@@ -880,6 +1130,7 @@ def _match_start_semantic(
         threshold=auto,
         margin=margin,
         lexical_scores=lexical_scores,
+        text=text,
     )
     if picked is None:
         return None
@@ -906,6 +1157,52 @@ def _iter_start_candidates(
             continue
         candidates.append((scenario, graph, start))
     return candidates
+
+
+_WEAK_START_STEMS = {
+    "банк",
+    "взят",
+    "где",
+    "данны",
+    "документ",
+    "кака",
+    "каки",
+    "како",
+    "клиент",
+    "надо",
+    "нужно",
+    "новый",
+    "отделе",
+    "оформ",
+    "паспорт",
+    "продукт",
+    "сдела",
+    "хочу",
+}
+
+
+def _content_stems(text: str) -> set[str]:
+    return {
+        token[:4] if len(token) > 4 else token
+        for token in _tokens(normalize(text))
+        if token not in _MATCH_STOPWORDS and len(token) >= 4
+    } - _WEAK_START_STEMS
+
+
+def _has_start_signal(
+    text: str,
+    scenario: DialogScenario,
+    start: Mapping[str, Any],
+) -> bool:
+    """True when the replica shares a distinctive stem with the start theme."""
+    if _is_non_bank_passport_question(text):
+        return False
+    query = _content_stems(_with_aliases(text))
+    blob = _content_stems(
+        f"{scenario.title} {scenario.root_question} {start.get('label') or ''} "
+        f"{' '.join(str(item) for item in start.get('examples') or [])}"
+    )
+    return bool(query and blob and query & blob)
 
 
 def _lexical_start_scores(
@@ -951,10 +1248,22 @@ def _suggest_start(
     text: str,
     *,
     channel: str = "",
+    exclude_code: str = "",
 ) -> SuggestedScenario | None:
-    if _match_start(text, channel=channel) is not None:
+    started = _match_start(text, channel=channel)
+    if started is not None:
+        if exclude_code and started[0].code != exclude_code:
+            return SuggestedScenario(
+                code=started[0].code,
+                title=started[0].title,
+                confidence=0.88,
+            )
         return None
-    candidates = _iter_start_candidates(channel)
+    candidates = [
+        item
+        for item in _iter_start_candidates(channel)
+        if not exclude_code or item[0].code != exclude_code
+    ]
     auto, suggest, _margin, suggest_margin = _semantic_thresholds(text)
     lexical = _lexical_start_scores(text, candidates)
     lexical_scores = {item[1].code: item[0] for item in lexical}
@@ -963,6 +1272,7 @@ def _suggest_start(
         threshold=suggest,
         margin=suggest_margin,
         lexical_scores=lexical_scores,
+        text=text,
     )
     if picked is not None and picked[0] < auto:
         return SuggestedScenario(
@@ -990,6 +1300,332 @@ def _edge_examples(edge: Mapping[str, Any], target: Mapping[str, Any]) -> list[s
     return examples
 
 
+def _query_wants_card(text: str) -> bool:
+    norm = normalize(text)
+    if re.search(r"без\s+карт", norm):
+        return False
+    return "карт" in norm
+
+
+def _edge_is_with_card(edge: Mapping[str, Any], target: Mapping[str, Any]) -> bool:
+    blob = normalize(
+        f"{edge.get('to') or ''} {edge.get('label') or ''} {target.get('id') or ''} {target.get('label') or ''}"
+    )
+    if "без карт" in blob or "without_card" in blob:
+        return False
+    return "with_card" in blob or "с карточк" in blob
+
+
+def _clarify_choice_tokens(node: Mapping[str, Any]) -> set[str]:
+    """Distinctive words from «A или B» alternatives in the current question."""
+    clarify = normalize(
+        f"{node.get('clarify_text') or ''} {node.get('hint_text') or ''}"
+    )
+    choices: set[str] = set()
+    for left, right in re.findall(r"(\w+)\s+или\s+(\w+)", clarify):
+        for part in (left, right):
+            if part not in _MATCH_STOPWORDS and len(part) >= 4:
+                choices.add(part)
+    return choices
+
+
+def _reply_answers_current_clarify(text: str, node: Mapping[str, Any]) -> bool:
+    """True when a short replica picks one of the current «или» options."""
+    tokens = [
+        token
+        for token in _tokens(normalize(text))
+        if token not in _MATCH_STOPWORDS and len(token) >= 4
+    ]
+    choices = _clarify_choice_tokens(node)
+    if not choices or not tokens or len(tokens) > 2:
+        return False
+    return any(
+        token == option
+        or token.startswith(option)
+        or option.startswith(token)
+        for token in tokens
+        for option in choices
+    )
+
+
+_YEAR_CMP_YOUNGER = (
+    "меньш",
+    "не старше",
+    "не больше",
+    "не более",
+    "до ",
+    "молож",
+    "укладыва",
+)
+_YEAR_CMP_OLDER = ("старше", "больше", "более", "превыш")
+_QUESTION_OPENER_RE = re.compile(
+    r"(?i)^\s*(?:а\s+)?(?:сколько|скольки|как(?:ой|ая|ие|им)?|где|когда|"
+    r"почему|зачем|что\s+такое|какой|какая|какие)\b"
+)
+_EDGE_CLASSIFY_PROMPT = (
+    "Ты классификатор ответов клиента в сценарии банка. "
+    "Даны вопрос оператора и варианты ответа. "
+    "Выбери ОДИН id варианта, который клиент имел в виду, "
+    "даже если он ответил своими словами или назвал число. "
+    "Верни NONE если это другой вопрос, отказ оформлять "
+    "или реплика не про эти варианты. "
+    "Ответ — только id или NONE, без пояснений."
+)
+
+
+def _looks_like_question(text: str) -> bool:
+    folded = (text or "").strip()
+    if folded.endswith("?"):
+        return True
+    return bool(_QUESTION_OPENER_RE.search(folded))
+
+
+def _edge_blob(edge: Mapping[str, Any], target: Mapping[str, Any] | None = None) -> str:
+    parts = [
+        str(edge.get("label") or ""),
+        str(edge.get("reply") or ""),
+        " ".join(str(item) for item in edge.get("keywords") or []),
+    ]
+    if target is not None:
+        parts.append(str(target.get("label") or ""))
+    return normalize(" ".join(parts))
+
+
+def _iter_regular_edges(
+    node: Mapping[str, Any],
+    nodes: Mapping[str, Mapping[str, Any]],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    found: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for edge in node.get("edges") or []:
+        if not isinstance(edge, Mapping) or _edge_is_fallback(edge):
+            continue
+        target = nodes.get(str(edge.get("to") or ""))
+        if target is None:
+            continue
+        found.append((dict(edge), dict(target)))
+    return found
+
+
+def _edge_year_side(blob: str) -> str | None:
+    stripped = re.sub(r"не\s+(старше|больше|более)", " ", blob)
+    younger = any(marker in blob for marker in _YEAR_CMP_YOUNGER)
+    older = any(marker in stripped for marker in _YEAR_CMP_OLDER)
+    if younger and not older:
+        return "younger"
+    if older and not younger:
+        return "older"
+    return None
+
+
+def _node_year_threshold(node: Mapping[str, Any], blobs: Sequence[str]) -> float | None:
+    haystack = normalize(
+        " ".join(
+            [
+                str(node.get("clarify_text") or ""),
+                str(node.get("hint_text") or ""),
+                *blobs,
+            ]
+        )
+    )
+    match = re.search(r"(\d{1,2})\s*(?:лет|года|год)", haystack)
+    if match:
+        return float(match.group(1))
+    match = re.search(
+        r"(?:меньш\w*|старше|больше|до|не старше)\s*(\d{1,2})",
+        haystack,
+    )
+    if match:
+        return float(match.group(1))
+    return None
+
+
+def _extract_manufacture_ages(text: str) -> list[float]:
+    now_year = timezone.now().year
+    ages: list[float] = []
+    for match in re.finditer(r"\b((?:19|20)\d{2})\b", normalize(text)):
+        year = int(match.group(1))
+        if 1980 <= year <= now_year:
+            ages.append(float(now_year - year))
+    return ages
+
+
+def _quantities_for_threshold(text: str) -> list[float]:
+    values = list(_extract_ages(text))
+    if values:
+        return values
+    values = _extract_manufacture_ages(text)
+    if values:
+        return values
+    tokens = [token for token in _tokens(normalize(text)) if token not in _MATCH_STOPWORDS]
+    if len(tokens) > 5:
+        return []
+    found: list[float] = []
+    for token in tokens:
+        if token.isdigit() and 1 <= int(token) <= 80:
+            found.append(float(token))
+        elif token in _WORD_NUMBERS:
+            found.append(float(_WORD_NUMBERS[token]))
+    return found
+
+
+def _match_edge_by_year_threshold(
+    text: str,
+    node: Mapping[str, Any],
+    nodes: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    if _looks_like_question(text):
+        return None
+    folded = normalize(text)
+    if re.search(r"кредит|ставк|процент|льготн", folded) and not re.search(
+        r"выпуск|машин|авто|пробег|салон",
+        folded,
+    ):
+        return None
+    pairs = _iter_regular_edges(node, nodes)
+    if len(pairs) < 2:
+        return None
+    sides: dict[str, dict[str, Any]] = {}
+    blobs: list[str] = []
+    for edge, target in pairs:
+        blob = _edge_blob(edge, target)
+        blobs.append(blob)
+        side = _edge_year_side(blob)
+        if side and side not in sides:
+            sides[side] = target
+    if "younger" not in sides or "older" not in sides:
+        return None
+    threshold = _node_year_threshold(node, blobs)
+    if threshold is None:
+        return None
+    quantities = _quantities_for_threshold(text)
+    if not quantities:
+        return None
+    value = quantities[0]
+    if value <= threshold:
+        return sides["younger"]
+    return sides["older"]
+
+
+def _match_edge_by_embedding(
+    text: str,
+    node: Mapping[str, Any],
+    nodes: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    if not _semantic_enabled() or _looks_like_question(text):
+        return None
+    pairs = _iter_regular_edges(node, nodes)
+    if len(pairs) < 2:
+        return None
+    try:
+        from core.embeddings import embed_query_with_backend, embed_texts_with_backend
+
+        query_vector, query_backend = embed_query_with_backend(text)
+        profiles = [
+            _edge_blob(edge, target) or str(edge.get("to") or "")
+            for edge, target in pairs
+        ]
+        option_vectors, option_backend = embed_texts_with_backend(profiles)
+    except Exception as exc:  # noqa: BLE001 — routing must fail open
+        logger.warning("scenario edge embedding unavailable: %s", exc)
+        return None
+    if query_backend not in {"http", "local"} or option_backend != query_backend:
+        return None
+    ranked = sorted(
+        (
+            (_cosine_similarity(query_vector, vector), target)
+            for vector, (_edge, target) in zip(option_vectors, pairs, strict=True)
+        ),
+        key=lambda item: item[0],
+        reverse=True,
+    )
+    if not ranked:
+        return None
+    best_score, best_target = ranked[0]
+    runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
+    if best_score < 0.78 or best_score - runner_up < 0.04:
+        return None
+    return best_target
+
+
+def _parse_edge_choice(raw: str, allowed: set[str]) -> str | None:
+    cleaned = re.sub(r"(?is)^\s*(ответ|id|вариант)\s*:\s*", "", raw or "").strip()
+    if not cleaned or re.search(r"(?i)\bnone\b", cleaned):
+        return None
+    token = re.split(r"[\s,.;:]+", cleaned, maxsplit=1)[0].strip("«»\"'")
+    if token in allowed:
+        return token
+    folded = cleaned.casefold()
+    hits = [item for item in allowed if item.casefold() in folded]
+    if len(hits) == 1:
+        return hits[0]
+    return None
+
+
+def _classify_edge_with_llm(
+    text: str,
+    node: Mapping[str, Any],
+    nodes: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    if _looks_like_question(text):
+        return None
+    if (os.environ.get("MODEL_GATEWAY_MODE") or "").strip().lower() in {
+        "stub",
+        "0",
+        "false",
+        "off",
+    }:
+        return None
+    pairs = _iter_regular_edges(node, nodes)
+    if len(pairs) < 2:
+        return None
+    options = []
+    allowed: set[str] = set()
+    for edge, target in pairs:
+        option_id = str(target.get("id") or edge.get("to") or "").strip()
+        if not option_id:
+            continue
+        allowed.add(option_id)
+        options.append(
+            f"{option_id}: {edge.get('reply') or edge.get('label') or target.get('label')}"
+        )
+    if len(options) < 2:
+        return None
+    question = str(node.get("clarify_text") or node.get("hint_text") or node.get("label") or "")
+    try:
+        from core.model_gateway import ModelGateway
+
+        gateway = ModelGateway.from_registry()
+        response = gateway.chat(
+            "sufler_cc",
+            [
+                {"role": "system", "content": _EDGE_CLASSIFY_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Вопрос оператора:\n{question}\n\n"
+                        f"Варианты:\n" + "\n".join(options) + "\n\n"
+                        f"Реплика клиента:\n{text}\n"
+                    ),
+                },
+            ],
+            temperature=0.0,
+            max_tokens=20,
+        )
+        message = (response.get("choices") or [{}])[0]
+        raw = ""
+        if isinstance(message, Mapping):
+            payload = message.get("message") or message
+            if isinstance(payload, Mapping):
+                raw = str(payload.get("content") or "")
+        chosen = _parse_edge_choice(raw, allowed)
+    except Exception as exc:  # noqa: BLE001 — keep lexical routing
+        logger.warning("scenario edge llm unavailable: %s", exc)
+        return None
+    if not chosen:
+        return None
+    return nodes.get(chosen)
+
+
 def _score_edge(text: str, edge: Mapping[str, Any], target: Mapping[str, Any]) -> int:
     keywords = list(edge.get("keywords") or [])
     keywords.append(str(edge.get("label") or ""))
@@ -998,6 +1634,8 @@ def _score_edge(text: str, edge: Mapping[str, Any], target: Mapping[str, Any]) -
     if norm in {"да", "ага", "угу"} and any(normalize(k) in {"да"} for k in keywords):
         score = max(score, 2)
     if norm in {"нет"} and any(normalize(k) in {"нет"} for k in keywords):
+        score = max(score, 2)
+    if _query_wants_card(text) and _edge_is_with_card(edge, target):
         score = max(score, 2)
     return score
 
@@ -1029,6 +1667,20 @@ def _match_edge(
         return regular[1]
     if fallback_target is not None and _is_other_reply(text):
         return fallback_target
+    if _query_wants_card(text):
+        for edge in node.get("edges") or []:
+            if not isinstance(edge, Mapping) or _edge_is_fallback(edge):
+                continue
+            target = nodes.get(str(edge.get("to") or ""))
+            if target is not None and _edge_is_with_card(edge, target):
+                return target
+    smart = (
+        _match_edge_by_year_threshold(text, node, nodes)
+        or _match_edge_by_embedding(text, node, nodes)
+        or _classify_edge_with_llm(text, node, nodes)
+    )
+    if smart is not None:
+        return smart
     return None
 
 
@@ -1040,7 +1692,9 @@ def _save_session(session_key: str, progress: ScenarioProgress, scenario: Dialog
         defaults={
             "scenario": scenario,
             "node_id": progress.node_id,
-            "path": progress.path,
+            "path": progress.steps or progress.path,
+            "paused": False,
+            "off_topic_count": 0,
         },
     )
 
@@ -1069,6 +1723,173 @@ def _load_session(session_key: str) -> DialogScenarioSession | None:
     return session
 
 
+def _session_progress(session: DialogScenarioSession) -> ScenarioProgress | None:
+    version = session.scenario.current_version
+    if version is None:
+        return None
+    nodes = _nodes_by_id(version.graph or {})
+    current = nodes.get(session.node_id) or _start_node(nodes)
+    if current is None:
+        return None
+    return _progress_for(session.scenario, current, list(session.path or []), nodes)
+
+
+def _paused_on_topic(
+    text: str,
+    session: DialogScenarioSession,
+    *,
+    channel: str,
+) -> bool:
+    version = session.scenario.current_version
+    if version is None:
+        return False
+    nodes = _nodes_by_id(version.graph or {})
+    current = nodes.get(session.node_id) or _start_node(nodes)
+    if current is not None and (
+        _match_edge(text, current, nodes) is not None
+        or _reply_answers_current_clarify(text, current)
+    ):
+        return True
+    started = _match_start(text, channel=channel)
+    return bool(started and started[0].code == session.scenario.code)
+
+
+def pause_scenario_session(session_key: str) -> ScenarioProgress | None:
+    session = _load_session(session_key)
+    if session is None:
+        return None
+    session.paused = True
+    session.off_topic_count = 0
+    session.save(update_fields=("paused", "off_topic_count", "updated_at"))
+    return _session_progress(session)
+
+
+def resume_scenario(
+    session_key: str,
+    *,
+    mode: str = "checkpoint",
+    channel: str = "",
+    node_id: str = "",
+) -> ScenarioProgress | None:
+    session = _load_session(session_key)
+    if session is None:
+        return None
+    if mode == "start":
+        return enter_scenario(
+            session.scenario.code,
+            session_key=session_key,
+            channel=channel,
+        )
+    if mode == "step":
+        target = (node_id or "").strip()
+        if not target:
+            return None
+        version = session.scenario.current_version
+        if version is None:
+            return None
+        nodes = _nodes_by_id(version.graph or {})
+        node = nodes.get(target)
+        if node is None:
+            return None
+        steps = _normalize_path_steps(session.path or [])
+        index = next(
+            (i for i, item in enumerate(steps) if item["node_id"] == target),
+            -1,
+        )
+        if index < 0:
+            return None
+        progress = _progress_for(session.scenario, node, steps[:index], nodes)
+        session.node_id = progress.node_id
+        session.path = progress.steps
+        session.paused = False
+        session.off_topic_count = 0
+        session.save(
+            update_fields=(
+                "node_id",
+                "path",
+                "paused",
+                "off_topic_count",
+                "updated_at",
+            )
+        )
+        return progress
+    session.paused = False
+    session.off_topic_count = 0
+    session.save(update_fields=("paused", "off_topic_count", "updated_at"))
+    return _session_progress(session)
+
+
+def _resolve_paused_session(
+    text: str,
+    session: DialogScenarioSession,
+    *,
+    channel: str,
+) -> ScenarioTurn | None:
+    """Keep a paused session out of the graph; drop it after two off-topic turns."""
+    on_topic = _paused_on_topic(text, session, channel=channel)
+    if on_topic:
+        session.off_topic_count = 0
+        session.save(update_fields=("off_topic_count", "updated_at"))
+        return ScenarioTurn(
+            paused_progress=_session_progress(session),
+            suggested=_suggest_start(
+                text,
+                channel=channel,
+                exclude_code=session.scenario.code,
+            ),
+        )
+    if classify_turn(text):
+        return ScenarioTurn(paused_progress=_session_progress(session))
+    session.off_topic_count = int(session.off_topic_count or 0) + 1
+    if session.off_topic_count >= 2:
+        clear_scenario_session(session.session_key)
+        return None
+    session.save(update_fields=("off_topic_count", "updated_at"))
+    return ScenarioTurn(
+        paused_progress=_session_progress(session),
+        suggested=_suggest_start(
+            text,
+            channel=channel,
+            exclude_code=session.scenario.code,
+        ),
+    )
+
+
+def _start_question_already_answered(text: str, start: Mapping[str, Any]) -> bool:
+    clarify = str(start.get("clarify_text") or start.get("hint_text") or "")
+    folded = clarify.casefold()
+    return bool(
+        _query_wants_card(text)
+        and re.search(r"с карт\w* или без|без карт\w* или с", folded)
+    )
+
+
+def _progress_after_start(
+    scenario: DialogScenario,
+    graph: Mapping[str, Any],
+    start: Mapping[str, Any],
+    text: str,
+    session_key: str,
+) -> ScenarioProgress:
+    nodes = _nodes_by_id(graph)
+    nxt = None
+    if _start_question_already_answered(text, start):
+        nxt = _match_edge(text, start, nodes)
+    path: list[Any] = []
+    node: Mapping[str, Any] = start
+    if nxt is not None and str(nxt.get("id") or "") != str(start.get("id") or ""):
+        path = [
+            {
+                "node_id": str(start.get("id") or ""),
+                "label": str(start.get("label") or scenario.title),
+            }
+        ]
+        node = nxt
+    progress = _progress_for(scenario, node, path, nodes)
+    _save_session(session_key, progress, scenario)
+    return progress
+
+
 def enter_scenario(
     code: str,
     *,
@@ -1086,10 +1907,11 @@ def enter_scenario(
         return None
     if not _scenario_supports_channel(scenario, channel):
         return None
-    start = _start_node(_nodes_by_id(version.graph or {}))
+    nodes = _nodes_by_id(version.graph or {})
+    start = _start_node(nodes)
     if start is None:
         return None
-    progress = _progress_for(scenario, start, [])
+    progress = _progress_for(scenario, start, [], nodes)
     _save_session(session_key, progress, scenario)
     return progress
 
@@ -1103,6 +1925,11 @@ def resolve_scenario_turn(
     """Match a scenario turn. Off-script replies leave the graph so KB can answer."""
     key = (session_key or "").strip()[:160]
     session = _load_session(key)
+    if session and getattr(session, "paused", False):
+        paused_turn = _resolve_paused_session(text, session, channel=channel)
+        if paused_turn is not None:
+            return paused_turn
+        session = _load_session(key)
     if session and session.scenario.current_version:
         scenario = session.scenario
         nodes = _nodes_by_id(session.scenario.current_version.graph or {})
@@ -1110,23 +1937,50 @@ def resolve_scenario_turn(
         if current is not None:
             nxt = _match_edge(text, current, nodes)
             if nxt is not None:
-                progress = _progress_for(scenario, nxt, list(session.path or []))
+                progress = _progress_for(scenario, nxt, list(session.path or []), nodes)
                 if nxt.get("edges"):
                     _save_session(key, progress, scenario)
                 else:
                     clear_scenario_session(key)
                 return ScenarioTurn(progress=progress, session_active=bool(nxt.get("edges")))
-            started = _match_start(text, channel=channel)
-            if started and started[0].code != scenario.code:
-                new_scenario, _graph, start = started
-                progress = _progress_for(new_scenario, start, [])
-                _save_session(key, progress, new_scenario)
+            if _reply_answers_current_clarify(text, current):
+                progress = _progress_for(scenario, current, list(session.path or []), nodes)
+                _save_session(key, progress, scenario)
                 return ScenarioTurn(progress=progress, session_active=True)
+            started = _match_start(text, channel=channel)
+            if started:
+                new_scenario, graph, start = started
+                same_code = new_scenario.code == scenario.code
+                start_answer = _match_edge(text, start, _nodes_by_id(graph))
+                if (
+                    not same_code
+                    or start_answer is not None
+                    or _start_question_already_answered(text, start)
+                ):
+                    progress = _progress_after_start(
+                        new_scenario,
+                        graph,
+                        start,
+                        text,
+                        key,
+                    )
+                    return ScenarioTurn(progress=progress, session_active=True)
             if classify_turn(text):
                 return ScenarioTurn(session_active=True)
-            clear_scenario_session(key)
+            if _is_decline_reply(text):
+                clear_scenario_session(key)
+                return ScenarioTurn(
+                    unmatched=True,
+                    suggested=SuggestedScenario(
+                        code=scenario.code,
+                        title=scenario.title,
+                        confidence=0.72,
+                    ),
+                )
+            paused = pause_scenario_session(key)
             return ScenarioTurn(
                 unmatched=True,
+                paused_progress=paused,
                 suggested=SuggestedScenario(
                     code=scenario.code,
                     title=scenario.title,
@@ -1136,9 +1990,8 @@ def resolve_scenario_turn(
 
     started = _match_start(text, channel=channel)
     if started is not None:
-        scenario, _graph, start = started
-        progress = _progress_for(scenario, start, [])
-        _save_session(key, progress, scenario)
+        scenario, graph, start = started
+        progress = _progress_after_start(scenario, graph, start, text, key)
         return ScenarioTurn(progress=progress, session_active=True)
     suggested = _suggest_start(text, channel=channel)
     if suggested is not None:

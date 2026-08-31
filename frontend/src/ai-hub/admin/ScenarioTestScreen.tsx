@@ -191,7 +191,11 @@ export function ScenarioTestScreen({
                     {step.hint_text ? <p>{step.hint_text}</p> : null}
                     {step.clarify_text ? <p className="scr-message__question">{step.clarify_text}</p> : null}
                     {step.selected_edge ? <span>Распознана ветка: {step.selected_edge}</span> : null}
-                    {step.terminal ? <b>Сценарий завершён</b> : null}
+                    {step.terminal ? (
+                      <div className="scr-chat__finished" role="status">
+                        Сценарий окончен
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="scr-message scr-message--error">
@@ -241,13 +245,30 @@ export function ScenarioTestScreen({
           {error ? <Card>{error}</Card> : null}
         </section>
 
-        <aside className="scr-run-inspector">
+        <aside className={`scr-run-inspector${currentStep?.terminal ? ' scr-run-inspector--done' : ''}`}>
           <h2>Текущий путь</h2>
+          {result?.path.length ? (
+            <p className="scr-run-inspector__meta">Шаг {result.path.length} из {result.path.length}</p>
+          ) : null}
           <ol>
-            {(result?.path ?? []).map((item, index) => <li key={`${item}-${index}`}><span>{index + 1}</span>{item}</li>)}
+            {(result?.path ?? []).map((item, index) => {
+              const current = index === (result?.path.length ?? 0) - 1
+              return (
+                <li key={`${item}-${index}`} className={current ? 'is-current' : undefined}>
+                  <span>{index + 1}</span>
+                  {item}
+                </li>
+              )
+            })}
           </ol>
           {!result?.path.length ? <p>Путь появится после первой реплики.</p> : null}
-          {currentStep ? (
+          {currentStep?.terminal ? (
+            <section className="scr-run-inspector__done">
+              <small>Сценарий окончен</small>
+              <strong>{currentStep.label}</strong>
+              <span>Диалог по этой ветке закрыт</span>
+            </section>
+          ) : currentStep ? (
             <section>
               <small>Активный шаг</small>
               <strong>{currentStep.label}</strong>

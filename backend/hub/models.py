@@ -501,6 +501,8 @@ class DialogScenarioSession(models.Model):
     )
     node_id = models.CharField(max_length=64)
     path = models.JSONField(default=list)
+    paused = models.BooleanField(default=False)
+    off_topic_count = models.PositiveSmallIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

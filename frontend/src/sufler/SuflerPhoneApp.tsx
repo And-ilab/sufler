@@ -18,6 +18,8 @@ import {
   type ClientHistorySummaryBlock,
 } from '../online-chat/api/onlineChatApi'
 import type { SuflerHint } from './api/suggest'
+import { NO_SUZ_HINT_MESSAGE } from './emptyHintCopy'
+import { ScenarioPathWidget } from './ScenarioPathWidget'
 import './SuflerPhoneApp.css'
 
 export interface SuflerPhoneAppProps {
@@ -55,6 +57,8 @@ const DEFAULT_DEMO: TranscriptLine[] = [
       {
         rank: 1,
         text: 'Перевод в РФ доступен через «Платежи» → «За рубеж». Проверьте суточный лимит клиента и статус карты.',
+        detail_text:
+          'Перевод в РФ доступен через «Платежи» → «За рубеж» в мобильном банке или интернет-банке. Перед отправкой проверьте суточный лимит клиента, статус карты и разрешение на международные операции. Если лимит исчерпан, направьте клиента в отделение или предложите оформить изменение лимита в приложении. Актуальные комиссии и лимиты сверяйте в статье СУЗ.',
         relevance_score: 0.92,
         relevance_percent: 92,
         citations: [
@@ -69,6 +73,8 @@ const DEFAULT_DEMO: TranscriptLine[] = [
       {
         rank: 2,
         text: 'Для перевода нужен действующий лимит на международные операции в интернет-банке или мобильном приложении.',
+        detail_text:
+          'Для перевода нужен действующий лимит на международные операции в интернет-банке или мобильном приложении. Если операция отклоняется, сначала проверьте, включены ли платежи за рубеж и не исчерпан ли суточный лимит. При необходимости подскажите клиенту, где в приложении открыть раздел лимитов, либо направьте в отделение с паспортом.',
         relevance_score: 0.87,
         relevance_percent: 87,
         citations: [
@@ -83,6 +89,8 @@ const DEFAULT_DEMO: TranscriptLine[] = [
       {
         rank: 3,
         text: 'Комиссия зависит от суммы и валюты; актуальные тарифы — в справочнике СУЗ раздела переводов.',
+        detail_text:
+          'Комиссия зависит от суммы, валюты и способа перевода. Не называйте конкретный процент или сумму, если их нет в открытой статье СУЗ. Откройте справочник раздела переводов, назовите клиенту только подтверждённые условия и при расхождении направьте в отделение.',
         relevance_score: 0.81,
         relevance_percent: 81,
         citations: [
@@ -121,29 +129,28 @@ function ClientSummaryCard({
   loading?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
+  const toggle = () => setExpanded((current) => !current)
 
   return (
     <div
       className="sufler-phone__summary"
       tabIndex={0}
-      role="group"
+      role="button"
       aria-label="Summary клиента"
       aria-expanded={expanded}
       data-testid="client-summary"
-      onMouseEnter={() => setExpanded(true)}
-      onMouseLeave={() => setExpanded(false)}
-      onFocus={() => setExpanded(true)}
-      onBlur={(event) => {
-        const next = event.relatedTarget as Node | null
-        if (!next || !event.currentTarget.contains(next)) {
-          setExpanded(false)
+      onClick={toggle}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          toggle()
         }
       }}
     >
       <Card className="sufler-phone__summary-card">
         <strong>Summary клиента</strong>
         {expanded ? (
-          <div className="sufler-phone__summary-body">
+          <div className="sufler-phone__summary-body" onClick={(event) => event.stopPropagation()}>
             <p>{summary}</p>
             <hr />
             <small>Детальный summary</small>
@@ -214,6 +221,7 @@ export function SuflerPhoneApp({
     pushAsr,
     enterSuggested,
     exitActive,
+    resumeActive,
     resetConversation,
     setRecognitionPaused,
   } = useSuflerTranscript({
@@ -223,8 +231,10 @@ export function SuflerPhoneApp({
     getKbSlugs: kb.getKbSlugs,
   })
   const liveTurns = useRef<Record<DualSpeaker, string>>({ client: '', operator: '' })
+  const dialogueRef = useRef<HTMLElement>(null)
   const [typedLine, setTypedLine] = useState('')
   const [feedbackByHint, setFeedbackByHint] = useState<Record<string, HintFeedbackChoice>>({})
+  const [resumeOpen, setResumeOpen] = useState(false)
 
   const handleUtterance = (speaker: DualSpeaker, text: string, isFinal: boolean) => {
     if (!liveTurns.current[speaker]) {
@@ -270,7 +280,51 @@ export function SuflerPhoneApp({
     clearImitation()
   }
 
+  const visibleError = [live.error, error].find(
+    (message) =>
+      Boolean(message)
+      && !/ошибка суфлёра|повторите попытку/i.test(message),
+  )
   const blocks = useMemo(() => lines, [lines])
+  const lastScenarioHintTurnId = useMemo(() => {
+    for (let index = blocks.length - 1; index >= 0; index -= 1) {
+      const line = blocks[index]
+      if (
+        line.speaker === 'client'
+        && line.hints?.some((hint) => hint.source_type === 'scenario')
+      ) {
+        return line.turnId
+      }
+    }
+    return ''
+  }, [blocks])
+  const dialogueTail = useMemo(
+    () =>
+      [
+        blocks.length,
+        scenario?.code ?? '',
+        scenario?.path?.join('>') ?? '',
+        ...blocks.map((line) => `${line.id}:${line.hints?.length ?? 0}:${line.hintStatus ?? ''}`),
+      ].join('|'),
+    [blocks, scenario],
+  )
+
+  useEffect(() => {
+    const scroller = dialogueRef.current
+    if (!scroller) return
+    const stickToBottom = () => {
+      scroller.scrollTop = scroller.scrollHeight
+    }
+    stickToBottom()
+    const frame = window.requestAnimationFrame(stickToBottom)
+    const observer = new ResizeObserver(stickToBottom)
+    observer.observe(scroller)
+    Array.from(scroller.children).forEach((child) => observer.observe(child))
+    return () => {
+      window.cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [dialogueTail, live.caption, live.systemCaption])
 
   const handleHintFeedback = (
     line: TranscriptLine,
@@ -304,7 +358,7 @@ export function SuflerPhoneApp({
           <p className="sufler-phone__eyebrow">Суфлёр · активный звонок</p>
           <h1>Телефония</h1>
         </div>
-        {suggestedScenario && !scenario?.path?.length ? (
+        {suggestedScenario && (!scenario?.path?.length || scenario.paused) ? (
           <button
             type="button"
             className="sufler-phone__lamp"
@@ -327,6 +381,23 @@ export function SuflerPhoneApp({
           </button>
         ) : null}
         <div className="sufler-phone__meta">
+          {embedded ? null : (
+            <a
+              href="/ai-hub/admin"
+              className="sufler-phone__settings"
+              aria-label="Настройки"
+              title="Настройки"
+              data-testid="admin-center-gear"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.9 1h-3.8a.5.5 0 0 0-.49.42l-.36 2.54c-.59.24-1.13.55-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.81 8.48a.5.5 0 0 0 .12.64L4.96 10.7c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.23.4.32.64.22l2.39-.96c.5.39 1.04.7 1.63.94l.36 2.54c.05.24.25.42.49.42h3.8c.24 0 .44-.18.49-.42l.36-2.54c.59-.24 1.13-.55 1.63-.94l2.39.96c.24.1.51 0 .64-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"
+                />
+              </svg>
+              Настройки
+            </a>
+          )}
           <KbPicker
             catalog={kb.catalog}
             selected={kb.selected}
@@ -353,31 +424,85 @@ export function SuflerPhoneApp({
         </div>
       </header>
       {scenario?.path?.length ? (
-        <div className="sufler-phone__scenario" data-testid="sufler-scenario-path">
-          <span className="sufler-phone__scenario-label">Активный сценарий</span>
-          <strong>{scenario.code}</strong>
-          <span className="sufler-phone__scenario-path">
-            {scenario.path.map((part, index) => (
-              <span key={`${part}-${index}`}>
-                {index > 0 ? <i>→</i> : null}
-                {part}
-              </span>
-            ))}
-          </span>
-          <Button variant="ghost" onClick={() => void exitActive()}>
-            Выйти из сценария
-          </Button>
+        <div className="sufler-phone__scenario-wrap">
+          <div
+            className={`sufler-phone__scenario${
+              scenario.completed
+                ? ' sufler-phone__scenario--completed'
+                : scenario.paused
+                  ? ' sufler-phone__scenario--paused'
+                  : ''
+            }`}
+            data-testid="sufler-scenario-path"
+          >
+            <span className="sufler-phone__scenario-label">
+              {scenario.completed
+                ? 'Сценарий окончен'
+                : scenario.paused
+                  ? 'Сценарий на паузе'
+                  : 'Активный сценарий'}
+            </span>
+            <strong>{scenario.code}</strong>
+            <span className="sufler-phone__scenario-path">
+              {scenario.path.map((part, index) => (
+                <span key={`${part}-${index}`}>
+                  {index > 0 ? <i>→</i> : null}
+                  {part}
+                </span>
+              ))}
+            </span>
+            {scenario.completed ? null : scenario.paused ? (
+              <Button onClick={() => setResumeOpen(true)}>Вернуться в сценарий</Button>
+            ) : (
+              <Button onClick={() => void exitActive()}>Выйти из сценария</Button>
+            )}
+          </div>
+          {resumeOpen ? (
+            <div
+              className="sufler-phone__resume-dialog"
+              role="dialog"
+              aria-labelledby="sufler-resume-title"
+              data-testid="sufler-scenario-resume-dialog"
+            >
+              <p id="sufler-resume-title">Вернуться в сценарий</p>
+              <div className="sufler-phone__resume-actions">
+                <Button
+                  onClick={() => {
+                    setResumeOpen(false)
+                    void resumeActive('start')
+                  }}
+                >
+                  С начала
+                </Button>
+                <Button
+                  onClick={() => {
+                    setResumeOpen(false)
+                    void resumeActive('checkpoint')
+                  }}
+                >
+                  С места остановки
+                </Button>
+                <Button variant="ghost" onClick={() => setResumeOpen(false)}>
+                  Отмена
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
-      {(error || live.error) && (
+      {visibleError ? (
         <Card className="sufler-phone__error" role="alert">
-          {live.error || error}
+          {visibleError}
         </Card>
-      )}
+      ) : null}
 
       <div className="sufler-phone__workspace">
-        <section className="sufler-phone__dialogue" aria-label="Диалог звонка">
+        <section
+          ref={dialogueRef}
+          className="sufler-phone__dialogue"
+          aria-label="Диалог звонка"
+        >
           {blocks.map((line) => {
             const hints = line.speaker === 'client' ? line.hints?.slice(0, 5) ?? [] : []
             return (
@@ -408,53 +533,77 @@ export function SuflerPhoneApp({
                   <p>{line.text}</p>
                 </Card>
 
-                {hints.length > 0 && (
-                  <div
-                    className={`sufler-phone__hints${
-                      hints.some((hint) => hint.source_type === 'scenario')
-                        ? ' sufler-phone__hints--scenario'
-                        : ''
-                    }`}
-                    data-testid={`hints-${line.turnId}`}
-                  >
-                    <div className="sufler-phone__hints-title">
-                      {hints.some((hint) => hint.source_type === 'scenario')
-                        ? 'Сценарий ведёт оператора'
-                        : 'Подсказки по базе знаний'}
+                {hints.length > 0 && (() => {
+                  const scenarioHints = hints.filter((hint) => hint.source_type === 'scenario')
+                  const kbHints = hints.filter((hint) => hint.source_type !== 'scenario')
+                  const split = scenarioHints.length > 0 && kbHints.length > 0
+                  const renderHint = (hint: SuflerHint, index: number, total: number) => (
+                    <HintCard
+                      key={`${line.turnId}-${hint.rank}`}
+                      className={hint.source_type === 'scenario' ? 'sufler-phone__scenario-hint' : ''}
+                      title={hintTitle(hint)}
+                      relevance={`${hint.relevance_percent}%`}
+                      relevancePercent={hint.relevance_percent}
+                      relevanceStatus={relevanceStatusFromPercent(hint.relevance_percent)}
+                      suzLink={hintSuz(hint)}
+                      showFeedback={hint.source_type !== 'scenario'}
+                      feedbackValue={feedbackByHint[`${line.turnId}-${hint.rank}`] ?? null}
+                      onFeedback={(choice) => handleHintFeedback(line, hint, choice)}
+                      hintIndex={index + 1}
+                      hintTotal={total}
+                      showMore={hint.source_type !== 'scenario'}
+                      detailText={(hint.detail_text || hint.text).trim()}
+                      defaultExpanded={index === 0}
+                      data-testid={`hint-${line.turnId}-${hint.rank}`}
+                    >
+                      <span>{hint.text}</span>
+                    </HintCard>
+                  )
+                  return (
+                    <div
+                      className={`sufler-phone__hints${
+                        scenarioHints.length ? ' sufler-phone__hints--scenario' : ''
+                      }${split ? ' sufler-phone__hints--split' : ''}`}
+                      data-testid={`hints-${line.turnId}`}
+                    >
+                      {split ? (
+                        <>
+                          <div className="sufler-phone__hints-col sufler-phone__hints-col--scenario">
+                            <div className="sufler-phone__hints-title">Сценарий ведёт оператора</div>
+                            {scenarioHints.map((hint, index) =>
+                              renderHint(hint, index, scenarioHints.length),
+                            )}
+                          </div>
+                          <div className="sufler-phone__hints-col sufler-phone__hints-col--kb">
+                            <div className="sufler-phone__hints-title">Подсказки по базе знаний</div>
+                            {kbHints.map((hint, index) => renderHint(hint, index, kbHints.length))}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="sufler-phone__hints-title">
+                            {scenarioHints.length
+                              ? 'Сценарий ведёт оператора'
+                              : 'Подсказки по базе знаний'}
+                          </div>
+                          {hints.map((hint, index) => renderHint(hint, index, hints.length))}
+                        </>
+                      )}
+                      {scenario?.completed
+                      && scenarioHints.length
+                      && line.turnId === lastScenarioHintTurnId ? (
+                        <div className="sufler-phone__scenario-finished" role="status">
+                          Сценарий окончен
+                        </div>
+                      ) : null}
                     </div>
-                    {hints.map((hint, index) => (
-                      <HintCard
-                        key={`${line.turnId}-${hint.rank}`}
-                        className={hint.source_type === 'scenario' ? 'sufler-phone__scenario-hint' : ''}
-                        title={hintTitle(hint)}
-                        relevance={`${hint.relevance_percent}%`}
-                        relevancePercent={hint.relevance_percent}
-                        relevanceStatus={relevanceStatusFromPercent(hint.relevance_percent)}
-                        suzLink={hintSuz(hint)}
-                        showFeedback
-                        feedbackValue={feedbackByHint[`${line.turnId}-${hint.rank}`] ?? null}
-                        onFeedback={(choice) => handleHintFeedback(line, hint, choice)}
-                        hintIndex={index + 1}
-                        hintTotal={hints.length}
-                        defaultExpanded={index === 0}
-                        data-testid={`hint-${line.turnId}-${hint.rank}`}
-                      >
-                        <span>{hint.text}</span>
-                        {hint.source_type === 'scenario' && hint.operator_tip ? (
-                          <span className="sufler-phone__scenario-question">
-                            <strong>Затем спросите клиента</strong>
-                            {hint.operator_tip}
-                          </span>
-                        ) : null}
-                      </HintCard>
-                    ))}
-                  </div>
-                )}
+                  )
+                })()}
                 {line.speaker === 'client' && line.isFinal && hints.length === 0 && (line.hintStatus === 'loading' || line.hintMessage) && (
                   <div className="sufler-phone__hints-empty" role="status">
                     {line.hintStatus === 'loading'
                       ? (line.hintMessage || 'Подсказки загружаются…')
-                      : (line.hintMessage || 'Подсказки не пришли. Повторите реплику или проверьте DeepSeek на сервере.')}
+                      : (line.hintMessage || NO_SUZ_HINT_MESSAGE)}
                   </div>
                 )}
               </article>
@@ -481,6 +630,13 @@ export function SuflerPhoneApp({
             {...clientHistory.data}
             loading={clientHistory.loading}
           />
+          {scenario?.path?.length ? (
+            <ScenarioPathWidget
+              scenario={scenario}
+              onReturn={() => void resumeActive('checkpoint')}
+              onReturnToStep={(nodeId) => void resumeActive('step', nodeId)}
+            />
+          ) : null}
         </aside>
       </div>
 

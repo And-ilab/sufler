@@ -560,6 +560,10 @@ def _schemas() -> dict[str, Any]:
             "type": "object",
             "properties": {
                 "text": {"type": "string"},
+                "detail_text": {
+                    "type": "string",
+                    "description": "Fuller KB article for the ⋯ expand on knowledge-base hints.",
+                },
                 "relevance": {"type": "number"},
                 "citations": {
                     "type": "array",

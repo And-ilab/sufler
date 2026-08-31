@@ -20,18 +20,23 @@ django.setup()
 from django.contrib.auth import get_user_model  # noqa: E402
 from django.contrib.auth.models import Group  # noqa: E402
 from django.test import Client, TestCase  # noqa: E402
+from django.utils import timezone  # noqa: E402
 
 from auth.roles import ROLES_BY_CODE  # noqa: E402
 from hub.models import DialogScenario  # noqa: E402
 from hub.scenario_catalog import (  # noqa: E402
     ALL_SCENARIOS,
     DRAFT_SCENARIOS,
+    NO_HINT_EXAMPLES,
     REFERENCE_SCENARIOS,
 )
 from hub.scenario_service import upsert_from_catalog  # noqa: E402
 from hub.scenario_service import attach_semantic_expansion  # noqa: E402
 from orchestrator.scenario_engine import (  # noqa: E402
+    _match_edge,
     _match_start,
+    _nodes_by_id,
+    _parse_edge_choice,
     _score,
     _semantic_profile,
     _topic_boost,
@@ -39,7 +44,14 @@ from orchestrator.scenario_engine import (  # noqa: E402
     clear_scenario_session,
     enter_scenario,
 )
-from orchestrator.sufler import suggest  # noqa: E402
+from orchestrator.sufler import (  # noqa: E402
+    _compose_scenario_spoken,
+    _leading_question_from_choices,
+    _sanitize_spoken_phrase,
+    pause_active_scenario,
+    resume_active_scenario,
+    suggest,
+)
 
 
 class DialogScenarioCatalogTest(TestCase):
@@ -67,13 +79,65 @@ class DialogScenarioCatalogTest(TestCase):
             for node in scenario["graph"]["nodes"]
             for edge in node.get("edges", [])
         ]
-        self.assertEqual(len(edges), 118)
+        self.assertEqual(len(edges), 129)
         for edge in edges:
             with self.subTest(label=edge["label"]):
                 reply = edge.get("reply", "").strip()
                 self.assertTrue(reply)
                 self.assertNotIn("Выбираю вариант", reply)
                 self.assertGreater(_score(reply, edge["keywords"], []), 0)
+
+    def test_autoloan_start_has_only_new_or_used_fork(self):
+        car = next(item for item in ALL_SCENARIOS if item["code"] == "CC-SCR-004")
+        start = next(node for node in car["graph"]["nodes"] if node["id"] == "start")
+        self.assertEqual(start["clarify_text"], "Автомобиль новый или с пробегом?")
+        self.assertEqual([edge["to"] for edge in start["edges"]], ["new_auto", "used_auto"])
+        self.assertEqual([edge["reply"] for edge in start["edges"]], ["Новый", "С пробегом"])
+        by_id = {node["id"]: node for node in car["graph"]["nodes"]}
+        self.assertEqual(
+            [edge["to"] for edge in by_id["new_auto"]["edges"]],
+            ["partner", "regular"],
+        )
+        self.assertEqual(
+            [edge["to"] for edge in by_id["used_auto"]["edges"]],
+            ["used_ok", "used_too_old"],
+        )
+        self.assertEqual(
+            [edge["to"] for edge in by_id["used_ok"]["edges"]],
+            ["partner", "regular"],
+        )
+        self.assertNotIn("belgee", by_id)
+        self.assertNotIn("other_brand", by_id)
+        self.assertNotIn("electro", by_id)
+        self.assertNotIn("ice", by_id)
+        for node in car["graph"]["nodes"]:
+            self.assertLessEqual(len(node.get("edges") or []), 2, node["id"])
+
+    def test_used_car_age_paraphrases_match_without_yes_no_keywords(self):
+        car = next(item for item in ALL_SCENARIOS if item["code"] == "CC-SCR-004")
+        nodes = _nodes_by_id(car["graph"])
+        used = nodes["used_auto"]
+        self.assertEqual(_match_edge("Прошло 8 лет.", used, nodes)["id"], "used_ok")
+        self.assertEqual(_match_edge("машине 8 лет", used, nodes)["id"], "used_ok")
+        self.assertEqual(_match_edge("восемь лет с выпуска", used, nodes)["id"], "used_ok")
+        recent_year = timezone.now().year - 8
+        self.assertEqual(
+            _match_edge(f"авто {recent_year} года", used, nodes)["id"],
+            "used_ok",
+        )
+        self.assertEqual(_match_edge("12 лет уже", used, nodes)["id"], "used_too_old")
+        self.assertEqual(_match_edge("машине 15 лет", used, nodes)["id"], "used_too_old")
+        self.assertIsNone(_match_edge("совсем другой ответ", used, nodes))
+        self.assertIsNone(
+            _match_edge("Скольки лет действует льготный кредит?", used, nodes)
+        )
+
+    def test_edge_choice_parser_reads_id_or_none(self):
+        allowed = {"used_ok", "used_too_old"}
+        self.assertEqual(_parse_edge_choice("used_ok", allowed), "used_ok")
+        self.assertEqual(_parse_edge_choice("id: used_too_old.", allowed), "used_too_old")
+        self.assertIsNone(_parse_edge_choice("NONE", allowed))
+        self.assertIsNone(_parse_edge_choice("partner", allowed))
 
     def test_all_linear_drafts_define_explicit_clarify_replies(self):
         catalog_path = BACKEND_ROOT / "hub" / "scenario_catalog.py"
@@ -140,11 +204,33 @@ class ScenarioEngineGatingTest(TestCase):
     def setUp(self):
         for payload in REFERENCE_SCENARIOS:
             upsert_from_catalog(payload, username="test")
+        from qu.admin_service import hash_question
+        from qu.models import QuReferenceExample
+
+        for intent_id, question in NO_HINT_EXAMPLES:
+            text = (question or "").strip()
+            if not text:
+                continue
+            digest = hash_question(text)
+            QuReferenceExample.objects.get_or_create(
+                question_hash=digest,
+                defaults={
+                    "question": text[:1000],
+                    "intent_id": intent_id[:128],
+                    "locale": "ru",
+                    "status": QuReferenceExample.STATUS_ACTIVE,
+                    "is_active": True,
+                    "source": QuReferenceExample.SOURCE_MANUAL,
+                    "created_by": "test",
+                    "channel": "telephony",
+                },
+            )
         env = patch.dict(
             os.environ,
             {
                 "SUFLER_ALLOW_UNGROUNDED": "0",
                 "MODEL_GATEWAY_MODE": "stub",
+                "SUFLER_LLM_BASE_URL": "",
             },
             clear=False,
         )
@@ -164,7 +250,7 @@ class ScenarioEngineGatingTest(TestCase):
         self.assertEqual(result["hints"], [])
 
     def test_incomplete_final_fragment_skips_hints(self):
-        for replica in ("Терминал не.", "Хочу взять деньги в."):
+        for replica in ("Терминал не.", "Хочу взять деньги в.", "Можете хочу."):
             with self.subTest(replica=replica):
                 result = suggest(replica, session_id=f"incomplete-{replica}")
                 self.assertEqual(result["blocked_reason"], "no_hint_needed")
@@ -309,7 +395,41 @@ class ScenarioEngineGatingTest(TestCase):
             session_id="call-grandchild-1",
         )
         self.assertEqual(result["scenario"]["code"], "CC-SCR-002")
-        self.assertIn("законный представитель", result["hints"][0]["text"])
+        spoken = result["hints"][0]["text"]
+        self.assertIn("законный представитель", spoken.casefold())
+        self.assertIn("или", spoken.casefold())
+        self.assertIn("?", spoken)
+        self.assertNotIn("четырнадцать", spoken.casefold())
+        self.assertNotIn("я дедушка", spoken.casefold())
+        self.assertNotIn("я мама", spoken.casefold())
+        self.assertTrue(result["scenario"].get("upcoming"))
+        self.assertGreater(
+            len(result["scenario"]["steps"]) + len(result["scenario"]["upcoming"]),
+            1,
+        )
+        self.assertTrue(result["scenario"].get("choices"))
+
+    def test_leading_question_asks_operator_not_client_voice(self):
+        question = _leading_question_from_choices(
+            [
+                {
+                    "label": "До 14 лет, иное лицо",
+                    "reply": "Я дедушка, законным представителем не являюсь",
+                },
+                {
+                    "label": "Законный представитель",
+                    "reply": "Я мама и законный представитель ребёнка",
+                },
+            ]
+        )
+        self.assertEqual(question, "Вы законный представитель или нет?")
+        spoken = _compose_scenario_spoken(
+            "Кто открывает счёт — вы законный представитель или иное лицо?",
+            question,
+        )
+        self.assertIn("законный представитель", spoken.casefold())
+        self.assertNotIn("я дедушка", spoken.casefold())
+        self.assertNotIn("я мама", spoken.casefold())
 
     def test_question_only_scenario_does_not_repeat_operator_tip(self):
         result = suggest(
@@ -317,7 +437,13 @@ class ScenarioEngineGatingTest(TestCase):
             session_id="question-only-scenario",
         )
         self.assertEqual(result["scenario"]["code"], "CC-SCR-007")
-        self.assertIn("За какой период", result["hints"][0]["text"])
+        spoken = result["hints"][0]["text"]
+        self.assertIn("?", spoken)
+        self.assertTrue(
+            "русск" in spoken.casefold()
+            or "английск" in spoken.casefold()
+            or "выписк" in spoken.casefold()
+        )
         self.assertEqual(result["hints"][0]["operator_tip"], "")
 
     def test_transfer_to_rf_walks_card_then_mobile_bank(self):
@@ -394,6 +520,34 @@ class ScenarioEngineGatingTest(TestCase):
         self.assertEqual(result["scenario"]["code"], "CC-SCR-001")
         self.assertEqual(result["hints"][0]["source_type"], "scenario")
 
+    def test_self_minor_does_not_start_grandchild_scenario(self):
+        for index, replica in enumerate(
+            (
+                "Я несовершеннолетний, хочу открыть счёт",
+                "от своего лица хочу открыть счёт, мне 14",
+                "я маленький, хочу оформить карту",
+            ),
+            start=1,
+        ):
+            with self.subTest(replica=replica):
+                result = suggest(replica, session_id=f"self-minor-{index}")
+                self.assertEqual(result["scenario"]["code"], "CC-SCR-001")
+                self.assertEqual(result["hints"][0]["source_type"], "scenario")
+
+    def test_other_person_starts_grandchild_not_teen_scenario(self):
+        for index, replica in enumerate(
+            (
+                "я другое лицо, хочу открыть счёт ребёнку",
+                "я дедушка, хочу открыть счёт внуку",
+                "хочу открыть счёт внуку, ему 6 лет",
+            ),
+            start=1,
+        ):
+            with self.subTest(replica=replica):
+                result = suggest(replica, session_id=f"other-person-{index}")
+                self.assertEqual(result["scenario"]["code"], "CC-SCR-002")
+                self.assertEqual(result["hints"][0]["source_type"], "scenario")
+
     def test_apple_pay_starts_nfc_not_crypto(self):
         for index, replica in enumerate(
             (
@@ -411,6 +565,61 @@ class ScenarioEngineGatingTest(TestCase):
                     (result.get("suggested_scenario") or {}).get("code"),
                     "CC-SCR-009",
                 )
+
+    def test_autoloan_binary_walk_reaches_documents_step(self):
+        session = "car-long-walk"
+        first = suggest("хочу взять автокредит", session_id=session)
+        self.assertEqual(first["scenario"]["code"], "CC-SCR-004")
+        self.assertTrue(first["scenario"].get("upcoming"))
+        self.assertGreater(len(first["scenario"]["steps"]) + len(first["scenario"]["upcoming"]), 1)
+        spoken = first["hints"][0]["text"]
+        self.assertIn("?", spoken)
+        self.assertTrue("новый" in spoken.casefold() or "пробег" in spoken.casefold())
+        suggest("Новый", session_id=session)
+        suggest("У партнёра", session_id=session)
+        suggest("Нужна программа «Лёгка ехаць»", session_id=session)
+        suggest("Подам заявку в отделении", session_id=session)
+        done = suggest("Да, документы на авто уже есть", session_id=session)
+        self.assertEqual(done["scenario"]["code"], "CC-SCR-004")
+        self.assertTrue(done["scenario"].get("completed"))
+        self.assertGreaterEqual(len(done["scenario"]["path"]), 5)
+        self.assertIn("документы", " ".join(done["scenario"]["path"]).casefold())
+
+    def test_regular_car_one_word_answer_stays_on_autoloan_scenario(self):
+        started = suggest("хочу взять автокредит", session_id="car-ordinary")
+        self.assertEqual(started["scenario"]["code"], "CC-SCR-004")
+        answered = suggest("Обычный.", session_id="car-ordinary")
+        self.assertEqual(answered["scenario"]["code"], "CC-SCR-004")
+        self.assertIsNone(answered.get("suggested_scenario"))
+        self.assertTrue(
+            any(hint.get("source_type") == "scenario" for hint in answered["hints"])
+        )
+        spoken = " ".join(
+            hint["text"]
+            for hint in answered["hints"]
+            if hint.get("source_type") == "scenario"
+        ).casefold()
+        self.assertNotIn("обычный или электро", spoken)
+
+    def test_adverb_obychno_does_not_take_regular_loan_branch(self):
+        suggest("хочу взять автокредит", session_id="car-usually")
+        suggest("Обычный.", session_id="car-usually")
+        vague = suggest("Обычно.", session_id="car-usually")
+        self.assertEqual(vague["blocked_reason"], "no_hint_needed")
+        self.assertFalse(
+            any(hint.get("source_type") == "scenario" for hint in vague.get("hints") or [])
+        )
+        partner = suggest(
+            "Покупаю автомобиль у партнёра банка",
+            session_id="car-usually",
+        )
+        self.assertEqual(partner["scenario"]["code"], "CC-SCR-004")
+        spoken = " ".join(
+            hint["text"]
+            for hint in partner["hints"]
+            if hint.get("source_type") == "scenario"
+        ).casefold()
+        self.assertNotIn("мобильное приложение", spoken)
 
     def test_car_loan_paraphrases_start_scenario(self):
         for index, replica in enumerate(
@@ -433,6 +642,60 @@ class ScenarioEngineGatingTest(TestCase):
         )
         self.assertEqual(result["scenario"]["code"], "CC-SCR-002")
 
+    def test_civic_passport_question_does_not_switch_to_statement_scenario(self):
+        started = suggest("хочу взять автокредит", session_id="car-passport")
+        self.assertEqual(started["scenario"]["code"], "CC-SCR-004")
+        suggest("Новый", session_id="car-passport")
+        suggest("У партнёра", session_id="car-passport")
+        suggest("Нужна программа «Лёгка ехаць»", session_id="car-passport")
+        asked = suggest("А где мне взять паспорт?", session_id="car-passport")
+        self.assertNotEqual((asked.get("scenario") or {}).get("code"), "CC-SCR-007")
+        spoken = " ".join(
+            hint["text"]
+            for hint in asked.get("hints") or []
+            if hint.get("source_type") == "scenario"
+        ).casefold()
+        self.assertNotIn("за какой период", spoken)
+        self.assertNotIn("мини-выписка", spoken)
+        self.assertEqual(asked.get("blocked_reason"), "no_hint_needed")
+        self.assertEqual(asked.get("hints"), [])
+
+    def test_semantic_passport_query_does_not_enter_visa_statement(self):
+        scenarios = list(DialogScenario.objects.all())
+        vectors = {
+            scenario.pk: (
+                [1.0, 0.0]
+                if scenario.code == "CC-SCR-007"
+                else [0.0, 1.0]
+            )
+            for scenario in scenarios
+        }
+        signature = ((1, "passport-not-visa"),)
+        with (
+            patch(
+                "orchestrator.scenario_engine._semantic_signature",
+                return_value=signature,
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_signature",
+                signature,
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_backend",
+                "http",
+            ),
+            patch(
+                "orchestrator.scenario_engine._semantic_cache_vectors",
+                vectors,
+            ),
+            patch(
+                "core.embeddings.embed_query_with_backend",
+                return_value=([1.0, 0.0], "http"),
+            ),
+        ):
+            matched = _match_start("А где мне взять паспорт?")
+        self.assertIsNone(matched)
+
     def test_off_script_reply_leaves_scenario_instead_of_repeating_step(self):
         started = suggest(
             "хочу взять автокредит",
@@ -443,15 +706,53 @@ class ScenarioEngineGatingTest(TestCase):
             "Покупаю автомобиль у партнёра банка",
             session_id="car-off-script",
         )
-        self.assertIn("партнёр", " ".join(partner["scenario"]["path"]).casefold())
+        self.assertIn("новый", " ".join(partner["scenario"]["path"]).casefold())
         declined = suggest("Нет, не оформляем.", session_id="car-off-script")
-        self.assertIsNone(declined["scenario"])
+        self.assertIsNone(declined.get("scenario"))
         self.assertFalse(
             any(hint.get("source_type") == "scenario" for hint in declined["hints"])
         )
         suggested = declined.get("suggested_scenario")
         self.assertIsNotNone(suggested)
         self.assertEqual(suggested["code"], "CC-SCR-004")
+
+    def test_natural_used_car_age_advances_autoloan_scenario(self):
+        session = "car-age-8"
+        suggest("хочу взять автокредит", session_id=session)
+        suggest("С пробегом", session_id=session)
+        answered = suggest("Прошло 8 лет.", session_id=session)
+        self.assertEqual(answered["scenario"]["code"], "CC-SCR-004")
+        self.assertTrue(
+            any(
+                "не старше" in part.casefold() or "партнёр" in part.casefold()
+                for part in answered["scenario"]["path"]
+            )
+        )
+        self.assertTrue(
+            any(hint.get("source_type") == "scenario" for hint in answered["hints"])
+        )
+        spoken = " ".join(
+            hint["text"]
+            for hint in answered["hints"]
+            if hint.get("source_type") == "scenario"
+        ).casefold()
+        self.assertNotIn("17,5", spoken)
+        self.assertNotIn("17.5", spoken)
+
+    def test_llm_paraphrase_can_pick_scenario_edge(self):
+        car = next(item for item in ALL_SCENARIOS if item["code"] == "CC-SCR-004")
+        nodes = _nodes_by_id(car["graph"])
+        with patch(
+            "orchestrator.scenario_engine._classify_edge_with_llm",
+            return_value=nodes["partner"],
+        ):
+            picked = _match_edge(
+                "покупаю у официального дилера",
+                nodes["new_auto"],
+                nodes,
+            )
+        self.assertIsNotNone(picked)
+        self.assertEqual(picked["id"], "partner")
 
     def test_explicit_no_partner_still_takes_regular_loan_branch(self):
         suggest("хочу взять автокредит", session_id="car-no-partner")
@@ -476,10 +777,22 @@ class ScenarioEngineGatingTest(TestCase):
             "Скольки лет действует льготный кредит?",
             session_id="car-no-repeat",
         )
-        self.assertIsNone(mid["scenario"])
+        self.assertTrue((mid.get("scenario") or {}).get("paused"))
+        self.assertTrue(mid["scenario"].get("return_phrase"))
         self.assertFalse(
             any(hint.get("source_type") == "scenario" for hint in mid["hints"])
         )
+        thanks = suggest("спасибо", session_id="car-no-repeat")
+        self.assertTrue((thanks.get("scenario") or {}).get("paused"))
+        resumed = resume_active_scenario(
+            "car-no-repeat",
+            mode="checkpoint",
+            channel="telephony",
+            dialog_context="Клиент: хочу взять автокредит\nКлиент: спасибо",
+        )
+        self.assertFalse(resumed["scenario"].get("paused"))
+        self.assertEqual(resumed["scenario"]["code"], "CC-SCR-004")
+        self.assertTrue(resumed["hints"][0]["text"])
 
     def test_neither_option_takes_fallback_branch(self):
         started = suggest(
@@ -501,6 +814,149 @@ class ScenarioEngineGatingTest(TestCase):
         suggested = result.get("suggested_scenario")
         self.assertIsNotNone(suggested)
         self.assertEqual(suggested["code"], "CC-SCR-004")
+
+    def test_spoken_phrase_drops_suz_notes_and_question_echo(self):
+        cleaned = _sanitize_spoken_phrase(
+            "По номеру телефона РФ перевод идёт через СБП. "
+            "Уточните комиссию и лимит в статье СУЗ перед ответом.",
+            "как привязать карту к телефону",
+        )
+        self.assertIn("СБП", cleaned)
+        self.assertNotIn("СУЗ", cleaned)
+        self.assertNotIn("перед ответом", cleaned.casefold())
+
+        dialogue = _sanitize_spoken_phrase(
+            "Вы спрашиваете про карту учащегося для ребёнка 10 лет. "
+            "Счёт откроем на имя ребёнка. "
+            "Ребёнку уже есть 14 лет? С карточкой или без карточки?",
+            "ребёнку 10 лет нужна карта учащегося",
+        )
+        self.assertNotIn("Вы спрашиваете", dialogue)
+        self.assertNotIn("14", dialogue)
+        self.assertNotIn("без карточки", dialogue.casefold())
+        self.assertIn("ребёнка", dialogue.casefold())
+
+    def test_self_card_request_skips_card_or_not_question(self):
+        for index, replica in enumerate(
+            (
+                "Хочу оформить на себя карту мне 10 лет",
+                "Хочу оформить на себя карту мне 14 лет",
+                "Хочу оформить на себя карту мне 15 лет",
+            ),
+            start=1,
+        ):
+            with self.subTest(replica=replica):
+                result = suggest(replica, session_id=f"self-card-{index}")
+                self.assertEqual(result["scenario"]["code"], "CC-SCR-001")
+                spoken = " ".join(
+                    hint["text"]
+                    for hint in result["hints"]
+                    if hint.get("source_type") == "scenario"
+                ).casefold()
+                self.assertTrue(spoken)
+                self.assertNotIn("с карточкой или без", spoken)
+                self.assertTrue("счёт" in spoken or "карт" in spoken)
+                self.assertIn(
+                    "карточк",
+                    " ".join(result["scenario"]["path"]).casefold(),
+                )
+
+    def test_same_session_keeps_scenario_from_age_10_to_14(self):
+        first = suggest(
+            "Хочу оформить на себя карту мне 10 лет",
+            session_id="age-walk-card",
+        )
+        self.assertEqual(first["scenario"]["code"], "CC-SCR-001")
+        second = suggest(
+            "Хочу оформить на себя карту мне 14 лет",
+            session_id="age-walk-card",
+        )
+        self.assertEqual(second["scenario"]["code"], "CC-SCR-001")
+        self.assertTrue(second["hints"])
+        self.assertEqual(second["hints"][0]["source_type"], "scenario")
+
+    def test_compound_car_loan_question_keeps_scenario_hint(self):
+        result = suggest(
+            "Хочу взять кредит на машину, какой первоначальный взнос",
+            session_id="car-down-payment",
+        )
+        self.assertEqual(result["scenario"]["code"], "CC-SCR-004")
+        self.assertFalse(result["scenario"].get("paused"))
+        self.assertTrue(
+            any(hint.get("source_type") == "scenario" for hint in result["hints"])
+        )
+
+    def test_exit_pauses_scenario_and_two_off_topic_turns_drop_it(self):
+        started = suggest("хочу взять автокредит", session_id="pause-car")
+        self.assertEqual(started["scenario"]["code"], "CC-SCR-004")
+        paused = pause_active_scenario("pause-car")
+        self.assertTrue(paused["scenario"]["paused"])
+        first = suggest("какая сегодня погода в минске", session_id="pause-car")
+        self.assertTrue((first.get("scenario") or {}).get("paused"))
+        self.assertFalse(
+            any(hint.get("source_type") == "scenario" for hint in first["hints"])
+        )
+        second = suggest("сколько стоит проездной", session_id="pause-car")
+        self.assertIsNone(second.get("scenario"))
+
+    def test_resume_paused_scenario_from_checkpoint(self):
+        suggest("хочу взять автокредит", session_id="resume-car")
+        partner = suggest(
+            "Покупаю автомобиль у партнёра банка",
+            session_id="resume-car",
+        )
+        self.assertIn("новый", " ".join(partner["scenario"]["path"]).casefold())
+        pause_active_scenario("resume-car")
+        resumed = resume_active_scenario(
+            "resume-car",
+            mode="checkpoint",
+            channel="telephony",
+        )
+        self.assertEqual(resumed["scenario"]["code"], "CC-SCR-004")
+        self.assertFalse(resumed["scenario"].get("paused"))
+        self.assertIn("новый", " ".join(resumed["scenario"]["path"]).casefold())
+
+    def test_terminal_turn_marks_scenario_completed_with_steps(self):
+        first = suggest(
+            "надо отправить деньги в россию",
+            session_id="done-rf",
+        )
+        self.assertEqual(first["scenario"]["code"], "CC-SCR-005")
+        self.assertFalse(first["scenario"].get("completed"))
+        self.assertTrue(first["scenario"]["steps"])
+        self.assertTrue(first["scenario"]["steps"][0]["node_id"])
+        second = suggest("на карту сбера", session_id="done-rf")
+        self.assertFalse(second["scenario"].get("completed"))
+        third = suggest("через мобильный банк", session_id="done-rf")
+        self.assertTrue(third["scenario"]["completed"])
+        self.assertFalse(third["scenario"].get("paused"))
+        self.assertIn("М-банкинг", " ".join(third["scenario"]["path"]))
+        self.assertTrue(third["scenario"]["steps"])
+        self.assertTrue(all(step["node_id"] for step in third["scenario"]["steps"]))
+        self.assertTrue(third["hints"][0]["text"])
+
+    def test_resume_paused_scenario_to_chosen_step(self):
+        started = suggest("хочу взять автокредит", session_id="resume-step-car")
+        start_id = started["scenario"]["steps"][0]["node_id"]
+        self.assertTrue(start_id)
+        partner = suggest(
+            "Покупаю автомобиль у партнёра банка",
+            session_id="resume-step-car",
+        )
+        self.assertGreater(len(partner["scenario"]["path"]), 1)
+        pause_active_scenario("resume-step-car")
+        resumed = resume_active_scenario(
+            "resume-step-car",
+            mode="step",
+            node_id=start_id,
+            channel="telephony",
+            dialog_context="Клиент: хочу взять автокредит\nОператор: Автомобиль новый или с пробегом?",
+        )
+        self.assertEqual(resumed["scenario"]["code"], "CC-SCR-004")
+        self.assertFalse(resumed["scenario"].get("paused"))
+        self.assertEqual(resumed["scenario"]["node_id"], start_id)
+        self.assertEqual(len(resumed["scenario"]["path"]), 1)
+        self.assertTrue(resumed["hints"][0]["text"])
 
     def test_operator_can_enter_and_exit_suggested_scenario(self):
         entered = enter_scenario(

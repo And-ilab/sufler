@@ -32,6 +32,24 @@ export const Expanded: Story = {
   },
 }
 
+export const KnowledgeBaseWithMore: Story = {
+  args: {
+    defaultExpanded: true,
+    title: 'Переводы в РФ — лимиты',
+    relevance: '92%',
+    relevancePercent: 92,
+    showMore: true,
+    detailText:
+      'Перевод в РФ доступен через «Платежи» → «За рубеж» в мобильном банке или интернет-банке. Перед отправкой проверьте суточный лимит клиента, статус карты и разрешение на международные операции. Актуальные комиссии сверяйте в статье СУЗ.',
+    suzLink: {
+      title: 'Переводы в РФ — лимиты',
+      href: 'https://suz.local/articles/201',
+    },
+    children:
+      'Перевод в РФ доступен через «Платежи» → «За рубеж». Проверьте суточный лимит клиента и статус карты.',
+  },
+}
+
 export const WithFeedbackAndShades: Story = {
   args: {
     defaultExpanded: true,

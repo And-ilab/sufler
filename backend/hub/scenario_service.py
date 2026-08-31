@@ -193,11 +193,24 @@ def _heuristic_expansion(title: str, root_question: str) -> str:
     topic = title.strip() or root_question.strip()
     if not topic:
         return ""
+    speaker = ""
+    blob = f"{title} {root_question}".casefold()
+    if "внук" in blob or "6 лет" in blob:
+        speaker = (
+            " Клиент — другое лицо: бабушка, дедушка или родитель открывает "
+            "счёт ребёнку, внуку, на имя несовершеннолетнего, не себе."
+        )
+    elif "14-лет" in blob or "несовершеннолетн" in blob:
+        speaker = (
+            " Клиент говорит от своего лица: я несовершеннолетний, мне 14, "
+            "я маленький, хочу открыть счёт или карту себе."
+        )
     return (
         f"Тема сценария: {topic}. "
         f"Входная реплика: {root_question.strip() or topic}. "
         "Клиент может называть частные случаи, бренды, продукты, города, "
         "суммы и синонимы именно этой темы, не повторяя название дословно."
+        f"{speaker}"
     )
 
 

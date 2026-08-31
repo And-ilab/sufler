@@ -211,7 +211,7 @@ test('scenario catalog opens step editor, follows history and tests dialog', asy
   await page.getByRole('button', { name: 'Отправить' }).click()
   await expect(page.getByLabel('Тестовый диалог')).toContainText('Счёт ребёнку открывает законный представитель.')
   await page.getByLabel('Примеры вариантов ответа').getByRole('button', { name: 'Да, я законный представитель', exact: true }).click()
-  await expect(page.getByLabel('Тестовый диалог')).toContainText('Сценарий завершён')
+  await expect(page.getByLabel('Тестовый диалог')).toContainText('Сценарий окончен')
 })
 
 test('scenario creation waits for required fields and opens first step', async ({ page }) => {

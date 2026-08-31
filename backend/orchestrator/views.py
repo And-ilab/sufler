@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Mapping
 
 from django.http import HttpRequest, JsonResponse
@@ -14,10 +15,18 @@ from auth.roles import (
     PERM_SUFLER_CHAT,
     PERM_SUFLER_TELEPHONY,
 )
-from orchestrator.scenario_engine import clear_scenario_session
-from orchestrator.sufler import SuflerOrchestratorError, enter_suggested_scenario, suggest
+from orchestrator.sufler import (
+    SuflerOrchestratorError,
+    enter_suggested_scenario,
+    clear_active_scenario,
+    pause_active_scenario,
+    resume_active_scenario,
+    suggest,
+)
 from orchestrator.test_dialog import run_test_prompt
 from orchestrator.transcribe import TranscribeError, transcribe_wav
+
+logger = logging.getLogger(__name__)
 
 
 def _optional_string(payload: Mapping[str, Any], field: str) -> str:
@@ -126,8 +135,26 @@ def sufler_suggest(request: HttpRequest) -> JsonResponse:
             },
             status=400,
         )
+    except Exception:  # noqa: BLE001 — operator UI must never see a hard fail
+        logger.exception("sufler_suggest_unhandled")
+        return JsonResponse(
+            {
+                "query": "",
+                "profile": "sufler_cc",
+                "kb_id": "cc_production",
+                "kb_slugs": [],
+                "hints": [],
+                "citations_enabled": True,
+                "blocked_reason": "no_relevant_knowledge",
+                "min_relevance": 0.2,
+                "latency_ms": {"qu": 0.0, "rag": 0.0, "llm": 0.0, "total": 0.0},
+                "request_id": "",
+                "scenario": None,
+                "suggested_scenario": None,
+            }
+        )
     response = JsonResponse(result)
-    response["X-Request-ID"] = result["request_id"]
+    response["X-Request-ID"] = result.get("request_id") or ""
     return response
 
 
@@ -196,8 +223,78 @@ def sufler_scenario_exit(request: HttpRequest) -> JsonResponse:
             },
             status=400,
         )
-    clear_scenario_session(session_id)
-    return JsonResponse({"ok": True, "scenario": None, "suggested_scenario": None})
+    return JsonResponse(pause_active_scenario(session_id))
+
+
+@require_http_methods(["POST"])
+@require_permissions(
+    PERM_SUFLER_TELEPHONY,
+    PERM_SUFLER_CHAT,
+    require_all=False,
+    api=True,
+)
+def sufler_scenario_clear(request: HttpRequest) -> JsonResponse:
+    """POST /api/v1/sufler/scenario/clear — drop the session (new conversation)."""
+    try:
+        session_id, _code, _channel = _parse_scenario_session_body(request.body)
+    except SuflerOrchestratorError as exc:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"request": [str(exc)]},
+            },
+            status=400,
+        )
+    return JsonResponse(clear_active_scenario(session_id))
+
+
+def _parse_scenario_resume_body(body: bytes) -> tuple[str, str, str, str, str]:
+    session_id, _code, channel = _parse_scenario_session_body(body)
+    try:
+        payload = json.loads(body or b"{}")
+    except json.JSONDecodeError:
+        payload = {}
+    mode = "checkpoint"
+    node_id = ""
+    dialog_context = ""
+    if isinstance(payload, Mapping):
+        mode = str(payload.get("mode") or "checkpoint").strip()
+        node_id = str(payload.get("node_id") or "").strip()
+        dialog_context = str(payload.get("dialog_context") or "")
+    if mode not in {"start", "checkpoint", "step"}:
+        raise SuflerOrchestratorError("mode must be start, checkpoint or step")
+    return session_id, mode, channel, node_id, dialog_context
+
+
+@require_http_methods(["POST"])
+@require_permissions(
+    PERM_SUFLER_TELEPHONY,
+    PERM_SUFLER_CHAT,
+    require_all=False,
+    api=True,
+)
+def sufler_scenario_resume(request: HttpRequest) -> JsonResponse:
+    """POST /api/v1/sufler/scenario/resume — continue a paused scenario."""
+    try:
+        session_id, mode, channel, node_id, dialog_context = (
+            _parse_scenario_resume_body(request.body)
+        )
+        result = resume_active_scenario(
+            session_id,
+            mode=mode,
+            channel=channel,
+            node_id=node_id,
+            dialog_context=dialog_context,
+        )
+    except SuflerOrchestratorError as exc:
+        return JsonResponse(
+            {
+                "error": "validation_error",
+                "details": {"request": [str(exc)]},
+            },
+            status=400,
+        )
+    return JsonResponse(result)
 
 
 def _parse_test_dialog_body(body: bytes) -> tuple[str, str, bool]:

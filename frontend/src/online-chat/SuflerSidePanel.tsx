@@ -180,7 +180,7 @@ export function SuflerSidePanel({
               relevancePercent={hint.relevance_percent}
               relevanceStatus={relevanceStatusFromPercent(hint.relevance_percent)}
               suzLink={hintSuz(hint)}
-              showFeedback
+              showFeedback={hint.source_type !== 'scenario'}
               feedbackValue={feedbackByHint[hint.rank] ?? null}
               onFeedback={(choice) => {
                 setFeedbackByHint((current) => ({ ...current, [hint.rank]: choice }))
@@ -198,6 +198,8 @@ export function SuflerSidePanel({
               }}
               hintIndex={index + 1}
               hintTotal={hints.length}
+              showMore={hint.source_type !== 'scenario'}
+              detailText={(hint.detail_text || hint.text).trim()}
               onInsert={
                 disabled || !onInsert
                   ? undefined

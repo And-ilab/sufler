@@ -70,6 +70,7 @@ import {
   type SummaryHistoryData,
 } from './ClientSummaryCard'
 import { TopicSelect } from './TopicSelect'
+import { NO_SUZ_HINT_MESSAGE } from '../../sufler/emptyHintCopy'
 
 const CANVAS_MOCKUP_VERSION = 'v1.4.74'
 
@@ -1381,12 +1382,14 @@ type SuflerHintData = {
   title: string;
   preview: string;
   answerText: string;
+  detailText?: string;
   operatorTip?: string;
   relevance: string;
   relevanceTone: "success" | "neutral" | "warning";
   suzTitle: string;
   permalink?: string;
   highlighted?: boolean;
+  isScenario?: boolean;
 };
 
 function mapApiHintToCard(hint: SuflerHint, index: number): SuflerHintData {
@@ -1400,17 +1403,20 @@ function mapApiHintToCard(hint: SuflerHint, index: number): SuflerHintData {
   const tone: SuflerHintData["relevanceTone"] =
     percent >= 75 ? "success" : percent >= 50 ? "neutral" : "warning";
   const tip = (hint.operator_tip || "").trim();
+  const detailText = (hint.detail_text || answerText).trim();
   return {
     id: `hint-${hint.rank}-${index}`,
     title,
     preview,
     answerText,
+    detailText: detailText || undefined,
     operatorTip: tip || undefined,
     relevance: `${percent}%`,
     relevanceTone: tone,
     suzTitle: title,
     permalink: citation?.permalink?.trim() || undefined,
     highlighted: index === 0,
+    isScenario: hint.source_type === "scenario",
   };
 }
 
@@ -1611,6 +1617,8 @@ function SuflerHintCard({
   onFeedback?: (choice: SuflerFeedbackChoice) => void;
 }): JSX.Element {
   const shade = relevanceShade(t, hint.relevance);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const detailText = (hint.detailText || hint.answerText).trim();
 
   return (
     <div
@@ -1642,6 +1650,56 @@ function SuflerHintCard({
             <Text style={{ fontSize: 12, lineHeight: 1.5, color: t.text.primary, marginBottom: 12 }}>
               {hint.answerText}
             </Text>
+          ) : null}
+          {!hint.isScenario ? (
+            <button
+              type="button"
+              aria-expanded={detailOpen}
+              aria-label={detailOpen ? "Скрыть подробности из базы знаний" : "Подробнее из базы знаний"}
+              data-testid={`hint-kb-more-${hint.id}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                setDetailOpen((current) => !current);
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 28,
+                minHeight: 22,
+                marginBottom: 10,
+                padding: "0 0 2px",
+                color: detailOpen ? t.text.primary : t.text.tertiary,
+                fontSize: 16,
+                fontWeight: 800,
+                lineHeight: 1,
+                letterSpacing: "0.04em",
+                border: `1px solid ${detailOpen ? shade.borderLeft : t.stroke.tertiary}`,
+                borderRadius: 999,
+                background: detailOpen ? shade.background : t.fill.secondary,
+                cursor: "pointer",
+              }}
+            >
+              ⋯
+            </button>
+          ) : null}
+          {detailOpen && detailText ? (
+            <div
+              onClick={(event) => event.stopPropagation()}
+              style={{
+                marginBottom: 12,
+                padding: "8px 10px",
+                fontSize: 12,
+                lineHeight: 1.5,
+                color: t.text.primary,
+                whiteSpace: "pre-wrap",
+                border: `1px solid ${t.stroke.tertiary}`,
+                borderRadius: 8,
+                background: t.fill.secondary,
+              }}
+            >
+              {detailText}
+            </div>
           ) : null}
           <Row gap={6} wrap>
             <Button
@@ -1692,7 +1750,7 @@ function SuflerHintCard({
               </Callout>
             </div>
           ) : null}
-          {isExpanded ? (
+          {isExpanded && !hint.isScenario ? (
             <div onClick={(e) => e.stopPropagation()}>
               <SuflerFeedbackRow
                 t={t}
@@ -3546,10 +3604,10 @@ export function ArmOperatorView({
           } else {
             setSuflerError(
               result.blocked_reason === "no_relevant_knowledge"
-                ? "По этой реплике в выбранных базах нет близкой статьи."
-                : result.blocked_reason === "sufler_unavailable"
-                  ? "В выбранных базах нет проиндексированных статей."
-                  : "Ошибка суфлёра. Повторите попытку позже.",
+                || result.blocked_reason === "sufler_unavailable"
+                || !result.blocked_reason
+                ? NO_SUZ_HINT_MESSAGE
+                : "Ошибка суфлёра. Повторите попытку позже.",
             );
           }
         } else {

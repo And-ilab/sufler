@@ -42,6 +42,9 @@ export interface HintCardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'tit
   onFeedback?: (choice: HintFeedbackChoice) => void
   hintIndex?: number
   hintTotal?: number
+  /** KB hints: always show ⋯ at the end; click opens fuller article text. */
+  showMore?: boolean
+  detailText?: string
   children?: ReactNode
 }
 
@@ -64,6 +67,8 @@ export const HintCard = forwardRef<HTMLDivElement, HintCardProps>(
       onFeedback,
       hintIndex,
       hintTotal,
+      showMore = false,
+      detailText = '',
       className = '',
       onClick,
       onMouseEnter,
@@ -77,8 +82,10 @@ export const HintCard = forwardRef<HTMLDivElement, HintCardProps>(
   ) => {
     const [internalExpanded, setInternalExpanded] = useState(defaultExpanded)
     const [hoverExpanded, setHoverExpanded] = useState(false)
+    const [detailOpen, setDetailOpen] = useState(false)
     const [localFeedback, setLocalFeedback] = useState<HintFeedbackChoice | null>(null)
     const contentId = useId()
+    const moreId = `${contentId}-more`
     const isExpanded = expanded ?? (internalExpanded || hoverExpanded)
     const feedbackControlled = feedbackValue !== undefined
     const selectedFeedback = feedbackControlled ? feedbackValue : localFeedback
@@ -162,12 +169,45 @@ export const HintCard = forwardRef<HTMLDivElement, HintCardProps>(
           </span>
           <StatusBadge status={badgeStatus}>{relevance}</StatusBadge>
         </span>
-        <span
-          id={contentId}
-          className={`ui-hint__content ${isExpanded ? '' : 'ui-hint__content--compact'}`.trim()}
-        >
-          {children}
+        <span className="ui-hint__lead">
+          <span
+            id={contentId}
+            className={`ui-hint__content ${isExpanded ? '' : 'ui-hint__content--compact'}`.trim()}
+          >
+            {children}
+          </span>
+          {showMore ? (
+            <button
+              type="button"
+              className={`ui-hint__more${detailOpen ? ' is-open' : ''}`}
+              aria-expanded={detailOpen}
+              aria-controls={moreId}
+              aria-label={detailOpen ? 'Скрыть подробности из базы знаний' : 'Подробнее из базы знаний'}
+              data-testid="hint-kb-more"
+              onMouseDown={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setDetailOpen((current) => !current)
+              }}
+            >
+              ⋯
+            </button>
+          ) : null}
         </span>
+        {showMore && detailOpen ? (
+          <div
+            id={moreId}
+            className="ui-hint__detail"
+            onClick={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            {detailText.trim() || children}
+          </div>
+        ) : null}
         {isExpanded && suzLink?.href ? (
           <a
             className="ui-hint__suz"
