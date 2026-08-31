@@ -79,7 +79,7 @@ function clampWindowSize(width: number, height: number) {
   }
 }
 
-function clampWindowPosition(left: number, top: number, width: number, height: number) {
+function clampWindowPosition(left: number, top: number, width: number, _height: number) {
   const maxLeft = Math.max(0, window.innerWidth - Math.min(width, 80))
   const maxTop = Math.max(0, window.innerHeight - 48)
   return {

@@ -245,6 +245,7 @@ export function CcReportsScreen({
       label: `★ ${item.name}`,
       fr: 'custom',
       default_view: (item.view_mode as ReportViewMode) || 'table',
+      description: undefined as string | undefined,
     }))
     return [...source, ...templates]
   }, [catalogMeta, domain, reportType, savedTemplates])
@@ -260,6 +261,7 @@ export function CcReportsScreen({
         fr: '',
         label: reportType,
         default_view: 'table' as const,
+        description: undefined as string | undefined,
       }
     )
   }, [catalogMeta, payload, reportChoices, reportType])
@@ -596,7 +598,7 @@ export function CcReportsScreen({
                 </select>
               </label>
             </div>
-            {selected.description ? (
+            {'description' in selected && selected.description ? (
               <p className="rpt-muted" style={{ margin: '8px 0 0' }}>{selected.description}</p>
             ) : null}
           </div>
