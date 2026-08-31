@@ -195,8 +195,8 @@ services:
         ]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 90s
 
   mailpit:
     image: axllent/mailpit:v1.21
