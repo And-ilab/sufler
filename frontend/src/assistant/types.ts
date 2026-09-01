@@ -1,6 +1,19 @@
 export type FeedbackKind = 'useful' | 'incomplete' | 'incorrect'
 
-export type ToolId = 'code' | 'sql' | 'rpa' | 'document' | 'translate'
+export type ToolId = 'code' | 'sql' | 'rpa' | 'document' | 'text' | 'diagram' | 'translate'
+
+export type GeneratedDraftKind = 'text' | 'slides' | 'diagram'
+
+export interface AssistantGeneratedDraft {
+  kind: GeneratedDraftKind
+  templateId: number
+  templateName: string
+  filename: string
+  outputFormat: string
+  formatLabel?: string
+  text: string
+  fields: Record<string, string>
+}
 
 export type ToolRunState = 'idle' | 'ready' | 'running' | 'done' | 'blocked'
 
@@ -17,6 +30,8 @@ export interface AssistantSource {
 export interface AssistantAttachmentRef {
   name: string
   type?: string
+  text?: string
+  mediaKind?: string
 }
 
 export interface AssistantOcrField {
@@ -44,6 +59,10 @@ export interface AssistantMessage {
   tools?: ToolId[]
   attachments?: AssistantAttachmentRef[]
   ocr?: AssistantOcrResult
+  shortContent?: string
+  detailContent?: string
+  expanded?: boolean
+  draft?: AssistantGeneratedDraft
 }
 
 export interface AssistantToolState {
@@ -65,6 +84,8 @@ export const DEFAULT_TOOLS: AssistantToolState[] = [
   { id: 'sql', label: 'SQL', state: 'ready', detail: 'read-only' },
   { id: 'rpa', label: 'RPA', state: 'idle', detail: 'confirm' },
   { id: 'document', label: 'Документ', state: 'idle' },
+  { id: 'text', label: 'Текст', state: 'idle' },
+  { id: 'diagram', label: 'Схема', state: 'idle' },
   { id: 'translate', label: 'RU↔EN', state: 'idle' },
 ]
 

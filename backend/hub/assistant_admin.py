@@ -95,7 +95,7 @@ DEFAULT_CAPABILITIES: tuple[dict[str, Any], ...] = (
     {
         "code": "generate_document",
         "name": "Генерация документов",
-        "description": "Word/PDF по шаблону.",
+        "description": "Word/PDF/Excel/PPT/BPMN по шаблону банка.",
         "deep_link": "assistant_tools",
         "category": "tool",
         "sort_order": 30,

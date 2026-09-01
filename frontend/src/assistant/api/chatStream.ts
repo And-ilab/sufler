@@ -68,6 +68,7 @@ export async function* streamAssistantChat(input: {
   sessionId?: string
   kbSlugs?: string[]
   attachments?: ChatAttachmentPayload[]
+  expand?: boolean
   signal?: AbortSignal
 }): AsyncGenerator<ChatStreamChunk> {
   let response: Response
@@ -85,6 +86,7 @@ export async function* streamAssistantChat(input: {
         session_id: input.sessionId,
         kb_slugs: input.kbSlugs ?? [],
         attachments: input.attachments?.length ? input.attachments : undefined,
+        expand: input.expand || undefined,
         stream: true,
       }),
       signal: input.signal,
@@ -155,8 +157,11 @@ export async function* streamAssistantChat(input: {
 export async function* streamDemoChat(
   _message: string,
   signal?: AbortSignal,
+  expand = false,
 ): AsyncGenerator<ChatStreamChunk> {
-  const text = DEMO_STUB_ANSWER
+  const text = expand
+    ? `${DEMO_STUB_ANSWER} Подробнее: условия, кому подходит продукт и как его оформить — по подтверждённым банковским источникам. Срок, ставка и пакет документов указаны в карточке продукта. Заявку принимает отделение или канал дистанционного обслуживания.`
+    : DEMO_STUB_ANSWER
   const step = 18
   for (let index = 0; index < text.length; index += step) {
     if (signal?.aborted) {

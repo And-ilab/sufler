@@ -357,6 +357,50 @@ class AssistantCapability(models.Model):
         return self.code
 
 
+class AssistantDocumentTemplate(models.Model):
+    """Bank document blanks for UC-ASS-05 (Word/PDF/Excel/PPT/BPMN)."""
+
+    FORMAT_DOCX = "docx"
+    FORMAT_PDF = "pdf"
+    FORMAT_XLSX = "xlsx"
+    FORMAT_PPTX = "pptx"
+    FORMAT_BPMN = "bpmn"
+    FORMAT_TXT = "txt"
+    FORMAT_MMD = "mmd"
+    FORMAT_CHOICES = (
+        (FORMAT_DOCX, "Word"),
+        (FORMAT_PDF, "PDF"),
+        (FORMAT_XLSX, "Excel"),
+        (FORMAT_PPTX, "PowerPoint"),
+        (FORMAT_BPMN, "BPMN"),
+        (FORMAT_TXT, "Текст"),
+        (FORMAT_MMD, "Схема / ER"),
+    )
+
+    name = models.CharField(max_length=200)
+    category = models.CharField(max_length=64, default="Общее")
+    output_format = models.CharField(
+        max_length=8,
+        choices=FORMAT_CHOICES,
+        default=FORMAT_DOCX,
+        db_index=True,
+    )
+    body = models.TextField(
+        help_text="Текст бланка. Поля подставляются как {{field_id}}.",
+    )
+    fields = models.JSONField(default=list, blank=True)
+    active = models.BooleanField(default=True, db_index=True)
+    updated_by = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("category", "name")
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.output_format})"
+
+
 class SuflerPolicy(models.Model):
     """Operator hint guardrails for sufler_cc (II.3.5.2 / FR-UND-13 / FR-SUF-08/13)."""
 

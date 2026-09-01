@@ -190,7 +190,7 @@ class ModelGatewayTest(unittest.TestCase):
             "Bearer test-key",
         )
 
-    def test_sufler_uses_dedicated_llm_assistant_stays_on_ollama(self):
+    def test_sufler_and_assistant_share_deepseek_when_configured(self):
         env = {
             "MODEL_GATEWAY_MODE": "openai",
             "OPENAI_BASE_URL": "http://ollama:11434/v1",
@@ -232,6 +232,53 @@ class ModelGatewayTest(unittest.TestCase):
             sufler_call.kwargs["headers"]["Authorization"],
             "Bearer test-sufler-key",
         )
+        self.assertEqual(
+            assistant_call.args[0],
+            "https://api.deepseek.com/v1/chat/completions",
+        )
+        self.assertEqual(
+            assistant_call.kwargs["json"]["model"],
+            "deepseek-chat",
+        )
+        self.assertEqual(
+            assistant_call.kwargs["headers"]["Authorization"],
+            "Bearer test-sufler-key",
+        )
+
+    def test_assistant_stays_on_ollama_without_deepseek(self):
+        env = {
+            "MODEL_GATEWAY_MODE": "openai",
+            "OPENAI_BASE_URL": "http://ollama:11434/v1",
+            "OPENAI_API_KEY": "ollama",
+            "OPENAI_MODEL": "qwen2.5:3b",
+            "OLLAMA_BASE_URL": "http://ollama:11434",
+            "SUFLER_LLM_BASE_URL": "",
+            "SUFLER_LLM_API_KEY": "",
+            "SUFLER_LLM_MODEL": "",
+            "ASSISTANT_LLM_BASE_URL": "",
+            "ASSISTANT_LLM_API_KEY": "",
+            "ASSISTANT_LLM_MODEL": "",
+        }
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "id": "chatcmpl-ollama",
+            "object": "chat.completion",
+            "choices": [],
+        }
+        with patch.dict("os.environ", env, clear=False):
+            with patch(
+                "assistant.local_llm.active_model_id",
+                return_value="qwen2.5:3b",
+            ):
+                gateway = ModelGateway.from_registry()
+                with patch(
+                    "core.model_gateway.requests.post",
+                    return_value=response,
+                ) as post:
+                    gateway.chat("assistant_bank", self.messages)
+                    assistant_call = post.call_args
+
         self.assertEqual(
             assistant_call.args[0],
             "http://ollama:11434/v1/chat/completions",

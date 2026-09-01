@@ -288,6 +288,81 @@ export async function listAssistantCapabilities(): Promise<AssistantCapability[]
   return body.items
 }
 
+export type DocTemplateFormat = 'docx' | 'pdf' | 'xlsx' | 'pptx' | 'bpmn' | 'txt' | 'mmd'
+
+export interface DocTemplateField {
+  id: string
+  label: string
+  required?: boolean
+}
+
+export interface AssistantDocTemplate {
+  id: number
+  name: string
+  category: string
+  output_format: DocTemplateFormat
+  format_label: string
+  body: string
+  fields: DocTemplateField[]
+  active: boolean
+  updated_by: string
+  created_at: string
+  updated_at: string
+}
+
+export async function listAssistantDocTemplates(): Promise<AssistantDocTemplate[]> {
+  const response = await authedFetch('/api/admin/assistant/doc-templates/', {
+    method: 'GET',
+  })
+  const body = await parseJson<{ items: AssistantDocTemplate[] }>(response)
+  return body.items
+}
+
+export async function createAssistantDocTemplate(payload: {
+  name: string
+  category?: string
+  output_format?: DocTemplateFormat
+  body: string
+  fields?: DocTemplateField[]
+  active?: boolean
+}): Promise<AssistantDocTemplate> {
+  const response = await authedFetch('/api/admin/assistant/doc-templates/', {
+    method: 'POST',
+    csrf: true,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return parseJson(response)
+}
+
+export async function updateAssistantDocTemplate(
+  id: number,
+  payload: Partial<{
+    name: string
+    category: string
+    output_format: DocTemplateFormat
+    body: string
+    fields: DocTemplateField[]
+    active: boolean
+  }>,
+): Promise<AssistantDocTemplate> {
+  const response = await authedFetch(`/api/admin/assistant/doc-templates/${id}/`, {
+    method: 'PUT',
+    csrf: true,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return parseJson(response)
+}
+
+export async function deleteAssistantDocTemplate(id: number): Promise<void> {
+  const response = await authedFetch(`/api/admin/assistant/doc-templates/${id}/`, {
+    method: 'DELETE',
+    csrf: true,
+  })
+  await parseJson<{ ok: boolean }>(response)
+}
+
 export async function setCapabilityEnabled(
   code: string,
   enabled: boolean,

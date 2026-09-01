@@ -13,6 +13,12 @@ export interface ChatOcrPayload {
   pages?: Array<{ page?: number; text?: string; confidence?: number }>
 }
 
+export interface ChatMediaPayload {
+  kind: 'audio' | 'video' | string
+  engine?: string
+  compressed?: boolean
+}
+
 export interface ChatAttachmentPayload {
   name: string
   type: string
@@ -20,6 +26,42 @@ export interface ChatAttachmentPayload {
   content_type?: string
   size_bytes?: number
   ocr?: ChatOcrPayload
+  media?: ChatMediaPayload
+}
+
+const MEDIA_EXTENSIONS = new Set([
+  '.wav',
+  '.mp3',
+  '.m4a',
+  '.aac',
+  '.ogg',
+  '.oga',
+  '.flac',
+  '.wma',
+  '.mp4',
+  '.mov',
+  '.mkv',
+  '.webm',
+  '.avi',
+  '.m4v',
+])
+
+export function isMediaFileName(name: string): boolean {
+  return MEDIA_EXTENSIONS.has(extensionOf(name))
+}
+
+export function downloadTranscript(name: string, text: string) {
+  const stem = name.replace(/\.[^.]+$/u, '') || 'transcript'
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${stem}.transcript.txt`
+  link.rel = 'noopener'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
 
 function csrfToken(): string {

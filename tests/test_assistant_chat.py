@@ -23,6 +23,12 @@ from assistant.openapi import (  # noqa: E402
     generate_openapi_yaml,
 )
 from auth.roles import ROLES_BY_CODE  # noqa: E402
+from assistant.chat import _generation_parameters, parse_chat_request  # noqa: E402
+from assistant.idp import (  # noqa: E402
+    build_attachment_prompt,
+    split_fragments,
+    wants_summary,
+)
 from core.model_gateway import STUB_RESPONSES  # noqa: E402
 
 
@@ -105,6 +111,72 @@ class AssistantChatApiTest(TestCase):
         content, done = parse_sse_content(b"".join(response.streaming_content))
         self.assertTrue(done)
         self.assertEqual(content, STUB_RESPONSES["assistant_bank"])
+
+    def test_parse_expand_flag(self):
+        parsed = parse_chat_request({"message": "Автокредит", "stream": True})
+        self.assertFalse(parsed["expand"])
+        expanded = parse_chat_request(
+            {"message": "Автокредит", "stream": True, "expand": True}
+        )
+        self.assertTrue(expanded["expand"])
+
+    def test_attachment_only_defaults_to_summary(self):
+        parsed = parse_chat_request(
+            {
+                "stream": True,
+                "attachments": [
+                    {
+                        "type": "docx",
+                        "name": "fx.docx",
+                        "text": "Курс продажи USD 3,2500. Лимит 50 000 BYN в сутки.",
+                    }
+                ],
+            }
+        )
+        user = parsed["messages"][-1]["content"]
+        self.assertIn("Суммаризируй вложение", user)
+        self.assertIn("Фрагмент", user)
+        self.assertIn("3,2500", user)
+
+    def test_question_uses_document_fragments_not_empty_summary_hint(self):
+        prompt = build_attachment_prompt(
+            [
+                {
+                    "name": "fx.docx",
+                    "type": "docx",
+                    "text": "Для наличного обмена резиденту нужен паспорт. "
+                    "SWIFT — это перевод, а не обмен валюты. "
+                    "Лимит безналичного обмена 50 000 BYN в сутки.",
+                }
+            ],
+            "Какой лимит безналичного обмена?",
+        )
+        self.assertFalse(wants_summary("Какой лимит безналичного обмена?"))
+        self.assertIn("только по фрагментам", prompt.casefold())
+        self.assertIn("50 000", prompt)
+
+    def test_idp_splits_long_document(self):
+        words = " ".join(f"слово{index}" for index in range(500))
+        fragments = split_fragments(words)
+        self.assertGreater(len(fragments), 1)
+
+    def test_expand_uses_higher_token_budget(self):
+        short = _generation_parameters()
+        long = _generation_parameters(expand=True)
+        self.assertGreaterEqual(int(long["max_tokens"]), 2048)
+        self.assertGreaterEqual(
+            int(long["max_tokens"]), int(short["max_tokens"])
+        )
+
+    def test_default_token_budget_grows_eighteen_percent(self):
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"ASSISTANT_MAX_TOKENS": "256"}, clear=False):
+            short = _generation_parameters()
+            long = _generation_parameters(expand=True)
+        self.assertEqual(int(short["max_tokens"]), 302)
+        self.assertGreaterEqual(int(long["max_tokens"]), 4096)
+        self.assertGreater(int(long["max_tokens"]), int(short["max_tokens"]))
 
     def test_validation_and_rbac(self):
         client = Client()

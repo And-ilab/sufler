@@ -20,6 +20,14 @@ from auth.roles import (
     PERM_QU_ADMIN,
     role_codes_for_user,
 )
+from assistant.doc_templates import (
+    create_template,
+    delete_template,
+    get_template,
+    list_templates,
+    serialize_template,
+    update_template,
+)
 from hub.assistant_admin import (
     AssistantAdminError,
     create_assistant_kb,
@@ -726,6 +734,44 @@ def assistant_capability_detail(
         updated = update_capability(code, body)
     except AssistantAdminError as exc:
         if str(exc) == "capability not found":
+            return JsonResponse({"error": "not_found"}, status=404)
+        return _assistant_validation_error(exc)
+    return JsonResponse(updated)
+
+
+@require_http_methods(["GET", "POST"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_doc_templates(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        return JsonResponse({"items": list_templates()})
+    try:
+        body = _parse_json_object(request)
+        created = create_template(body, username=request.user.get_username())
+    except AssistantAdminError as exc:
+        return _assistant_validation_error(exc)
+    return JsonResponse(created, status=201)
+
+
+@require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_doc_template_detail(
+    request: HttpRequest,
+    template_id: int,
+) -> JsonResponse:
+    try:
+        if request.method == "GET":
+            return JsonResponse(serialize_template(get_template(template_id)))
+        if request.method == "DELETE":
+            delete_template(template_id)
+            return JsonResponse({"ok": True})
+        body = _parse_json_object(request)
+        updated = update_template(
+            template_id,
+            body,
+            username=request.user.get_username(),
+        )
+    except AssistantAdminError as exc:
+        if str(exc) == "template not found":
             return JsonResponse({"error": "not_found"}, status=404)
         return _assistant_validation_error(exc)
     return JsonResponse(updated)

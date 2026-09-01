@@ -18,7 +18,7 @@ export function AssistantWindowApp({
   initiallyOpen = true,
 }: AssistantWindowAppProps) {
   const [open, setOpen] = useState(initiallyOpen)
-  const [maximized, setMaximized] = useState(false)
+  const [maximized, setMaximized] = useState(true)
   const { theme: colorTheme } = useAiHubColorTheme()
 
   if (!open) {

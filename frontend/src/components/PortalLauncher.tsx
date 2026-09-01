@@ -66,6 +66,7 @@ interface ModuleWindowProps {
   roles?: readonly string[]
   settingsEntry?: SettingsMenuEntry | null
   colorTheme?: AiHubColorTheme
+  tiled?: boolean
   onClose: () => void
   onMinimize: () => void
 }
@@ -99,6 +100,7 @@ function ModuleWindow({
   roles = [],
   settingsEntry = null,
   colorTheme = 'classic',
+  tiled = false,
   onClose,
   onMinimize,
 }: ModuleWindowProps) {
@@ -133,7 +135,7 @@ function ModuleWindow({
   }
 
   const startEdgeResize = (edge: ResizeEdge) => (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (maximized) return
+    if (maximized || tiled) return
     event.stopPropagation()
     const frame = event.currentTarget.closest('.portal-module-window')
     if (!(frame instanceof HTMLElement)) return
@@ -163,7 +165,7 @@ function ModuleWindow({
   }
 
   const startMove = (event: ReactPointerEvent<HTMLElement>) => {
-    if (maximized) return
+    if (maximized || tiled) return
     if ((event.target as HTMLElement).closest('.portal-module-window__controls')) return
     const frame = event.currentTarget.closest('.portal-module-window')
     if (!(frame instanceof HTMLElement)) return
@@ -196,11 +198,13 @@ function ModuleWindow({
     <section
       className={`portal-module-window portal-module-window--${module}${
         maximized ? ' portal-module-window--maximized' : ''
-      }${position && !maximized ? ' portal-module-window--moved' : ''}${
+      }${tiled && !maximized ? ' portal-module-window--tiled' : ''}${
+        position && !maximized && !tiled ? ' portal-module-window--moved' : ''
+      }${
         dragging ? ' is-dragging' : ''
       }`}
       style={
-        maximized
+        maximized || tiled
           ? undefined
           : {
               width: `${size.width}px`,
@@ -289,7 +293,7 @@ function ModuleWindow({
         />
       )}
 
-      {!maximized
+      {!maximized && !tiled
         ? RESIZE_EDGES.map((edge) => (
             <button
               key={edge}
@@ -486,29 +490,40 @@ export function PortalLauncher({
     >
       {children}
 
-      {openWindows.has('sufler') && (
-        <ModuleWindow
-          module="sufler"
-          username={username}
-          roleLabel={roleLabel}
-          roles={roles}
-          settingsEntry={settingsEntry}
-          colorTheme={colorTheme}
-          onClose={() => closeModule('sufler')}
-          onMinimize={() => closeModule('sufler')}
-        />
-      )}
-      {openWindows.has('assistant') && (
-        <ModuleWindow
-          module="assistant"
-          username={username}
-          roleLabel={roleLabel}
-          roles={roles}
-          settingsEntry={settingsEntry}
-          colorTheme={colorTheme}
-          onClose={() => closeModule('assistant')}
-          onMinimize={() => closeModule('assistant')}
-        />
+      {openWindows.size > 0 && (
+        <div
+          className={`portal-module-desktop${
+            openWindows.size > 1 ? ' portal-module-desktop--tiled' : ''
+          }`}
+          data-testid="portal-module-desktop"
+        >
+          {openWindows.has('sufler') && (
+            <ModuleWindow
+              module="sufler"
+              username={username}
+              roleLabel={roleLabel}
+              roles={roles}
+              settingsEntry={settingsEntry}
+              colorTheme={colorTheme}
+              tiled={openWindows.size > 1}
+              onClose={() => closeModule('sufler')}
+              onMinimize={() => closeModule('sufler')}
+            />
+          )}
+          {openWindows.has('assistant') && (
+            <ModuleWindow
+              module="assistant"
+              username={username}
+              roleLabel={roleLabel}
+              roles={roles}
+              settingsEntry={settingsEntry}
+              colorTheme={colorTheme}
+              tiled={openWindows.size > 1}
+              onClose={() => closeModule('assistant')}
+              onMinimize={() => closeModule('assistant')}
+            />
+          )}
+        </div>
       )}
 
       {modules.length > 0 && menuVariant === 'card' && menuOpen && (

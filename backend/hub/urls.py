@@ -3,6 +3,8 @@ from django.urls import path
 from hub.views import (
     assistant_capabilities,
     assistant_capability_detail,
+    assistant_doc_template_detail,
+    assistant_doc_templates,
     assistant_knowledge_base_detail,
     assistant_knowledge_base_document_detail,
     assistant_knowledge_base_reindex,
@@ -110,5 +112,15 @@ urlpatterns = [
         "assistant/capabilities/<slug:code>/",
         assistant_capability_detail,
         name="assistant_capability_detail",
+    ),
+    path(
+        "assistant/doc-templates/",
+        assistant_doc_templates,
+        name="assistant_doc_templates",
+    ),
+    path(
+        "assistant/doc-templates/<int:template_id>/",
+        assistant_doc_template_detail,
+        name="assistant_doc_template_detail",
     ),
 ]

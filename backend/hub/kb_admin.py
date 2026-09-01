@@ -430,6 +430,53 @@ def _extract_doc_text(filename: str, data: bytes) -> str:
     return _validate_extracted_text(text)
 
 
+def _extract_xlsx_text(data: bytes) -> str:
+    """Read cell values from an XLSX workbook (shared strings + inline)."""
+    try:
+        with zipfile.ZipFile(BytesIO(data)) as archive:
+            names = set(archive.namelist())
+            shared: list[str] = []
+            if "xl/sharedStrings.xml" in names:
+                root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+                ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+                for item in root.findall("m:si", ns):
+                    bits = [node.text or "" for node in item.findall(".//m:t", ns)]
+                    shared.append("".join(bits))
+            sheets = sorted(
+                name
+                for name in names
+                if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
+            )
+            if not sheets:
+                raise KnowledgeBaseError("xlsx file contains no worksheets")
+            lines: list[str] = []
+            for sheet_name in sheets:
+                sheet = ET.fromstring(archive.read(sheet_name))
+                ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+                for row in sheet.findall(".//m:row", ns):
+                    values: list[str] = []
+                    for cell in row.findall("m:c", ns):
+                        value_node = cell.find("m:v", ns)
+                        if value_node is None or value_node.text is None:
+                            continue
+                        raw = value_node.text
+                        if cell.get("t") == "s":
+                            try:
+                                raw = shared[int(raw)]
+                            except (ValueError, IndexError):
+                                pass
+                        if str(raw).strip():
+                            values.append(str(raw).strip())
+                    if values:
+                        lines.append(" | ".join(values))
+    except (BadZipFile, KeyError, ET.ParseError) as exc:
+        raise KnowledgeBaseError("invalid xlsx file") from exc
+    text = "\n".join(lines).strip()
+    if not text:
+        raise KnowledgeBaseError("xlsx file contains no extractable text")
+    return text
+
+
 def _extract_pdf_text(data: bytes) -> str:
     try:
         from pypdf import PdfReader  # type: ignore
@@ -480,6 +527,8 @@ def extract_document_text(filename: str, data: bytes) -> str:
         return _extract_doc_text(filename, data)
     if extension == ".pdf":
         return _validate_extracted_text(_extract_pdf_text(data))
+    if extension == ".xlsx":
+        return _validate_extracted_text(_extract_xlsx_text(data))
     # Binary office/image formats: keep a searchable filename marker for MVP.
     stem = Path(filename).stem.replace("_", " ").replace("-", " ")
     return _validate_extracted_text(normalize_text(f"{stem} {filename}"))

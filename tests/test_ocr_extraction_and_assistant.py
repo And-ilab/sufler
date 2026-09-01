@@ -93,6 +93,82 @@ class OcrExtractionUnitTest(TestCase):
         self.assertEqual(fields["birth_date"]["value"], "16.09.1988")
         self.assertNotEqual(fields["full_name"]["value"], "ГОРОД МОСКВА")
 
+    def test_belarus_passport_mrz_not_header(self):
+        """English header + MRZ: FIO from MRZ, not REPUBLIC OF BELARUS."""
+        fields = extract_passport_fields(
+            "REPUBLIC OF BELARUS\n"
+            "PASSPORT\n"
+            "Surname\nSAYAPIN\n"
+            "Given names\nANDREI\n"
+            "Nationality\nREPUBLIC OF BELARUS\n"
+            "Passport No. MP2417879\n"
+            "P<BLRSAYAPIN<<ANDREI<<<<<<<<<<<<<<<<<<<<<<<<<<\n"
+            "MP24178795BLR8304265M28042683260483A011PB648\n"
+        )
+        self.assertEqual(fields["full_name"]["value"], "SAYAPIN ANDREI")
+        self.assertEqual(fields["surname"]["value"], "SAYAPIN")
+        self.assertEqual(fields["given_name"]["value"], "ANDREI")
+        self.assertEqual(fields["series"]["value"], "MP")
+        self.assertEqual(fields["number"]["value"], "2417879")
+        self.assertEqual(fields["document_number"]["value"], "MP2417879")
+        self.assertEqual(fields["birth_date"]["value"], "26.04.1983")
+        self.assertNotEqual(fields["full_name"]["value"], "REPUBLIC OF BELARUS")
+
+    def test_noisy_english_header_without_labels(self):
+        fields = extract_passport_fields(
+            "REPUBLIC OF BELARUS\n"
+            "PASSPORT\n"
+            "P<BLRSAYAPIN<<ANDREI<<<<<<<<<<<<<<<<<<<<<<<<<<\n"
+            "MP24178795BLR8304265M28042683260483A011PB648\n"
+        )
+        self.assertEqual(fields["full_name"]["value"], "SAYAPIN ANDREI")
+        self.assertEqual(fields["document_number"]["value"], "MP2417879")
+
+    def test_icao_sample_us_passport_mrz(self):
+        """Public ICAO TD3 example (Wikipedia / industry docs)."""
+        fields = extract_passport_fields(
+            "P<USASMITH<<JOHN<MICHAEL<<<<<<<<<<<<<<<<<<<<\n"
+            "1234567897USA8501011M2501019<<<<<<<<<<<<<<06\n"
+        )
+        self.assertEqual(fields["full_name"]["value"], "SMITH JOHN MICHAEL")
+        self.assertEqual(fields["document_number"]["value"], "123456789")
+        self.assertEqual(fields["birth_date"]["value"], "01.01.1985")
+
+    def test_azerbaijan_noisy_photo_ocr(self):
+        """Real GitHub sample: Tesseract splits MRZ; recover FIO + number."""
+        fields = extract_passport_fields(
+            "C94630262\n"
+            "QAQARIN\nQAQARIN\n"
+            "FIDAN BƏŞİR QIZI\nFIDAN\n"
+            "AZORBAYCAN/AZERBAIJAN\n"
+            "PCAZEQA\n"
+            "C94630262\n"
+            "OAZE6707297F23031072W12IMJ <<<<<<<4O\n"
+        )
+        self.assertEqual(fields["full_name"]["value"], "QAQARIN FIDAN")
+        self.assertEqual(fields["document_number"]["value"], "C94630262")
+        self.assertEqual(fields["birth_date"]["value"], "29.07.1967")
+        self.assertEqual(fields["expiry_date"]["value"], "10.03.2023")
+        doc_type, detected = extract_fields(
+            "C94630262\nQAQARIN\nQAQARIN\nFIDAN\nFIDAN\n"
+            "AZORBAYCAN/AZERBAIJAN\n"
+            "C946302620AZE67 (O7297F23031072W12IMJ\n",
+            filename="scan.jpg",
+        )
+        self.assertEqual(doc_type, "passport")
+        self.assertEqual(detected["full_name"]["value"], "QAQARIN FIDAN")
+        self.assertEqual(detected["document_number"]["value"], "C94630262")
+
+    def test_german_td3_adenauer_sample(self):
+        """Wikimedia public-domain ICAO graphic (P<D<< + 9-digit number)."""
+        fields = extract_passport_fields(
+            "P<D<<ADENAUER<<KONRAD<HERMANN<JOSEPH<<<<<<<<\n"
+            "1234567897D<<7601059M6704115<<<<<<<<<<<<<<<2\n"
+        )
+        self.assertEqual(fields["full_name"]["value"], "ADENAUER KONRAD HERMANN JOSEPH")
+        self.assertEqual(fields["document_number"]["value"], "123456789")
+        self.assertEqual(fields["birth_date"]["value"], "05.01.1976")
+
 
 @override_settings(
     CELERY_TASK_ALWAYS_EAGER=True,

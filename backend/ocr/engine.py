@@ -47,6 +47,70 @@ def _decode_embedded_text(content: bytes) -> str | None:
     return None
 
 
+def _ocr_mrz_strip(image: Any) -> str | None:
+    """Second Tesseract pass on the bottom band — ICAO MRZ is Latin + <."""
+    try:
+        import pytesseract  # type: ignore
+    except Exception:
+        return None
+    try:
+        width, height = image.size
+        if width < 40 or height < 40:
+            return None
+        gray = image.convert("L")
+        chunks: list[str] = []
+        bands = (
+            (int(height * 0.55), int(height * 0.88)),
+            (int(height * 0.72), height),
+        )
+        config = (
+            "--psm 6 -c "
+            "tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<"
+        )
+        for top, bottom in bands:
+            if bottom - top < 20:
+                continue
+            band = gray.crop((0, top, width, bottom))
+            if band.width > 1400:
+                scale = 1400 / band.width
+                band = band.resize((1400, max(40, int(band.height * scale))))
+            elif 80 <= band.width < 500:
+                band = band.resize((band.width * 2, band.height * 2))
+            text = pytesseract.image_to_string(band, lang="eng", config=config)
+            cleaned = (text or "").strip()
+            if cleaned and cleaned not in chunks:
+                chunks.append(cleaned)
+        return "\n".join(chunks) or None
+    except Exception:
+        return None
+
+
+def _prepare_ocr_image(image: Any) -> Any:
+    """Upscale small scans and lift contrast before Tesseract."""
+    from PIL import ImageEnhance, ImageOps  # type: ignore
+
+    prepared = image.convert("RGB")
+    width, height = prepared.size
+    max_side = max(width, height)
+    min_side = min(width, height)
+    if max_side > 4000:
+        scale = 4000 / max_side
+        prepared = prepared.resize(
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            resample=1,
+        )
+    elif min_side < 800:
+        scale = 2 if min_side < 500 else 1.4
+        prepared = prepared.resize(
+            (int(width * scale), int(height * scale)),
+            resample=1,
+        )
+        prepared = ImageOps.autocontrast(prepared, cutoff=1)
+        prepared = ImageEnhance.Contrast(prepared).enhance(1.2)
+        prepared = ImageEnhance.Sharpness(prepared).enhance(1.1)
+    return prepared
+
+
 def _ocr_with_tesseract(content: bytes, languages: list[str]) -> str | None:
     try:
         import pytesseract  # type: ignore
@@ -54,13 +118,16 @@ def _ocr_with_tesseract(content: bytes, languages: list[str]) -> str | None:
     except Exception:
         return None
     try:
-        image = Image.open(io.BytesIO(content))
+        image = _prepare_ocr_image(Image.open(io.BytesIO(content)))
         lang = "+".join(
             "rus" if code.casefold().startswith("ru") else "eng"
             for code in languages
         ) or "rus+eng"
-        text = pytesseract.image_to_string(image, lang=lang)
-        return (text or "").strip() or None
+        text = pytesseract.image_to_string(image, lang=lang) or ""
+        mrz_text = _ocr_mrz_strip(image)
+        if mrz_text and mrz_text not in text:
+            text = f"{text.rstrip()}\n{mrz_text}".strip()
+        return text.strip() or None
     except Exception:
         return None
 

@@ -354,15 +354,38 @@
   background: #0a6b3c;
 }
 
+.portal-module-desktop {
+  position: absolute;
+  inset: 64px 8px 80px;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.portal-module-desktop--tiled {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.portal-module-desktop--tiled > .portal-module-window {
+  position: relative;
+  inset: auto;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+}
+
 .portal-module-window {
   position: absolute;
-  bottom: 92px;
+  bottom: 0;
   z-index: 30;
   display: flex;
-  max-width: calc(100vw - 48px);
-  max-height: calc(100vh - 120px);
+  max-width: 100%;
+  max-height: 100%;
   flex-direction: column;
   overflow: hidden;
+  pointer-events: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   background: var(--color-surface);
@@ -370,18 +393,33 @@
 }
 
 .portal-module-window--sufler {
-  left: var(--space-6);
+  left: 0;
 }
 
 .portal-module-window--assistant {
-  right: var(--space-6);
+  right: 0;
+}
+
+.portal-module-window--tiled {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  top: auto;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  width: auto !important;
+  height: auto !important;
+  max-width: none;
+  max-height: none;
 }
 
 .portal-module-window--maximized {
-  inset: 12px;
-  right: 12px;
-  left: 12px;
-  bottom: 12px;
+  inset: 0;
+  right: 0;
+  left: 0;
+  bottom: 0;
   width: auto !important;
   height: auto !important;
   max-width: none;
@@ -413,7 +451,8 @@
   user-select: none;
 }
 
-.portal-module-window--maximized .portal-module-window__header {
+.portal-module-window--maximized .portal-module-window__header,
+.portal-module-window--tiled .portal-module-window__header {
   cursor: default;
 }
 
@@ -482,8 +521,8 @@
 }
 
 .portal-module-window__body--assistant {
-  gap: var(--space-2);
-  padding: var(--space-3);
+  gap: 4px;
+  padding: 6px 8px;
   overflow: hidden;
 }
 
@@ -719,9 +758,17 @@
     grid-template-columns: 1fr;
   }
 
+  .portal-module-desktop {
+    inset: 64px 8px 88px;
+  }
+
+  .portal-module-desktop--tiled {
+    flex-direction: column;
+  }
+
   .portal-module-window {
-    right: var(--space-3);
-    left: var(--space-3);
+    right: 0;
+    left: 0;
     width: auto !important;
   }
 

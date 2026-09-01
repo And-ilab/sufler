@@ -10,12 +10,25 @@ from typing import Any, Iterator, Mapping, Sequence
 from core.embeddings import embedding_backend_info
 from core.model_gateway import ModelGateway, ModelGatewayConfigurationError
 from hub.model_registry_store import get_model_settings
+from assistant.idp import (
+    build_attachment_prompt,
+    has_attachment_marker,
+    wants_summary,
+)
 from qu.assistant_retrieval import preview_assistant_query
 
 PROFILE = "assistant_bank"
+_ANSWER_STYLE = (
+    "Пиши обычным текстом, без markdown (без **, *, заголовков #). "
+    "Не перечисляй источники в тексте, не пиши «Источники:», номера [1] "
+    "и фразы вроде «по предоставленным фрагментам» или «в базе знаний "
+    "найдено» — источники уже показаны отдельно."
+)
 DEFAULT_SYSTEM_PROMPT = (
     "Ты внутренний ИИ-ассистент банка. Отвечай по подтверждённым "
-    "корпоративным источникам, кратко и по делу."
+    "корпоративным источникам, по делу. "
+    "Заканчивай законченным предложением и законченной мыслью. "
+    + _ANSWER_STYLE
 )
 GROUNDED_SYSTEM_PROMPT = (
     "Ты внутренний ИИ-ассистент банка. Отвечай ТОЛЬКО фактами из "
@@ -28,7 +41,16 @@ GROUNDED_SYSTEM_PROMPT = (
     "который прямо отвечает на вопрос пользователя, и не смешивай "
     "чужие условия. "
     "Если действительно нет нужных фактов — скажи об этом. "
-    "Ответ краткий, по делу. В конце укажи названия источников."
+    "Ответ по делу: закончи законченным предложением и законченной "
+    "мыслью, не обрывай фразу, список или абзац на середине. "
+    + _ANSWER_STYLE
+)
+EXPAND_SYSTEM_PROMPT = (
+    "Ты внутренний ИИ-ассистент банка. Дай полный ответ по фактам "
+    "из переданных фрагментов: все условия, кому подходит, как оформить, "
+    "лимиты и документы. Не обрывай текст на середине предложения. "
+    "Числа и сроки бери дословно из фрагментов. "
+    + _ANSWER_STYLE
 )
 # Local llama often runs with -c 4096; five full .doc chunks overflow (~10k tokens).
 DEFAULT_RAG_LIMIT = 3
@@ -159,11 +181,16 @@ def parse_chat_request(payload: Mapping[str, Any]) -> dict[str, Any]:
             "Only stream=true is supported on POST /chat (SSE)"
         )
 
+    expand = payload.get("expand", False)
+    if not isinstance(expand, bool):
+        raise AssistantChatError("expand must be a boolean")
+
     return {
         "messages": messages,
         "session_id": session_id.strip(),
         "stream": True,
         "kb_slugs": _parse_kb_slugs(payload),
+        "expand": expand,
     }
 
 
@@ -176,36 +203,19 @@ def _apply_attachments(
         attachments, (str, bytes)
     ):
         raise AssistantChatError("attachments must be an array")
-    parts: list[str] = []
     for index, item in enumerate(attachments):
         if not isinstance(item, Mapping):
             raise AssistantChatError(f"attachments[{index}] must be an object")
-        kind = str(item.get("type") or item.get("content_type") or "").lower()
-        name = str(item.get("name") or item.get("filename") or f"file-{index}")
         text = item.get("text") or item.get("extracted_text") or ""
         if not isinstance(text, str) or not text.strip():
             raise AssistantChatError(
                 f"attachments[{index}] requires text/extracted_text "
-                "(smoke path for summarization)"
+                "(IDP summarization path)"
             )
-        if kind in {"pdf", "application/pdf"}:
-            parts.append(
-                f"[Вложение PDF «{name}» — саммаризируй содержимое]\n"
-                f"{text.strip()}"
-            )
-        elif kind.startswith("audio") or kind.startswith("video") or kind in {
-            "audio",
-            "video",
-        }:
-            parts.append(
-                f"[Вложение {kind} «{name}» — саммаризируй содержимое]\n"
-                f"{text.strip()}"
-            )
-        else:
-            parts.append(f"[Вложение «{name}»]\n{text.strip()}")
-    if not parts:
+    query = _last_user_text(messages)
+    appendix = build_attachment_prompt(attachments, query)
+    if not appendix:
         return messages
-    appendix = "\n\n".join(parts)
     for index in range(len(messages) - 1, -1, -1):
         if messages[index]["role"] == "user":
             messages[index] = {
@@ -299,13 +309,16 @@ def _document_context_text(document: Mapping[str, Any], max_chars: int) -> str:
 def _inject_rag_context(
     messages: Sequence[Mapping[str, str]],
     documents: Sequence[Mapping[str, Any]],
+    *,
+    expand: bool = False,
 ) -> list[dict[str, str]]:
     context_blocks = []
-    remaining = LLM_RAG_TOTAL_CHARS
+    remaining = 16000 if expand else LLM_RAG_TOTAL_CHARS
+    chunk_budget = 6000 if expand else LLM_CHUNK_CHARS
     for document in documents:
         if remaining <= 200:
             break
-        per_doc = min(LLM_CHUNK_CHARS, remaining)
+        per_doc = min(chunk_budget, remaining)
         body = _document_context_text(document, per_doc)
         if not body:
             continue
@@ -318,8 +331,9 @@ def _inject_rag_context(
         )
     context = "\n\n".join(context_blocks)
     query = _last_user_text(messages)
+    system_prompt = EXPAND_SYSTEM_PROMPT if expand else GROUNDED_SYSTEM_PROMPT
     grounded = [
-        {"role": "system", "content": GROUNDED_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         *[
             {"role": item["role"], "content": item["content"]}
             for item in messages
@@ -334,9 +348,18 @@ def _inject_rag_context(
                 "content": (
                     f"Вопрос пользователя:\n{query}\n\n"
                     f"Фрагменты базы знаний:\n{context}\n\n"
-                    "Сформулируй ответ только по тексту фрагментов. "
-                    "Числа и сроки бери дословно из тела фрагмента, "
-                    "не из имени файла. Если срока в тексте нет — так и скажи."
+                    + (
+                        "Разверни полный ответ только по тексту фрагментов: "
+                        "все условия, кому подходит, как оформить. "
+                        "Допиши ответ до конца, не обрывай предложение. "
+                        if expand
+                        else "Сформулируй полный ответ только по тексту фрагментов. "
+                        "Закончи законченным предложением и законченной мыслью: "
+                        "не обрывай фразу, список или абзац на середине. "
+                    )
+                    + "Числа и сроки бери дословно из тела фрагмента, "
+                    "не из имени файла. Если срока в тексте нет — так и скажи. "
+                    "Без markdown и без списка источников в тексте."
                 ),
             }
             break
@@ -371,8 +394,13 @@ def retrieve_assistant_context(
     return documents, threshold
 
 
-def _generation_parameters() -> dict[str, Any]:
-    """Build sampling params; cap tokens for CPU so the UI does not hang forever."""
+# +18% on the default (non-expand) cap so the last sentence can finish.
+_DEFAULT_TOKEN_HEADROOM = 1.18
+_EXPAND_TOKEN_FLOOR = 4096
+
+
+def _generation_parameters(*, expand: bool = False) -> dict[str, Any]:
+    """Sampling params. Cloud DeepSeek keeps a high ceiling so answers are not cut."""
     try:
         settings = get_model_settings(PROFILE)
         parameters: dict[str, Any] = {
@@ -381,9 +409,8 @@ def _generation_parameters() -> dict[str, Any]:
             "max_tokens": int(settings.max_tokens),
         }
     except Exception:
-        parameters = {"max_tokens": 256}
+        parameters = {"max_tokens": 2048}
 
-    # Default registry max_tokens=1024 is too slow on CPU (minutes per answer).
     raw_cap = os.environ.get("ASSISTANT_MAX_TOKENS") or os.environ.get(
         "LLM_MAX_TOKENS"
     )
@@ -393,8 +420,22 @@ def _generation_parameters() -> dict[str, Any]:
         except ValueError:
             pass
     else:
-        current = int(parameters.get("max_tokens") or 256)
-        parameters["max_tokens"] = min(current, 384)
+        current = int(parameters.get("max_tokens") or 2048)
+        try:
+            from assistant.local_llm import is_deepseek_assistant
+
+            cloud = is_deepseek_assistant()
+        except Exception:
+            cloud = False
+        if cloud:
+            parameters["max_tokens"] = max(current, 4096)
+        else:
+            parameters["max_tokens"] = max(current, 1024)
+    base = int(parameters.get("max_tokens") or 2048)
+    if expand:
+        parameters["max_tokens"] = max(base, _EXPAND_TOKEN_FLOOR)
+    elif base < _EXPAND_TOKEN_FLOOR:
+        parameters["max_tokens"] = max(32, int(round(base * _DEFAULT_TOKEN_HEADROOM)))
     return parameters
 
 
@@ -404,10 +445,11 @@ def iter_chat_sse(
     kb_slugs: Sequence[str] | None = None,
     gateway: ModelGateway | None = None,
     request_id: str | None = None,
+    expand: bool = False,
 ) -> Iterator[str]:
     """Yield OpenAI-compatible SSE frames from ``assistant_bank`` with RAG."""
     active = gateway or ModelGateway.from_registry()
-    parameters = _generation_parameters()
+    parameters = _generation_parameters(expand=expand)
 
     if request_id:
         yield f": request_id {request_id}\n\n"
@@ -426,11 +468,13 @@ def iter_chat_sse(
     )
 
     documents: list[dict[str, Any]] = []
+    attachment_mode = has_attachment_marker(messages)
     try:
-        documents, _threshold = retrieve_assistant_context(
-            messages,
-            kb_slugs=kb_slugs,
-        )
+        if not attachment_mode:
+            documents, _threshold = retrieve_assistant_context(
+                messages,
+                kb_slugs=kb_slugs,
+            )
     except Exception:
         documents = []
 
@@ -449,20 +493,33 @@ def iter_chat_sse(
     )
 
     outbound = (
-        _inject_rag_context(messages, documents)
+        _inject_rag_context(messages, documents, expand=expand)
         if documents
         else list(messages)
     )
     if not documents:
-        # Keep default system prompt; nudge model when KB is empty/miss.
+        if attachment_mode:
+            empty_system = (
+                "Ты внутренний ИИ-ассистент банка. Пользователь загрузил "
+                "документ. "
+                + (
+                    "Сделай полное резюме по фрагментам вложения. "
+                    if wants_summary(_last_user_text(messages))
+                    else "Ответь на вопрос только по фрагментам вложения. "
+                )
+                + "Заканчивай законченным предложением и законченной мыслью. "
+                + _ANSWER_STYLE
+            )
+        else:
+            empty_system = (
+                (EXPAND_SYSTEM_PROMPT if expand else DEFAULT_SYSTEM_PROMPT)
+                + " В выбранных базах знаний релевантных фрагментов "
+                "не найдено — сообщи об этом пользователю."
+            )
         outbound = [
             {
                 "role": "system",
-                "content": (
-                    DEFAULT_SYSTEM_PROMPT
-                    + " В выбранных базах знаний релевантных фрагментов "
-                    "не найдено — сообщи об этом пользователю."
-                ),
+                "content": empty_system,
             },
             *[
                 {"role": item["role"], "content": item["content"]}

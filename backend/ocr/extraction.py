@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+from ocr.mrz import parse_td3_mrz
+
 FieldValue = dict[str, Any]
 
 
@@ -50,6 +52,46 @@ _GEO_WORDS = frozenset(
         "ЖЕН",
         "MALE",
         "FEMALE",
+        "REPUBLIC",
+        "OF",
+        "BELARUS",
+        "BELARUSIAN",
+        "IDENTITY",
+        "NATIONALITY",
+        "MINISTRY",
+        "INTERNAL",
+        "AFFAIRS",
+        "HOLDER",
+        "SIGNATURE",
+        "AUTHORITY",
+        "ISSUING",
+        "TYPE",
+        "CODE",
+        "SEX",
+        "ПОЛ",
+        "ГРАЖДАНСТВО",
+        "ГРАМАДЗЯНСТВА",
+        "РЭСПУБЛИКА",
+        "БЕЛАРУСЬ",
+        "UNITED",
+        "STATES",
+        "AMERICA",
+        "AZERBAIJAN",
+        "AZORBAYCAN",
+        "AZERBAYCAN",
+        "RESPUBLIKASI",
+        "PASPORT",
+        "SURNAME",
+        "GIVEN",
+        "NAMES",
+        "DATE",
+        "BIRTH",
+        "ISSUE",
+        "EXPIRY",
+        "PERSONAL",
+        "PLACE",
+        "NUMBER",
+        "MINISTRY",
     }
 )
 
@@ -89,9 +131,28 @@ def _is_geo_or_junk_name(value: str) -> bool:
     upper = [token.casefold().replace("ё", "е").upper() for token in tokens]
     if any(token in _GEO_WORDS for token in upper):
         return True
+    if any(len(token) <= 2 for token in tokens):
+        return True
     if len(tokens) == 1 and tokens[0].upper() in _GEO_WORDS:
         return True
     return False
+
+
+def _visual_repeated_names(text: str) -> tuple[str, str] | None:
+    """Pick surname/given from tokens that OCR saw twice (label + value / two langs)."""
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for token in re.findall(r"[A-ZА-ЯЁ]{4,20}", text.upper().replace("Ё", "Е")):
+        if token in _GEO_WORDS or _is_geo_or_junk_name(token):
+            continue
+        if token not in counts:
+            order.append(token)
+            counts[token] = 0
+        counts[token] += 1
+    repeated = [token for token in order if counts[token] >= 2]
+    if len(repeated) >= 2:
+        return repeated[0], repeated[1]
+    return None
 
 
 def _normalize_date(raw: str) -> str:
@@ -101,16 +162,39 @@ def _normalize_date(raw: str) -> str:
 def extract_passport_fields(text: str) -> dict[str, FieldValue]:
     fields: dict[str, FieldValue] = {}
     normalized = text.replace("\r\n", "\n")
+    mrz = parse_td3_mrz(normalized)
+    if mrz:
+        conf = float(mrz["confidence"])
+        if mrz.get("surname"):
+            fields["surname"] = _field(mrz["surname"], conf, source="mrz")
+        if mrz.get("given_name"):
+            fields["given_name"] = _field(mrz["given_name"], conf, source="mrz")
+        if mrz.get("full_name"):
+            fields["full_name"] = _field(mrz["full_name"], conf, source="mrz")
+        if mrz.get("series"):
+            fields["series"] = _field(mrz["series"], conf, source="mrz")
+        if mrz.get("number"):
+            fields["number"] = _field(mrz["number"], conf, source="mrz")
+        if mrz.get("document_number"):
+            fields["document_number"] = _field(
+                mrz["document_number"],
+                conf,
+                source="mrz",
+            )
+        if mrz.get("birth_date"):
+            fields["birth_date"] = _field(mrz["birth_date"], conf, source="mrz")
+        if mrz.get("expiry_date"):
+            fields["expiry_date"] = _field(mrz["expiry_date"], 0.9, source="mrz")
 
     surname = _label_value(
         normalized,
-        ("Фамилия", "Surname", "Family name"),
+        ("Фамилия", "Surname", "Family name", "Прозвішча", "ПРОЗВІШЧА"),
         pattern=_NAME_TOKEN,
         confidence=0.94,
     )
     name = _label_value(
         normalized,
-        ("Имя", "Name", "Given name"),
+        ("Имя", "Given names", "Given name", "Given Names", "Імя", "ІМЯ"),
         pattern=_NAME_TOKEN,
         confidence=0.93,
     )
@@ -138,24 +222,25 @@ def extract_passport_fields(text: str) -> dict[str, FieldValue]:
     if fio and _is_geo_or_junk_name(str(fio["value"])):
         fio = None
 
-    if fio:
-        fields["full_name"] = fio
-    elif surname and name:
-        parts = [str(surname["value"]), str(name["value"])]
-        if patronymic:
-            parts.append(str(patronymic["value"]))
-        conf = min(
-            float(surname["confidence"]),
-            float(name["confidence"]),
-            float(patronymic["confidence"]) if patronymic else 1.0,
-        )
-        fields["full_name"] = _field(" ".join(parts), conf, source="compose")
+    if "full_name" not in fields:
+        if fio:
+            fields["full_name"] = fio
+        elif surname and name:
+            parts = [str(surname["value"]), str(name["value"])]
+            if patronymic:
+                parts.append(str(patronymic["value"]))
+            conf = min(
+                float(surname["confidence"]),
+                float(name["confidence"]),
+                float(patronymic["confidence"]) if patronymic else 1.0,
+            )
+            fields["full_name"] = _field(" ".join(parts), conf, source="compose")
 
-    if surname:
+    if surname and "surname" not in fields:
         fields["surname"] = surname
-    if name:
+    if name and "given_name" not in fields:
         fields["given_name"] = name
-    if patronymic:
+    if patronymic and "patronymic" not in fields:
         fields["patronymic"] = patronymic
 
     # RF passport: "45 11 532704" / "4511 532704"; BY: "PD 0000000"
@@ -189,7 +274,17 @@ def extract_passport_fields(text: str) -> dict[str, FieldValue]:
     elif by_id:
         series = series or _field(by_id.group(1).upper(), 0.8, source="by_id")
         number = number or _field(by_id.group(2), 0.8, source="by_id")
-    if series:
+    intl_id = re.search(r"\b([A-Z]\d{8})\b", normalized.upper())
+    if (
+        intl_id
+        and "document_number" not in fields
+        and not fields.get("series")
+    ):
+        fields["document_number"] = _field(
+            intl_id.group(1), 0.8, source="intl_id"
+        )
+        number = number or _field(intl_id.group(1), 0.8, source="intl_id")
+    if series and "series" not in fields:
         # Normalize RF series to "45 11"
         series_val = re.sub(r"\s+", " ", str(series["value"]).strip())
         compact = series_val.replace(" ", "")
@@ -200,8 +295,26 @@ def extract_passport_fields(text: str) -> dict[str, FieldValue]:
                 source=str(series.get("source") or "regex"),
             )
         fields["series"] = series
-    if number:
+    if number and "number" not in fields:
         fields["number"] = number
+    if (
+        "document_number" not in fields
+        and fields.get("series")
+        and fields.get("number")
+    ):
+        series_val = str(fields["series"]["value"]).replace(" ", "")
+        number_val = str(fields["number"]["value"])
+        if re.fullmatch(r"[A-ZА-Я]{2}", series_val) and re.fullmatch(
+            r"\d{7}", number_val
+        ):
+            fields["document_number"] = _field(
+                f"{series_val}{number_val}",
+                min(
+                    float(fields["series"]["confidence"]),
+                    float(fields["number"]["confidence"]),
+                ),
+                source="compose",
+            )
 
     issue_date = _label_value(
         normalized,
@@ -226,18 +339,31 @@ def extract_passport_fields(text: str) -> dict[str, FieldValue]:
         pattern=r"\d{2}[./-]\d{2}[./-]\d{4}|\d{4}-\d{2}-\d{2}",
         confidence=0.9,
     )
-    if birth_date:
+    if birth_date and "birth_date" not in fields:
         fields["birth_date"] = _field(
             _normalize_date(str(birth_date["value"])),
             float(birth_date["confidence"]),
             source=str(birth_date.get("source") or "regex"),
         )
-    if issue_date:
+    if issue_date and "issue_date" not in fields:
         fields["issue_date"] = _field(
             _normalize_date(str(issue_date["value"])),
             float(issue_date["confidence"]),
             source=str(issue_date.get("source") or "regex"),
         )
+
+    if "full_name" not in fields:
+        visual = _visual_repeated_names(normalized)
+        if visual:
+            fields["surname"] = fields.get("surname") or _field(
+                visual[0], 0.78, source="repeat"
+            )
+            fields["given_name"] = fields.get("given_name") or _field(
+                visual[1], 0.78, source="repeat"
+            )
+            fields["full_name"] = _field(
+                f"{visual[0]} {visual[1]}", 0.78, source="repeat"
+            )
 
     # Free-form FIO only when labels failed — never take geo lines.
     if "full_name" not in fields:
@@ -360,7 +486,23 @@ _EXTRACTORS = {
 
 def detect_document_type(text: str, filename: str = "") -> str:
     hay = f"{filename}\n{text}".casefold()
-    if any(token in hay for token in ("паспорт", "passport", "удостоверени")):
+    if (
+        any(
+            token in hay
+            for token in (
+                "паспорт",
+                "passport",
+                "pasport",
+                "удостоверени",
+                "p<blr",
+                "p<rus",
+                "surname",
+                "given name",
+            )
+        )
+        or "p<" in hay
+        or parse_td3_mrz(text) is not None
+    ):
         return "passport"
     if any(
         token in hay
@@ -389,6 +531,9 @@ def extract_fields(
         doc_type = detect_document_type(text, filename)
     extractor = _EXTRACTORS.get(doc_type)
     if extractor is None:
+        guessed = extract_passport_fields(text)
+        if guessed.get("full_name") or guessed.get("document_number"):
+            return "passport", guessed
         return doc_type, {}
     return doc_type, extractor(text)
 

@@ -4,6 +4,9 @@ from assistant.views import (
     assistant_attachment_extract,
     assistant_attachment_ocr,
     assistant_chat,
+    assistant_content_from_prompt,
+    assistant_doc_template_generate,
+    assistant_doc_templates,
     assistant_knowledge_bases,
     assistant_models,
     assistant_openapi,
@@ -33,6 +36,21 @@ urlpatterns = [
     ),
     path("models/", assistant_models, name="assistant_models"),
     path("kbs/", assistant_knowledge_bases, name="assistant_knowledge_bases"),
+    path(
+        "doc-templates/",
+        assistant_doc_templates,
+        name="assistant_doc_templates",
+    ),
+    path(
+        "doc-templates/<int:template_id>/generate/",
+        assistant_doc_template_generate,
+        name="assistant_doc_template_generate",
+    ),
+    path(
+        "content/from-prompt/",
+        assistant_content_from_prompt,
+        name="assistant_content_from_prompt",
+    ),
     path("openapi.json", assistant_openapi, name="assistant_openapi"),
     path("reports/", assistant_reports_catalog, name="assistant_reports_catalog"),
     path(

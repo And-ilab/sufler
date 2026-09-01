@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Button, Card, StatusBadge, type StatusBadgeStatus } from '../components'
 import {
   FEEDBACK_LABELS,
+  type AssistantGeneratedDraft,
   type AssistantMessage,
   type AssistantSource,
   type AssistantToolState,
@@ -15,9 +16,11 @@ import {
   type AssistantKbOption,
 } from './api/knowledgeBases'
 import {
+  downloadTranscript,
   extractChatAttachment,
   fieldConfidencePercent,
   fieldDisplayValue,
+  isMediaFileName,
   type ChatAttachmentPayload,
 } from './api/attachments'
 import {
@@ -29,23 +32,58 @@ import {
   formatDialogDate,
   type ChatDialogSummary,
 } from './chatPersistence'
+import { finishLastSentence } from './finishLastSentence'
+import {
+  downloadGeneratedDocument,
+  fetchChatDocTemplates,
+  generateDocDraft,
+  type ChatDocTemplate,
+  type DocTemplateFormat,
+} from './api/docTemplates'
 import { useAssistantChat } from './useAssistantChat'
 import './AssistantChat.css'
 
-const ATTACH_ACCEPT = '.pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png,.tiff,.tif'
+const ATTACH_ACCEPT = '.pdf,.doc,.docx,.txt,.rtf,.xlsx,.jpg,.jpeg,.png,.tiff,.tif,.wav,.mp3,.m4a,.ogg,.flac,.webm,.mp4,.mov,.mkv,.avi'
 const OCR_ACCEPT = '.pdf,.jpg,.jpeg,.png,.tiff,.tif'
 const ATTACH_MAX_FILES = 5
+
+function compactChatText(text: string) {
+  let out = text.replace(/\r\n/g, '\n')
+  out = out.replace(/\*\*([^*]+)\*\*/g, '$1')
+  out = out.replace(/\*([^*\n]+)\*/g, '$1')
+  out = out.replace(/\*\*/g, '')
+  const lines = out.split('\n').filter((line) => {
+    const trimmed = line.trim()
+    if (!trimmed) return true
+    if (/^источники\s*[:(\[]/i.test(trimmed)) return false
+    if (/^источники\s*\(\d+\)/i.test(trimmed)) return false
+    if (/^[-–—•]\s*\[\d+\]/.test(trimmed)) return false
+    if (/^\[\d+\]\s+\S/.test(trimmed) && /(бз:|источник|\.txt|\.doc|\.pdf)/i.test(trimmed)) {
+      return false
+    }
+    if (/по предоставленн\w*\s+фрагмент/i.test(trimmed)) return false
+    if (/в базе знаний найдено/i.test(trimmed)) return false
+    if (/^фрагменты базы знаний/i.test(trimmed)) return false
+    return true
+  })
+  return lines
+    .join('\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .trim()
+}
 
 const OCR_FIELD_LABELS: Record<string, string> = {
   full_name: 'ФИО',
   surname: 'Фамилия',
   given_name: 'Имя',
   patronymic: 'Отчество',
+  document_number: 'Номер документа',
   series: 'Серия',
   number: 'Номер',
-  issue_date: 'Дата выдачи',
   birth_date: 'Дата рождения',
-  document_number: 'Номер документа',
+  expiry_date: 'Срок действия',
+  issue_date: 'Дата выдачи',
   date: 'Дата',
   payer: 'Плательщик',
   beneficiary: 'Получатель',
@@ -53,6 +91,7 @@ const OCR_FIELD_LABELS: Record<string, string> = {
   purpose: 'Назначение',
   currency: 'Валюта',
 }
+const OCR_FIELD_ORDER = Object.keys(OCR_FIELD_LABELS)
 
 const OCR_CONFIDENCE_TONE = (pct: number | null): 'success' | 'warning' | 'danger' | 'neutral' => {
   if (pct == null) return 'neutral'
@@ -203,17 +242,20 @@ function SourceItem({ source }: { source: AssistantSource }) {
     try {
       const response = await fetch(href, { credentials: 'include' })
       if (!response.ok) {
-        let detail = `HTTP ${response.status}`
+        let detail = 'Не удалось открыть файл источника'
         try {
           const payload = (await response.json()) as {
             details?: { file?: string[]; request?: string[] }
             error?: string
           }
-          detail =
+          const raw =
             payload.details?.file?.[0]
             || payload.details?.request?.[0]
             || payload.error
-            || detail
+            || ''
+          if (raw && raw !== 'not_found') {
+            detail = raw
+          }
         } catch {
           /* ignore */
         }
@@ -221,11 +263,15 @@ function SourceItem({ source }: { source: AssistantSource }) {
       }
       const blob = await response.blob()
       const header = response.headers.get('Content-Disposition') || ''
-      const matched = /filename="?([^"]+)"?/i.exec(header)
-      const filename =
-        matched?.[1]
+      const starred = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(header)
+      const quoted = /filename="?([^"]+)"?/i.exec(header)
+      const rawName =
+        (starred?.[1] && decodeURIComponent(starred[1].replace(/['"]/g, '')))
+        || quoted?.[1]
+        || decodeURIComponent(response.headers.get('X-Source-Filename') || '')
         || source.title
         || 'document'
+      const filename = rawName.includes('.') ? rawName : `${rawName}.txt`
       const objectUrl = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = objectUrl
@@ -234,19 +280,40 @@ function SourceItem({ source }: { source: AssistantSource }) {
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
-      // Also try open in new tab (PDF/txt); browsers may still download office files.
-      window.setTimeout(() => {
-        window.open(objectUrl, '_blank', 'noopener,noreferrer')
-        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
-      }, 50)
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 4_000)
     } catch (err) {
       setFileError(err instanceof Error ? err.message : 'Не удалось открыть файл')
     }
   }
 
+  const toggle = () => {
+    if (hasQuote) setOpen((value) => !value)
+  }
+
   return (
-    <li className="asst-source-item" data-testid={`source-item-${source.id}`}>
-      <div className="asst-source-item__row">
+    <li
+      className={`asst-source-item${open ? ' is-open' : ''}${hasQuote ? ' asst-source-item--expandable' : ''}`}
+      data-testid={`source-item-${source.id}`}
+    >
+      <div
+        className="asst-source-item__row"
+        role={hasQuote ? 'button' : undefined}
+        tabIndex={hasQuote ? 0 : undefined}
+        onClick={hasQuote ? toggle : undefined}
+        onKeyDown={
+          hasQuote
+            ? (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  toggle()
+                }
+              }
+            : undefined
+        }
+        aria-expanded={hasQuote ? open : undefined}
+        data-testid={`source-quote-${source.id}`}
+        title={hasQuote ? (open ? 'Скрыть цитату' : 'Показать цитату') : undefined}
+      >
         <StatusBadge status="success">
           {source.relevance_percent}%
         </StatusBadge>
@@ -258,6 +325,7 @@ function SourceItem({ source }: { source: AssistantSource }) {
             data-testid={`source-link-${source.id}`}
             onClick={(event) => {
               event.preventDefault()
+              event.stopPropagation()
               void openSourceFile()
             }}
           >
@@ -267,14 +335,9 @@ function SourceItem({ source }: { source: AssistantSource }) {
           <span className="asst-source-item__title">{source.title}</span>
         )}
         {hasQuote ? (
-          <Button
-            type="button"
-            variant={open ? 'secondary' : 'ghost'}
-            onClick={() => setOpen((value) => !value)}
-            data-testid={`source-quote-${source.id}`}
-          >
-            {open ? 'Скрыть цитату' : 'Цитата'}
-          </Button>
+          <span className="asst-source-item__more" aria-hidden>
+            {open ? '▴' : '⋯'}
+          </span>
         ) : null}
       </div>
       {fileError ? (
@@ -289,24 +352,141 @@ function SourceItem({ source }: { source: AssistantSource }) {
   )
 }
 
+function sourcesMoreLabel(count: number) {
+  const mod10 = count % 10
+  const mod100 = count % 100
+  if (mod10 === 1 && mod100 !== 11) return `Ещё ${count} источник`
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return `Ещё ${count} источника`
+  }
+  return `Ещё ${count} источников`
+}
+
+function SourcesList({
+  messageId,
+  sources,
+}: {
+  messageId: string
+  sources: AssistantSource[]
+}) {
+  const [showAll, setShowAll] = useState(false)
+  const visible = showAll ? sources : sources.slice(0, 1)
+  const hiddenCount = sources.length - visible.length
+
+  return (
+    <div className="asst-sources" data-testid={`sources-${messageId}`}>
+      <strong>Источники ({sources.length})</strong>
+      <ul>
+        {visible.map((source) => (
+          <SourceItem key={source.id} source={source} />
+        ))}
+      </ul>
+      {sources.length > 1 ? (
+        <button
+          type="button"
+          className="asst-sources__more"
+          onClick={() => setShowAll((value) => !value)}
+          data-testid={`sources-more-${messageId}`}
+        >
+          {showAll ? 'Скрыть источники' : sourcesMoreLabel(hiddenCount)}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function previousMediaTranscripts(
+  messages: AssistantMessage[],
+  index: number,
+) {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const item = messages[cursor]
+    if (item?.role !== 'user') continue
+    return (item.attachments || []).filter((file) => file.mediaKind && file.text)
+  }
+  return []
+}
+
+function DraftCard({
+  message,
+  readOnly,
+  onChange,
+}: {
+  message: AssistantMessage
+  readOnly: boolean
+  onChange: (text: string) => void
+}) {
+  const draft = message.draft
+  if (!draft) return null
+  const isText = draft.kind === 'text'
+  return (
+    <div className="asst-draft" data-testid={`asst-draft-${message.id}`}>
+      <textarea
+        value={draft.text}
+        readOnly={readOnly}
+        data-testid="asst-draft-text"
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <div className="asst-draft__actions">
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={() => {
+            void navigator.clipboard?.writeText(draft.text)
+          }}
+        >
+          Копировать
+        </Button>
+        <Button
+          type="button"
+          variant={isText ? 'secondary' : 'primary'}
+          data-testid="asst-draft-download"
+          onClick={() => {
+            if (isText) {
+              const blob = new Blob([draft.text], { type: 'text/plain;charset=utf-8' })
+              const url = URL.createObjectURL(blob)
+              const link = document.createElement('a')
+              link.href = url
+              link.download = draft.filename || 'draft.txt'
+              document.body.appendChild(link)
+              link.click()
+              link.remove()
+              URL.revokeObjectURL(url)
+              return
+            }
+            void downloadGeneratedDocument(draft.templateId, draft.fields)
+          }}
+        >
+          Скачать {draft.formatLabel || draft.outputFormat}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function MessageLenta({
   messages,
   streaming,
   readOnly = false,
   onFeedback,
+  onExpand,
   onStop,
+  onDraftChange,
 }: {
   messages: AssistantMessage[]
   streaming: boolean
   readOnly?: boolean
   onFeedback: (id: string, kind: FeedbackKind) => void
+  onExpand: (id: string) => void
   onStop: () => void
+  onDraftChange: (id: string, text: string) => void
 }) {
-  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const lastTurnRef = useRef<HTMLDivElement | null>(null)
+  const lastMessageId = messages[messages.length - 1]?.id
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
-  }, [messages, streaming])
+    lastTurnRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }, [lastMessageId])
 
   if (!messages.length) {
     return (
@@ -322,9 +502,10 @@ function MessageLenta({
 
   return (
     <div className="asst-lenta" data-testid="asst-lenta" aria-live="polite">
-      {messages.map((message) => (
+      {messages.map((message, index) => (
         <div
           key={message.id}
+          ref={index === messages.length - 1 ? lastTurnRef : undefined}
           className={`asst-turn asst-turn--${message.role}`}
           data-testid={`msg-${message.id}`}
         >
@@ -336,14 +517,25 @@ function MessageLenta({
               {message.attachments?.length ? (
                 <ul className="asst-turn__files" aria-label="Вложения">
                   {message.attachments.map((file) => (
-                    <li key={file.name}>{file.name}</li>
+                    <li key={file.name}>
+                      <span>{file.name}</span>
+                      {file.mediaKind && file.text ? (
+                        <button
+                          type="button"
+                          className="asst-turn__transcript"
+                          onClick={() => downloadTranscript(file.name, file.text || '')}
+                        >
+                          транскрипт.txt
+                        </button>
+                      ) : null}
+                    </li>
                   ))}
                 </ul>
               ) : null}
-              <p className="asst-turn__user">{message.content}</p>
+              <p className="asst-turn__user">{compactChatText(message.content)}</p>
             </div>
           ) : (
-            <Card className="asst-turn__card">
+            <Card padded={false} className="asst-turn__card">
               {message.pending && !message.content ? (
                 <div className="asst-streaming" data-testid="asst-streaming">
                   <span>Ассистент печатает…</span>
@@ -353,21 +545,48 @@ function MessageLenta({
                 </div>
               ) : (
                 <p className="asst-turn__text">
-                  {message.content}
+                  {compactChatText(
+                    message.draft || message.pending || message.expanded
+                      ? message.content
+                      : finishLastSentence(message.content),
+                  )}
                   {message.pending ? <span className="asst-cursor" aria-hidden>|</span> : null}
                 </p>
               )}
-              {message.sources && message.sources.length > 0 ? (
-                <div className="asst-sources" data-testid={`sources-${message.id}`}>
-                  <strong>Источники ({message.sources.length})</strong>
-                  <ul>
-                    {message.sources.map((source) => (
-                      <SourceItem key={source.id} source={source} />
-                    ))}
-                  </ul>
-                </div>
+              {message.draft && !message.pending ? (
+                <DraftCard
+                  message={message}
+                  readOnly={readOnly}
+                  onChange={(text) => onDraftChange(message.id, text)}
+                />
               ) : null}
-              {!readOnly ? (
+              {message.sources && message.sources.length > 0 ? (
+                <SourcesList messageId={message.id} sources={message.sources} />
+              ) : null}
+              {!readOnly && !message.pending && message.content ? (
+                <div className="asst-answer-actions">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={streaming}
+                    onClick={() => onExpand(message.id)}
+                    data-testid={`asst-expand-${message.id}`}
+                  >
+                    {message.expanded ? 'Скрыть' : 'Подробнее'}
+                  </Button>
+                  {previousMediaTranscripts(messages, index).map((file) => (
+                    <Button
+                      key={`${file.name}-txt`}
+                      type="button"
+                      variant="ghost"
+                      onClick={() => downloadTranscript(file.name, file.text || '')}
+                    >
+                      Скачать транскрипт
+                    </Button>
+                  ))}
+                  <FeedbackBar message={message} onFeedback={onFeedback} />
+                </div>
+              ) : !readOnly ? (
                 <FeedbackBar message={message} onFeedback={onFeedback} />
               ) : null}
             </Card>
@@ -379,7 +598,6 @@ function MessageLenta({
           Стриминг токенов…
         </div>
       ) : null}
-      <div ref={bottomRef} aria-hidden />
     </div>
   )
 }
@@ -388,7 +606,9 @@ const TOOL_DESCRIPTIONS: Record<ToolId, string> = {
   code: 'Черновик фрагмента кода по запросу из чата.',
   sql: 'Read-only запросы к разрешённым витринам. Изменения запрещены.',
   rpa: 'Запуск роботов только после явного подтверждения оператора.',
-  document: 'Сформировать или разобрать документ (в т.ч. OCR-поля).',
+  document: 'Сформировать бланк банка: Word, PDF, Excel, PPT или BPMN.',
+  text: 'Черновик записки, справки или отчёта — можно править в чате.',
+  diagram: 'Презентация PPT или схема BPMN / ER по шаблону.',
   translate: 'Перевод фрагмента ответа или вложения RU ↔ EN.',
 }
 
@@ -486,6 +706,187 @@ function ToolsPanel({
           </ul>
         </div>
       </aside>
+    </div>
+  )
+}
+
+function GenerateDocumentModal({
+  open,
+  onClose,
+  onDraft,
+  onDownloaded,
+  formatFilter,
+}: {
+  open: boolean
+  onClose: () => void
+  onDraft: (text: string, draft?: AssistantGeneratedDraft) => void
+  onDownloaded: () => void
+  formatFilter?: DocTemplateFormat[]
+}) {
+  const [templates, setTemplates] = useState<ChatDocTemplate[]>([])
+  const [templateId, setTemplateId] = useState<number | null>(null)
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const selected = templates.find((item) => item.id === templateId) ?? null
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setError('')
+    void (async () => {
+      try {
+        await ensureDevSession()
+        const items = (await fetchChatDocTemplates()).filter((item) =>
+          formatFilter?.length
+            ? formatFilter.includes(item.output_format)
+            : true,
+        )
+        if (cancelled) return
+        setTemplates(items)
+        const first = items[0]
+        setTemplateId(first?.id ?? null)
+        setValues(
+          Object.fromEntries((first?.fields || []).map((field) => [field.id, ''])),
+        )
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Не удалось загрузить шаблоны')
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [formatFilter, open])
+
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [busy, onClose, open])
+
+  if (!open) return null
+
+  const run = async (mode: 'draft' | 'download') => {
+    if (!selected || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      if (mode === 'draft') {
+        const draft = await generateDocDraft(selected.id, values)
+        const kind =
+          selected.output_format === 'txt'
+            ? 'text'
+            : selected.output_format === 'pptx'
+              ? 'slides'
+              : selected.output_format === 'bpmn' || selected.output_format === 'mmd'
+                ? 'diagram'
+                : 'text'
+        onDraft(
+          `Черновик «${draft.template_name}» (${draft.format_label || draft.output_format}).`,
+          {
+            kind,
+            templateId: selected.id,
+            templateName: draft.template_name,
+            filename: draft.filename,
+            outputFormat: draft.output_format,
+            formatLabel: draft.format_label,
+            text: draft.text,
+            fields: values,
+          },
+        )
+      } else {
+        await downloadGeneratedDocument(selected.id, values)
+        onDownloaded()
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сформировать документ')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="asst-docgen" data-testid="asst-docgen-modal" role="presentation">
+      <button
+        type="button"
+        className="asst-docgen__backdrop"
+        aria-label="Закрыть"
+        disabled={busy}
+        onClick={onClose}
+      />
+      <div
+        className="asst-docgen__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Сгенерировать документ"
+      >
+        <strong>Сгенерировать документ</strong>
+        <label>
+          Шаблон
+          <select
+            value={templateId ?? ''}
+            data-testid="asst-docgen-template"
+            disabled={busy || !templates.length}
+            onChange={(event) => {
+              const nextId = Number(event.target.value)
+              const next = templates.find((item) => item.id === nextId) ?? null
+              setTemplateId(next?.id ?? null)
+              setValues(
+                Object.fromEntries((next?.fields || []).map((field) => [field.id, ''])),
+              )
+            }}
+          >
+            {!templates.length ? <option value="">Нет активных шаблонов</option> : null}
+            {templates.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.format_label} — {item.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {(selected?.fields || []).map((field) => (
+          <label key={field.id}>
+            {field.label}{field.required ? '' : ' (необяз.)'}
+            <input
+              value={values[field.id] || ''}
+              disabled={busy}
+              data-testid={`asst-docgen-field-${field.id}`}
+              onChange={(event) =>
+                setValues((current) => ({ ...current, [field.id]: event.target.value }))
+              }
+            />
+          </label>
+        ))}
+        {error ? <p className="asst-docgen__error" role="alert">{error}</p> : null}
+        <div className="asst-docgen__actions">
+          <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
+            Отмена
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy || !selected}
+            data-testid="asst-docgen-draft"
+            onClick={() => void run('draft')}
+          >
+            Создать черновик
+          </Button>
+          <Button
+            type="button"
+            disabled={busy || !selected}
+            data-testid="asst-docgen-download"
+            onClick={() => void run('download')}
+          >
+            Скачать
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -597,9 +998,6 @@ function OcrResultDrawer({
                   <pre data-testid="asst-ocr-raw">{panel.rawText}</pre>
                 </details>
               ) : null}
-              {panel.jobId ? (
-                <small className="asst-ocr-panel__job">job {panel.jobId}</small>
-              ) : null}
             </>
           ) : null}
         </div>
@@ -608,116 +1006,71 @@ function OcrResultDrawer({
   )
 }
 
-function HistoryDrawer({
-  open,
+function ChatSidebar({
   dialogs,
   activeId,
-  onClose,
+  readOnly,
   onOpen,
   onNew,
   onDelete,
 }: {
-  open: boolean
   dialogs: readonly ChatDialogSummary[]
   activeId: string
-  onClose: () => void
+  readOnly?: boolean
   onOpen: (id: string) => void
   onNew: () => void
   onDelete: (id: string) => void
 }) {
-  useEffect(() => {
-    if (!open) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, open])
-
   return (
-    <div
-      className={`asst-history${open ? ' is-open' : ''}`}
-      data-testid="asst-history-shell"
-      aria-hidden={!open}
-    >
+    <aside className="asst-rail" aria-label="История диалогов" data-testid="asst-history-drawer">
       <button
         type="button"
-        className="asst-history__backdrop"
-        aria-label="Закрыть историю диалогов"
-        tabIndex={open ? 0 : -1}
-        onClick={onClose}
-      />
-      <aside
-        id="asst-history-drawer"
-        className="asst-history__drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-label="История диалогов"
-        data-testid="asst-history-drawer"
+        className="asst-rail__new"
+        onClick={onNew}
+        disabled={readOnly}
+        aria-label="Новый диалог"
+        title="Новый диалог"
+        data-testid="asst-new"
       >
-        <header className="asst-history__header">
-          <div>
-            <strong>История диалогов</strong>
-            <span>Название — по первым словам вопроса</span>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={onClose}
-            aria-label="Закрыть историю"
-            data-testid="asst-history-close"
-          >
-            ×
-          </Button>
-        </header>
-        <div className="asst-history__toolbar">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={onNew}
-            data-testid="asst-history-new"
-          >
-            + Новый диалог
-          </Button>
-        </div>
-        <ul className="asst-history__list" data-testid="asst-history-list">
-          {dialogs.length === 0 ? (
-            <li className="asst-history__empty">Пока нет сохранённых диалогов</li>
-          ) : (
-            dialogs.map((dialog) => {
-              const active = dialog.id === activeId
-              return (
-                <li key={dialog.id}>
-                  <button
-                    type="button"
-                    className={`asst-history__item${active ? ' is-active' : ''}`}
-                    onClick={() => onOpen(dialog.id)}
-                    data-testid={`asst-history-item-${dialog.id}`}
-                  >
-                    <strong>{dialog.title}</strong>
-                    <span>{formatDialogDate(dialog.updatedAt)}</span>
-                    <small>{dialog.preview}</small>
-                  </button>
-                  <button
-                    type="button"
-                    className="asst-history__delete"
-                    aria-label={`Удалить диалог «${dialog.title}»`}
-                    title="Удалить"
-                    data-testid={`asst-history-delete-${dialog.id}`}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onDelete(dialog.id)
-                    }}
-                  >
-                    ×
-                  </button>
-                </li>
-              )
-            })
-          )}
-        </ul>
-      </aside>
-    </div>
+        +
+      </button>
+      <ul className="asst-rail__list" data-testid="asst-history-list">
+        {dialogs.length === 0 ? (
+          <li className="asst-rail__empty">Нет диалогов</li>
+        ) : (
+          dialogs.map((dialog) => {
+            const active = dialog.id === activeId
+            return (
+              <li key={dialog.id}>
+                <button
+                  type="button"
+                  className={`asst-rail__item${active ? ' is-active' : ''}`}
+                  onClick={() => onOpen(dialog.id)}
+                  title={dialog.title}
+                  data-testid={`asst-history-item-${dialog.id}`}
+                >
+                  <strong>{dialog.title}</strong>
+                  <span>{formatDialogDate(dialog.updatedAt)}</span>
+                </button>
+                <button
+                  type="button"
+                  className="asst-rail__delete"
+                  aria-label={`Удалить диалог «${dialog.title}»`}
+                  title="Удалить"
+                  data-testid={`asst-history-delete-${dialog.id}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onDelete(dialog.id)
+                  }}
+                >
+                  ×
+                </button>
+              </li>
+            )
+          })
+        )}
+      </ul>
+    </aside>
   )
 }
 
@@ -741,9 +1094,9 @@ export function AssistantChat({
 }: AssistantChatProps) {
   const [draft, setDraft] = useState(initialDraft)
   const [kbOpen, setKbOpen] = useState(false)
-  const [historyOpen, setHistoryOpen] = useState(false)
   const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([])
   const [attachBusy, setAttachBusy] = useState(false)
+  const [attachHint, setAttachHint] = useState('')
   const [attachError, setAttachError] = useState('')
   const [ocrPanel, setOcrPanel] = useState<OcrPanelState>(EMPTY_OCR_PANEL)
   const kbRootRef = useRef<HTMLDivElement>(null)
@@ -765,6 +1118,8 @@ export function AssistantChat({
     'loading' | 'ready' | 'switching' | 'error'
   >('loading')
   const [modelError, setModelError] = useState('')
+  const [docgenOpen, setDocgenOpen] = useState(false)
+  const [docgenFilter, setDocgenFilter] = useState<DocTemplateFormat[] | undefined>()
   const kbSlugsRef = useRef<string[]>([])
   kbSlugsRef.current = kbCatalog
     .filter((kb) => kbSelected[kb.id])
@@ -779,9 +1134,13 @@ export function AssistantChat({
     toolsOpen,
     setToolsOpen,
     sendMessage,
+    expandAnswer,
     stopStreaming,
     setFeedback,
     runTool,
+    setToolState,
+    pushLocalAssistantMessage,
+    updateDraftText,
     newDialog,
     openDialog,
     deleteDialog,
@@ -808,7 +1167,7 @@ export function AssistantChat({
         setActiveModelId(status.active_model_id ?? status.models[0]?.id ?? '')
         setModelError(
           status.manager_reachable === false
-            ? status.last_error || 'Ollama недоступна'
+            ? status.last_error || 'Модель недоступна'
             : status.last_error || '',
         )
         setModelStatus(
@@ -823,7 +1182,7 @@ export function AssistantChat({
         setModelError(
           loadError instanceof Error
             ? loadError.message
-            : 'Не удалось загрузить список моделей Ollama',
+            : 'Не удалось загрузить список моделей',
         )
         setModelStatus('error')
       }
@@ -945,7 +1304,19 @@ export function AssistantChat({
       return
     }
     const files = Array.from(fileList).slice(0, remaining)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    const recognizingSpeech = files.some((file) => isMediaFileName(file.name))
+    const compressingVideo = files.some((file) =>
+      /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(file.name),
+    )
     setAttachBusy(true)
+    setAttachHint(
+      compressingVideo
+        ? 'Распознаю речь, видео не сохраняется…'
+        : recognizingSpeech
+          ? 'Распознаю речь, аудио не сохраняется…'
+          : 'Читаю файл…',
+    )
     setAttachError('')
     try {
       await ensureDevSession()
@@ -953,6 +1324,7 @@ export function AssistantChat({
       for (const file of files) {
         extracted.push(await extractChatAttachment(file))
       }
+      files.splice(0)
       setAttachments((current) => [...current, ...extracted].slice(0, ATTACH_MAX_FILES))
     } catch (error) {
       setAttachError(
@@ -960,6 +1332,7 @@ export function AssistantChat({
       )
     } finally {
       setAttachBusy(false)
+      setAttachHint('')
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
@@ -972,7 +1345,6 @@ export function AssistantChat({
       ? URL.createObjectURL(file)
       : null
     ocrPreviewUrlRef.current = previewUrl
-    setHistoryOpen(false)
     setToolsOpen(false)
     setKbOpen(false)
     setOcrPanel({
@@ -989,11 +1361,16 @@ export function AssistantChat({
         documentType: 'passport',
       })
       const ocr = payload.ocr
-      const fields = Object.entries(ocr?.fields || {}).map(([id, raw]) => ({
+      const rawFields = ocr?.fields || {}
+      const orderedIds = [
+        ...OCR_FIELD_ORDER.filter((id) => id in rawFields),
+        ...Object.keys(rawFields).filter((id) => !OCR_FIELD_ORDER.includes(id)),
+      ]
+      const fields = orderedIds.map((id) => ({
         id,
         label: OCR_FIELD_LABELS[id] || id,
-        value: fieldDisplayValue(raw),
-        confidence: fieldConfidencePercent(raw),
+        value: fieldDisplayValue(rawFields[id]),
+        confidence: fieldConfidencePercent(rawFields[id]),
       }))
       setOcrPanel({
         open: true,
@@ -1042,6 +1419,19 @@ export function AssistantChat({
       data-testid="assistant-chat"
       data-readonly={readOnly ? 'true' : undefined}
     >
+      <ChatSidebar
+        dialogs={dialogs}
+        activeId={sessionId}
+        readOnly={readOnly}
+        onOpen={openDialog}
+        onNew={() => {
+          newDialog()
+          setAttachments([])
+          setAttachError('')
+        }}
+        onDelete={deleteDialog}
+      />
+      <div className="asst-chat__main">
       {readOnly ? (
         <div className="asst-readonly-banner" role="status" data-testid="asst-readonly-banner">
           <StatusBadge status="neutral">Только просмотр</StatusBadge>
@@ -1062,12 +1452,12 @@ export function AssistantChat({
             }
             onChange={(event) => void onModelChange(event.target.value)}
             data-testid="asst-model-select"
-            title={modelError || 'Модели из Ollama (ollama list)'}
+            title={modelError || 'Модель для ответов'}
           >
             {modelStatus === 'loading' ? (
               <option value="">Загрузка…</option>
             ) : modelCatalog.length === 0 ? (
-              <option value="">Нет моделей в Ollama</option>
+              <option value="">Нет доступных моделей</option>
             ) : (
               <>
                 {/* Keep controlled <select> valid if active id is briefly missing */}
@@ -1082,7 +1472,6 @@ export function AssistantChat({
                     disabled={model.available === false}
                   >
                     {model.label}
-                    {model.description ? ` · ${model.description}` : ''}
                   </option>
                 ))}
               </>
@@ -1158,54 +1547,33 @@ export function AssistantChat({
             </div>
           ) : null}
         </div>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => {
-            newDialog()
-            setHistoryOpen(false)
-            setAttachments([])
-            setAttachError('')
-          }}
-          disabled={readOnly}
-          data-testid="asst-new"
-        >
-          + Новый
-        </Button>
-        <Button
-          type="button"
-          variant={historyOpen ? 'secondary' : 'ghost'}
-          disabled={readOnly}
-          aria-expanded={historyOpen}
-          aria-controls="asst-history-drawer"
-          onClick={() => {
-            setHistoryOpen((value) => !value)
-            setKbOpen(false)
-            setToolsOpen(false)
-          }}
-          data-testid="asst-history"
-        >
-          История диалогов
-        </Button>
+        <div className="asst-toolbar__extras">
+          <Button
+            type="button"
+            variant={toolsOpen ? 'secondary' : 'ghost'}
+            aria-expanded={toolsOpen}
+            aria-controls="asst-tools-panel"
+            disabled={readOnly}
+            onClick={() => {
+              setToolsOpen((value) => !value)
+              setKbOpen(false)
+            }}
+            data-testid="asst-composer-tools"
+          >
+            Инструменты
+          </Button>
+          <Button
+            type="button"
+            variant={ocrPanel.open ? 'secondary' : 'ghost'}
+            disabled={readOnly || ocrPanel.busy}
+            onClick={() => ocrFileInputRef.current?.click()}
+            data-testid="asst-composer-ocr"
+            title="Распознать документ — результат откроется слева, без отправки в чат"
+          >
+            {ocrPanel.busy ? 'OCR…' : 'OCR'}
+          </Button>
+        </div>
       </div>
-
-      <HistoryDrawer
-        open={historyOpen}
-        dialogs={dialogs}
-        activeId={sessionId}
-        onClose={() => setHistoryOpen(false)}
-        onOpen={(id) => {
-          openDialog(id)
-          setHistoryOpen(false)
-        }}
-        onNew={() => {
-          newDialog()
-          setHistoryOpen(false)
-          setAttachments([])
-          setAttachError('')
-        }}
-        onDelete={deleteDialog}
-      />
 
       <OcrResultDrawer panel={ocrPanel} onClose={closeOcrPanel} />
 
@@ -1214,7 +1582,45 @@ export function AssistantChat({
           tools={tools}
           open={toolsOpen}
           onClose={() => setToolsOpen(false)}
-          onRun={runTool}
+          onRun={(id) => {
+            if (id === 'document' || id === 'text' || id === 'diagram') {
+              setToolsOpen(false)
+              setDocgenFilter(
+                id === 'text'
+                  ? ['txt']
+                  : id === 'diagram'
+                    ? ['pptx', 'bpmn', 'mmd']
+                    : undefined,
+              )
+              setDocgenOpen(true)
+              setToolState(id, { state: 'running', detail: 'форма бланка' })
+              return
+            }
+            runTool(id)
+          }}
+        />
+      ) : null}
+
+      {!readOnly ? (
+        <GenerateDocumentModal
+          open={docgenOpen}
+          formatFilter={docgenFilter}
+          onClose={() => {
+            setDocgenOpen(false)
+            setToolState('document', { state: 'idle', detail: undefined })
+            setToolState('text', { state: 'idle', detail: undefined })
+            setToolState('diagram', { state: 'idle', detail: undefined })
+          }}
+          onDraft={(text, draft) => {
+            pushLocalAssistantMessage(text, draft)
+            setToolState('document', { state: 'done', detail: 'черновик' })
+            setToolState('text', { state: 'done', detail: 'черновик' })
+            setToolState('diagram', { state: 'done', detail: 'черновик' })
+          }}
+          onDownloaded={() => {
+            setToolState('document', { state: 'done', detail: 'скачан' })
+            setToolState('diagram', { state: 'done', detail: 'скачан' })
+          }}
         />
       ) : null}
 
@@ -1223,7 +1629,9 @@ export function AssistantChat({
         streaming={streaming}
         readOnly={readOnly}
         onFeedback={setFeedback}
+        onExpand={expandAnswer}
         onStop={stopStreaming}
+        onDraftChange={updateDraftText}
       />
 
       {error && !readOnly ? (
@@ -1243,38 +1651,23 @@ export function AssistantChat({
       ) : null}
 
       <form className="asst-composer" onSubmit={onSubmit} data-testid="asst-composer">
-        <div className="asst-composer__extras">
-          <Button
-            type="button"
-            variant={toolsOpen ? 'secondary' : 'ghost'}
-            aria-expanded={toolsOpen}
-            aria-controls="asst-tools-panel"
-            disabled={readOnly}
-            onClick={() => {
-              setToolsOpen((value) => !value)
-              setKbOpen(false)
-              setHistoryOpen(false)
-            }}
-            data-testid="asst-composer-tools"
-          >
-            Инструменты
-          </Button>
-          <Button
-            type="button"
-            variant={ocrPanel.open ? 'secondary' : 'ghost'}
-            disabled={readOnly || ocrPanel.busy}
-            onClick={() => ocrFileInputRef.current?.click()}
-            data-testid="asst-composer-ocr"
-            title="Распознать документ — результат откроется слева, без отправки в чат"
-          >
-            {ocrPanel.busy ? 'OCR…' : 'OCR'}
-          </Button>
-        </div>
         {attachments.length > 0 ? (
           <ul className="asst-composer__attachments" data-testid="asst-attach-list">
             {attachments.map((file) => (
               <li key={`${file.name}-${file.size_bytes ?? 0}`}>
-                <span>{file.name}</span>
+                <span>
+                  {file.name}
+                  {file.media?.compressed ? ' · аудио' : ''}
+                </span>
+                {file.media && file.text ? (
+                  <button
+                    type="button"
+                    className="asst-composer__transcript"
+                    onClick={() => downloadTranscript(file.name, file.text)}
+                  >
+                    TXT
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   aria-label={`Убрать ${file.name}`}
@@ -1319,76 +1712,85 @@ export function AssistantChat({
           onChange={(event) => void onPickOcr(event.target.files)}
           data-testid="asst-ocr-input"
         />
-        <div className="asst-composer__field">
-          <textarea
-            id="asst-draft"
-            value={draft}
-            maxLength={maxChars}
-            placeholder={
-              readOnly
-                ? 'Отправка сообщений недоступна для аналитика'
-                : attachments.length
-                  ? 'Добавьте вопрос к файлу или отправьте для саммари…'
-                  : 'Задайте вопрос…'
-            }
-            data-testid="asst-draft"
-            disabled={readOnly}
-            readOnly={readOnly}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-          <button
-            type="button"
-            className="asst-composer__attach"
-            disabled={readOnly || attachBusy || streaming || attachments.length >= ATTACH_MAX_FILES}
-            onClick={() => fileInputRef.current?.click()}
-            data-testid="asst-attach"
-            title={
-              attachBusy
-                ? 'Читаю файл…'
-                : 'Прикрепить файл · PDF, DOC, DOCX, TXT, RTF, JPG, PNG · до 10 МБ'
-            }
-            aria-label={attachBusy ? 'Читаю файл' : 'Прикрепить файл'}
-          >
-            {attachBusy ? (
-              <span className="asst-composer__attach-busy" aria-hidden>
-                …
-              </span>
-            ) : (
-              <svg
-                className="asst-composer__attach-icon"
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                aria-hidden
-              >
-                <path
-                  d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.42-7.42l8.49-8.49a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l7.78-7.78"
-                  stroke="currentColor"
-                  strokeWidth="1.85"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            )}
-          </button>
-        </div>
-        <div className="asst-composer__footer">
-          <span data-testid="asst-char-count">
-            {charCount} / {maxChars} символов
-          </span>
-          <Button
-            type="submit"
-            disabled={
-              readOnly
-              || streaming
-              || attachBusy
-              || (!draft.trim() && !attachments.length)
-            }
-            data-testid="asst-send"
-          >
-            {streaming ? 'Стриминг…' : 'Отправить'}
-          </Button>
+        <div className="asst-composer__row">
+          <div className="asst-composer__field">
+            <textarea
+              id="asst-draft"
+              value={draft}
+              maxLength={maxChars}
+              placeholder={
+                readOnly
+                  ? 'Отправка сообщений недоступна для аналитика'
+                  : attachments.length
+                    ? 'Добавьте вопрос к файлу или отправьте для саммари…'
+                    : 'Задайте вопрос…'
+              }
+              data-testid="asst-draft"
+              disabled={readOnly}
+              readOnly={readOnly}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' || event.shiftKey) return
+                event.preventDefault()
+                if (readOnly || streaming || attachBusy) return
+                if (!draft.trim() && !attachments.length) return
+                event.currentTarget.form?.requestSubmit()
+              }}
+            />
+            <button
+              type="button"
+              className="asst-composer__attach"
+              disabled={readOnly || attachBusy || streaming || attachments.length >= ATTACH_MAX_FILES}
+              onClick={() => fileInputRef.current?.click()}
+              data-testid="asst-attach"
+              title={
+                attachBusy
+                  ? attachHint || 'Читаю файл…'
+                  : 'Прикрепить файл · видео сожмётся в аудио, затем распознаем речь'
+              }
+              aria-label={attachBusy ? attachHint || 'Читаю файл' : 'Прикрепить файл'}
+            >
+              {attachBusy ? (
+                <span className="asst-composer__attach-busy" aria-hidden>
+                  …
+                </span>
+              ) : (
+                <svg
+                  className="asst-composer__attach-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden
+                >
+                  <path
+                    d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.42-7.42l8.49-8.49a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l7.78-7.78"
+                    stroke="currentColor"
+                    strokeWidth="1.85"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+            </button>
+          </div>
+          <div className="asst-composer__footer">
+            <span data-testid="asst-char-count">
+              {charCount}/{maxChars}
+            </span>
+            <Button
+              type="submit"
+              disabled={
+                readOnly
+                || streaming
+                || attachBusy
+                || (!draft.trim() && !attachments.length)
+              }
+              data-testid="asst-send"
+            >
+              {streaming ? 'Стриминг…' : 'Отправить'}
+            </Button>
+          </div>
         </div>
         <div
           className={`asst-composer__meter asst-composer__meter--${charMeterTone}`}
@@ -1405,6 +1807,7 @@ export function AssistantChat({
           />
         </div>
       </form>
+      </div>
     </div>
   )
 }

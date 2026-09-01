@@ -1,4 +1,4 @@
-"""Ollama catalog + runtime active model for the assistant chat UI."""
+"""Assistant chat model catalog: DeepSeek when configured, else Ollama."""
 
 from __future__ import annotations
 
@@ -22,18 +22,46 @@ def ollama_base_url() -> str:
     return raw
 
 
+def assistant_remote_base_url() -> str:
+    for key in ("ASSISTANT_LLM_BASE_URL", "SUFLER_LLM_BASE_URL"):
+        raw = (os.environ.get(key) or "").strip().rstrip("/")
+        if raw:
+            return raw
+    openai = (os.environ.get("OPENAI_BASE_URL") or "").strip().rstrip("/")
+    if openai and "deepseek.com" in openai.lower():
+        return openai
+    return ""
+
+
+def is_deepseek_assistant() -> bool:
+    return "deepseek.com" in assistant_remote_base_url().lower()
+
+
 def openai_base_url() -> str:
+    remote = assistant_remote_base_url()
+    if remote:
+        return remote
     raw = (os.environ.get("OPENAI_BASE_URL") or "").strip().rstrip("/")
-    if raw and "deepseek.com" not in raw.lower():
+    if raw:
         return raw
     return f"{ollama_base_url()}/v1"
 
 
 def _is_assistant_model(model_id: str) -> bool:
-    return bool(model_id) and "deepseek" not in model_id.lower()
+    return bool(model_id)
+
+
+def _deepseek_model_id() -> str:
+    return (
+        (os.environ.get("ASSISTANT_LLM_MODEL") or "").strip()
+        or (os.environ.get("SUFLER_LLM_MODEL") or "").strip()
+        or "deepseek-chat"
+    )
 
 
 def _env_default_model() -> str:
+    if is_deepseek_assistant():
+        return _deepseek_model_id()
     openai_model = (os.environ.get("OPENAI_MODEL") or "").strip()
     if _is_assistant_model(openai_model):
         return openai_model
@@ -66,7 +94,9 @@ def _write_runtime_model(model_id: str) -> None:
 
 
 def active_model_id() -> str:
-    """Runtime UI selection, then env default. Ignore DeepSeek (sufler-only)."""
+    """DeepSeek when configured; otherwise Ollama/UI selection."""
+    if is_deepseek_assistant():
+        return _deepseek_model_id()
     runtime = _read_runtime_model()
     if runtime and _is_assistant_model(runtime):
         return runtime
@@ -141,7 +171,29 @@ def offline_status(*, error: str | None = None) -> dict[str, Any]:
     }
 
 
+def _deepseek_status() -> dict[str, Any]:
+    model = _deepseek_model_id()
+    return {
+        "active_model_id": model,
+        "switching": False,
+        "llama_running": True,
+        "manager_reachable": True,
+        "openai_alias": model,
+        "models": [
+            {
+                "id": model,
+                "label": "DeepSeek",
+                "description": "",
+                "available": True,
+            }
+        ],
+        "last_error": None,
+    }
+
+
 def get_models_status() -> dict[str, Any]:
+    if is_deepseek_assistant():
+        return _deepseek_status()
     try:
         models = _list_pulled_models()
     except (
@@ -200,6 +252,13 @@ def select_model(model_id: str) -> dict[str, Any]:
     model_id = model_id.strip()
     if not model_id:
         raise ValueError("model_id is required")
+    if is_deepseek_assistant():
+        active = _deepseek_model_id()
+        if model_id != active:
+            raise ValueError(
+                f"Qwen/Ollama отключены. Активна облачная модель {active}."
+            )
+        return get_models_status()
     try:
         models = _list_pulled_models()
     except (

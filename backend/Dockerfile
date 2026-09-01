@@ -6,13 +6,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Tesseract for OCR (FR-OCR); Russian + English language packs.
+# Tesseract for OCR (FR-OCR); ffmpeg for audio/video ASR (§5.1.38).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tesseract-ocr \
         tesseract-ocr-rus \
         tesseract-ocr-eng \
         antiword \
+        ffmpeg \
+        fonts-dejavu-core \
         libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 

@@ -37,7 +37,7 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
-/** Models pulled in Ollama + currently active chat model. */
+/** Active chat model catalog (DeepSeek or local Ollama). */
 export async function fetchLocalLlmModels(): Promise<LocalLlmStatus> {
   const response = await fetch('/api/v1/assistant/models/', {
     credentials: 'include',
@@ -49,7 +49,7 @@ export async function fetchLocalLlmModels(): Promise<LocalLlmStatus> {
   return (await response.json()) as LocalLlmStatus
 }
 
-/** Select active Ollama model for subsequent chat requests (no container restart). */
+/** Select active chat model for subsequent requests (no container restart). */
 export async function selectLocalLlmModel(modelId: string): Promise<LocalLlmStatus> {
   const response = await fetch('/api/v1/assistant/models/', {
     method: 'PUT',

@@ -20,6 +20,7 @@ import { QuPreviewScreen } from './QuPreviewScreen'
 import { KbAdminScreen } from './KbAdminScreen'
 import { PromptsAssistantScreen } from './PromptsAssistantScreen'
 import { CapabilitiesScreen } from './CapabilitiesScreen'
+import { AssistantToolsScreen } from './AssistantToolsScreen'
 import { DocTypesScreen } from './DocTypesScreen'
 import { OcrDocumentsPanel } from '../ocr/OcrDocumentsPanel'
 import { CcReportsScreen } from '../reports/CcReportsScreen'
@@ -116,9 +117,9 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
   },
   assistant_tools: {
     title: 'Инструменты ассистента',
-    subtitle: 'RPA, шаблоны документов и безопасные SQL-инструменты.',
-    status: 'На проверке ИБ',
-    cards: [['RPA', '7', 'Зарегистрировано'], ['Шаблоны', '14', 'Активные формы'], ['SQL', '3', 'Запросы только на чтение']],
+    subtitle: 'Библиотека бланков банка (Word/PDF/Excel/PPT/BPMN), RPA и SQL.',
+    status: 'Шаблоны UC-ASS-05',
+    cards: [['RPA', '—', 'Следующий этап'], ['Шаблоны', 'CRUD', 'Активные бланки'], ['SQL', '—', 'Только чтение']],
   },
   monitoring: {
     title: 'Мониторинг ассистента',
@@ -570,6 +571,8 @@ export function AiHubAdminApp({
             <PromptsAssistantScreen canEdit={canEdit} />
           ) : screen === 'capabilities' ? (
             <CapabilitiesScreen canEdit={canEdit} />
+          ) : screen === 'assistant_tools' ? (
+            <AssistantToolsScreen canEdit={canEdit} />
           ) : screen === 'ocr' ? (
             <div className="admin-ocr-screen" data-testid="admin-ocr-screen">
               <OcrDocumentsPanel />
@@ -673,7 +676,7 @@ export function AiHubAdminApp({
           )}
         </main>
 
-        {screen !== 'qu_admin' && screen !== 'sufler_training' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && screen !== 'doc_types' && screen !== 'ocr' && screen !== 'sufler_stats' && screen !== 'cc_reports' && screen !== 'asr_qa' && screen !== 'scenario_editor' && screen !== 'scenario_test' && screen !== 'scenario_bindings' && (
+        {screen !== 'qu_admin' && screen !== 'sufler_training' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && screen !== 'assistant_tools' && screen !== 'doc_types' && screen !== 'ocr' && screen !== 'sufler_stats' && screen !== 'cc_reports' && screen !== 'asr_qa' && screen !== 'scenario_editor' && screen !== 'scenario_test' && screen !== 'scenario_bindings' && (
         <footer className="admin-save-footer" data-testid="admin-save-footer">
           <span>
             {screen === 'model_params'
