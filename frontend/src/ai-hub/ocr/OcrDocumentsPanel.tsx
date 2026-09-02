@@ -167,12 +167,6 @@ const BUILTIN_SCHEMAS: Record<string, Record<string, unknown>> = {
   },
 }
 
-const BUILTIN_DOC_TYPES: OcrDocType[] = OPERATOR_DOC_TYPES.map((doc_type) => ({
-  doc_type,
-  title: OPERATOR_DOC_TITLES[doc_type],
-  field_schema: BUILTIN_SCHEMAS[doc_type],
-}))
-
 function humanizeKey(key: string): string {
   if (/[А-Яа-яЁё]/.test(key)) return key.replace(/_/g, ' ')
   return key.replace(/_/g, ' ').trim() || 'Поле'
@@ -603,7 +597,7 @@ export function OcrDocumentsPanel({
   const [dragOver, setDragOver] = useState(false)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [fieldsByJob, setFieldsByJob] = useState<Record<string, OcrField[]>>({})
-  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null)
+  const [, setSelectedFieldId] = useState<string | null>(null)
   const [approved, setApproved] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')

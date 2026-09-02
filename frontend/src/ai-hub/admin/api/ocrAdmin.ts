@@ -395,7 +395,7 @@ export function downloadOcrFieldsDocx(
     { name: 'word/document.xml', data: encodeUtf8(documentXml) },
   ])
   triggerDownload(
-    new Blob([bytes], {
+    new Blob([bytes.slice()], {
       type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     }),
     `${fileStem}.docx`,

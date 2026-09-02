@@ -105,8 +105,6 @@ const OCR_FIELD_LABELS: Record<string, string> = {
   address: 'Адрес',
   issued_by: 'Кем выдан',
   birth_place: 'Место рождения',
-  personal_number: 'Личный номер',
-  nationality: 'Гражданство',
 }
 const OCR_FIELD_ORDER = Object.keys(OCR_FIELD_LABELS)
 

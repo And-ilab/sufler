@@ -149,7 +149,11 @@ export function DocTypesScreen({ canEdit = true }: DocTypesScreenProps) {
         .filter((item) => isOperatorDocType(item.doc_type))
         .map((item) => ({
           ...item,
-          title: OPERATOR_DOC_TITLES[item.doc_type] || item.title,
+          title: (
+            isOperatorDocType(item.doc_type)
+              ? OPERATOR_DOC_TITLES[item.doc_type]
+              : item.title
+          ),
         }))
         .sort((left, right) => (
           OPERATOR_DOC_TYPES.indexOf(left.doc_type as typeof OPERATOR_DOC_TYPES[number])
