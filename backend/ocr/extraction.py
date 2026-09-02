@@ -10,6 +10,17 @@ import re
 from typing import Any, Mapping
 
 from ocr.mrz import parse_td3_mrz
+from ocr.page_templates import (
+    detect_document_type_from_pages,
+    detect_page_kind,
+    collapse_extracted_fields,
+    extract_generic_fields,
+    extract_labeled_fields,
+    extract_registration_fields,
+    merge_field_maps,
+    normalize_ocr_date,
+    _label_value as _shared_label_value,
+)
 
 FieldValue = dict[str, Any]
 
@@ -96,6 +107,13 @@ _GEO_WORDS = frozenset(
 )
 
 
+_DATE_VALUE = (
+    r"\d{2}[./-]\d{2}[./-]\d{4}"
+    r"|\d{2}\s+\d{2}\s+\d{4}"
+    r"|\d{4}-\d{2}-\d{2}"
+)
+
+
 def _label_value(
     text: str,
     labels: tuple[str, ...],
@@ -103,30 +121,36 @@ def _label_value(
     pattern: str,
     confidence: float = 0.9,
 ) -> FieldValue | None:
-    """Match `Label: value` on one line or `Label` / value on the next line."""
-    for label in labels:
-        same_line = re.compile(
-            rf"(?im)(?:^|\n)\s*{re.escape(label)}\s*[:\-–]?\s*({pattern})\s*(?:\n|$)",
-        )
-        match = same_line.search(text)
-        if match:
-            return _field(match.group(1), confidence, source=f"label:{label}")
-        next_line = re.compile(
-            rf"(?im)(?:^|\n)\s*{re.escape(label)}\s*[:\-–]?\s*\n\s*({pattern})\s*(?:\n|$)",
-        )
-        match = next_line.search(text)
-        if match:
-            return _field(
-                match.group(1),
-                confidence - 0.03,
-                source=f"label_nl:{label}",
-            )
-    return None
+    """Match `Label: value` or bilingual `Label / OTHER` with value on the next line."""
+    return _shared_label_value(
+        text, labels, pattern=pattern, confidence=confidence
+    )
+
+
+def _normalize_date(raw: str) -> str:
+    return normalize_ocr_date(raw)
 
 
 def _is_geo_or_junk_name(value: str) -> bool:
     tokens = [part for part in re.split(r"\s+", value.strip()) if part]
     if not tokens:
+        return True
+    if re.search(r"[A-Za-z]", value) and re.search(r"[А-Яа-яЁё]", value):
+        return True
+    hay = value.upper().replace("Ё", "Е")
+    if any(
+        frag in hay
+        for frag in (
+            "РЕСП",
+            "ВОТКИН",
+            "УДМУРТ",
+            "ЗАРЕГ",
+            "ЖИТЕЛЬ",
+            "ГОРОД",
+            "УЛИЦ",
+            "ОБЛАСТ",
+        )
+    ):
         return True
     upper = [token.casefold().replace("ё", "е").upper() for token in tokens]
     if any(token in _GEO_WORDS for token in upper):
@@ -155,11 +179,11 @@ def _visual_repeated_names(text: str) -> tuple[str, str] | None:
     return None
 
 
-def _normalize_date(raw: str) -> str:
-    return raw.replace("/", ".").replace("-", ".")
-
-
-def extract_passport_fields(text: str) -> dict[str, FieldValue]:
+def extract_passport_fields(
+    text: str,
+    *,
+    allow_name_guess: bool = True,
+) -> dict[str, FieldValue]:
     fields: dict[str, FieldValue] = {}
     normalized = text.replace("\r\n", "\n")
     mrz = parse_td3_mrz(normalized)
@@ -243,15 +267,32 @@ def extract_passport_fields(text: str) -> dict[str, FieldValue]:
     if patronymic and "patronymic" not in fields:
         fields["patronymic"] = patronymic
 
-    # RF passport: "45 11 532704" / "4511 532704"; BY: "PD 0000000"
+    # RF passport: "45 11 532704" / "4511 532704"; BY: "PD 0000000" / "KH2430485"
     rf_id = re.search(
-        r"(?m)(?<![\d])(\d{2})\s*(\d{2})\s+(\d{6})(?!\d)",
+        r"(?m)(?<![\d])(\d{2})\s*(\d{2})\s*(\d{6})(?!\d)",
         normalized,
     )
     by_id = re.search(
         r"(?i)\b([A-ZА-Я]{2})\s*[-–]?\s*(\d{7})\b",
         normalized,
     )
+    by_labeled = _label_value(
+        normalized,
+        (
+            "Passport No",
+            "Passport No.",
+            "PASSPORT NO",
+            "НУМАР ПАШПАРТА",
+            "Номер паспорта",
+        ),
+        pattern=r"[A-ZА-Я]{2}\s*[-–]?\s*\d{7}",
+        confidence=0.93,
+    )
+    if by_labeled and not by_id:
+        compact = re.sub(r"[\s\-–]+", "", str(by_labeled["value"]).upper())
+        labeled_match = re.fullmatch(r"([A-ZА-Я]{2})(\d{7})", compact)
+        if labeled_match:
+            by_id = labeled_match
     series = _label_value(
         normalized,
         ("Серия", "Series", "Серия паспорта"),
@@ -271,9 +312,15 @@ def extract_passport_fields(text: str) -> dict[str, FieldValue]:
             source="rf_id",
         )
         number = number or _field(rf_id.group(3), 0.9, source="rf_id")
-    elif by_id:
-        series = series or _field(by_id.group(1).upper(), 0.8, source="by_id")
-        number = number or _field(by_id.group(2), 0.8, source="by_id")
+    if by_id:
+        by_series = by_id.group(1).upper()
+        by_number = by_id.group(2)
+        series_val = str(series["value"]).replace(" ", "") if series else ""
+        number_val = str(number["value"]) if number else ""
+        if not series or not re.fullmatch(r"[A-ZА-Я]{2}", series_val):
+            series = _field(by_series, 0.9, source="by_id")
+        if not number or not re.fullmatch(r"\d{7}", number_val):
+            number = _field(by_number, 0.9, source="by_id")
     intl_id = re.search(r"\b([A-Z]\d{8})\b", normalized.upper())
     if (
         intl_id
@@ -318,13 +365,20 @@ def extract_passport_fields(text: str) -> dict[str, FieldValue]:
 
     issue_date = _label_value(
         normalized,
-        ("Дата выдачи", "Date of issue", "Issued", "Выдан"),
-        pattern=r"\d{2}[./-]\d{2}[./-]\d{4}|\d{4}-\d{2}-\d{2}",
+        (
+            "Дата выдачи",
+            "Date of issue",
+            "DATE OF ISSUE",
+            "Issued",
+            "Выдан",
+            "Дата выдачы",
+        ),
+        pattern=_DATE_VALUE,
         confidence=0.9,
     )
     if not issue_date:
         date_match = re.search(
-            r"(?im)(?:выдач|issued).{0,40}?(\d{2}[./-]\d{2}[./-]\d{4})",
+            rf"(?im)(?:выдач|issued).{{0,80}}?({_DATE_VALUE})",
             normalized,
         )
         if date_match:
@@ -335,8 +389,16 @@ def extract_passport_fields(text: str) -> dict[str, FieldValue]:
             )
     birth_date = _label_value(
         normalized,
-        ("Дата рождения", "Date of birth", "Birth", "Рождения"),
-        pattern=r"\d{2}[./-]\d{2}[./-]\d{4}|\d{4}-\d{2}-\d{2}",
+        (
+            "Дата рождения",
+            "Date of birth",
+            "DATE OF BIRTH",
+            "Birth",
+            "Рождения",
+            "Дата нараджэння",
+            "Дата нараджэння",
+        ),
+        pattern=_DATE_VALUE,
         confidence=0.9,
     )
     if birth_date and "birth_date" not in fields:
@@ -365,8 +427,8 @@ def extract_passport_fields(text: str) -> dict[str, FieldValue]:
                 f"{visual[0]} {visual[1]}", 0.78, source="repeat"
             )
 
-    # Free-form FIO only when labels failed — never take geo lines.
-    if "full_name" not in fields:
+    # Free-form FIO only when labels failed — never take geo / stamp lines.
+    if allow_name_guess and "full_name" not in fields:
         for match in re.finditer(
             rf"(?m)^\s*({_NAME_TOKEN}(?:\s+{_NAME_TOKEN}){{1,2}})\s*$",
             normalized,
@@ -506,18 +568,77 @@ def detect_document_type(text: str, filename: str = "") -> str:
         return "passport"
     if any(
         token in hay
-        for token in ("платёжн", "платежн", "payment order", "поручен")
+        for token in (
+            "платёжн",
+            "платежн",
+            "payment order",
+            "поручен",
+            "poruchen",
+            "platezh",
+        )
     ):
         return "payment_order"
-    if any(token in hay for token in ("выписк", "statement", "account")):
+    if any(
+        token in hay
+        for token in (
+            "егрн",
+            "недвижим",
+            "кадастр",
+            "реестр недвижимости",
+        )
+    ):
+        pass
+    elif any(
+        token in hay
+        for token in (
+            "остаток",
+            "выписк по сч",
+            "statement of account",
+            "opening balance",
+        )
+    ) or (
+        any(token in hay for token in ("выписк", "vypisk", "справк", "spravk"))
+        and any(
+            token in hay
+            for token in ("счёт", "счет", "iban", "зачисление", "по счету", "по счёту")
+        )
+    ):
         return "account_statement"
-    if any(token in hay for token in ("кредитн", "loan agreement")):
+    if any(token in hay for token in ("кредитн", "kredit", "loan agreement")):
         return "loan_agreement"
-    if any(token in hay for token in ("квитанц", "receipt")):
+    if any(token in hay for token in ("квитанц", "kvitan", "receipt")):
         return "payment_receipt"
-    if any(token in hay for token in ("заявлен", "application", "анкет")):
+    if any(
+        token in hay
+        for token in ("заявлен", "zayavl", "application", "анкет")
+    ):
         return "banking_application"
+    if any(
+        token in hay
+        for token in ("прописк", "регистрац", "место жительства", "residence")
+    ):
+        return "passport"
+    voted = detect_document_type_from_pages([text], filename=filename)
+    if voted != "unknown":
+        return voted
     return "unknown"
+
+
+def _schema_keys_for(doc_type: str, field_schema: Mapping[str, Any] | None = None) -> set[str]:
+    keys: set[str] = set()
+    raw = field_schema or {}
+    nested = raw.get("fields") if isinstance(raw.get("fields"), Mapping) else raw
+    if isinstance(nested, Mapping):
+        keys.update(str(name) for name in nested if name != "fields")
+    if not doc_type or doc_type in {"unknown", ""}:
+        return keys
+    try:
+        from ocr.templates_registry import template_schema_for
+
+        keys.update(str(name) for name in (template_schema_for(doc_type).get("fields") or {}))
+    except Exception:
+        pass
+    return keys
 
 
 def extract_fields(
@@ -525,17 +646,62 @@ def extract_fields(
     *,
     document_type: str | None = None,
     filename: str = "",
+    pages: list[str] | None = None,
+    field_schema: Mapping[str, Any] | None = None,
 ) -> tuple[str, dict[str, FieldValue]]:
-    doc_type = document_type or detect_document_type(text, filename)
+    page_texts = [item for item in (pages or [text]) if item and item.strip()]
+    combined = "\n\n".join(page_texts) or text
+    doc_type = document_type or detect_document_type(combined, filename)
     if doc_type == "unknown":
-        doc_type = detect_document_type(text, filename)
+        doc_type = detect_document_type_from_pages(page_texts or [combined], filename)
+    forced = bool(document_type and document_type not in {"unknown", ""})
+    labeled = extract_labeled_fields(combined)
+    generic = {} if forced else extract_generic_fields(combined)
+    page_kind = detect_page_kind(combined)
     extractor = _EXTRACTORS.get(doc_type)
-    if extractor is None:
-        guessed = extract_passport_fields(text)
+    specialist: dict[str, FieldValue] = {}
+    if extractor is extract_passport_fields:
+        specialist = extract_passport_fields(
+            combined,
+            allow_name_guess=page_kind
+            not in {"passport_registration", "passport_children"},
+        )
+    elif extractor is not None:
+        specialist = extractor(combined)
+    if page_kind == "passport_registration" or doc_type == "passport":
+        specialist = merge_field_maps(
+            extract_registration_fields(combined),
+            specialist,
+        )
+        if page_kind == "passport_registration":
+            for key in ("full_name", "surname", "given_name", "patronymic"):
+                specialist.pop(key, None)
+                labeled.pop(key, None)
+    if extractor is None and doc_type in {"unknown", ""}:
+        guessed = extract_passport_fields(combined)
         if guessed.get("full_name") or guessed.get("document_number"):
-            return "passport", guessed
-        return doc_type, {}
-    return doc_type, extractor(text)
+            return "passport", collapse_extracted_fields(
+                merge_field_maps(generic, labeled, guessed)
+            )
+    merged = collapse_extracted_fields(merge_field_maps(generic, labeled, specialist))
+    if not merged and specialist:
+        merged = specialist
+    if "currency" not in merged:
+        currency = re.search(r"\b(BYN|USD|EUR|RUB)\b", combined, re.I)
+        if currency:
+            merged["currency"] = _field(
+                currency.group(1).upper(),
+                0.88,
+                source="token",
+            )
+    if doc_type in {"unknown", ""} and merged:
+        voted = detect_document_type_from_pages(page_texts or [combined], filename)
+        if voted != "unknown":
+            doc_type = voted
+    allowed = _schema_keys_for(doc_type, field_schema)
+    if forced and allowed:
+        merged = {key: value for key, value in merged.items() if key in allowed}
+    return doc_type or "unknown", merged
 
 
 def fields_as_plain(fields: Mapping[str, FieldValue]) -> dict[str, Any]:

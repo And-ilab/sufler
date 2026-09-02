@@ -15,6 +15,47 @@ class TemplateRegistryError(ValueError):
     """Invalid template admin operation."""
 
 
+_PASSPORT_IDENTITY_FIELDS: tuple[tuple[str, dict[str, Any]], ...] = (
+    ("surname", {"type": "string", "min_length": 2, "max_length": 80}),
+    ("given_name", {"type": "string", "min_length": 2, "max_length": 80}),
+)
+
+
+def ensure_passport_identity_schema(
+    field_schema: Mapping[str, Any] | None,
+    required_fields: list[str] | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Keep Фамилия / Имя on the passport template even if the DB row was trimmed."""
+    schema = dict(field_schema or {})
+    required = list(required_fields or [])
+    ordered: dict[str, Any] = {}
+    for key, spec in _PASSPORT_IDENTITY_FIELDS:
+        current = schema.get(key)
+        ordered[key] = dict(current) if isinstance(current, Mapping) else dict(spec)
+        if key not in required:
+            required.append(key)
+    for key, value in schema.items():
+        if key not in ordered:
+            ordered[key] = value
+    return ordered, required
+
+
+def _persist_passport_identity(template: OcrDocumentTemplate) -> OcrDocumentTemplate:
+    if template.doc_type != "passport":
+        return template
+    schema, required = ensure_passport_identity_schema(
+        template.field_schema, list(template.required_fields or [])
+    )
+    if schema == (template.field_schema or {}) and required == list(
+        template.required_fields or []
+    ):
+        return template
+    template.field_schema = schema
+    template.required_fields = required
+    template.save(update_fields=["field_schema", "required_fields", "updated_at"])
+    return template
+
+
 def seed_templates_from_yaml(*, force: bool = False) -> list[dict[str, Any]]:
     """Ensure DB templates exist for every YAML document_type."""
     rules = _load_rules(DEFAULT_RULES_PATH)
@@ -51,26 +92,34 @@ def list_templates(*, include_drafts: bool = True) -> list[dict[str, Any]]:
     qs = OcrDocumentTemplate.objects.all()
     if not include_drafts:
         qs = qs.filter(status=OcrDocumentTemplate.STATUS_PUBLISHED)
-    return [template_to_dict(item, include_samples=True) for item in qs]
+    return [
+        template_to_dict(_persist_passport_identity(item), include_samples=True)
+        for item in qs
+    ]
 
 
 def get_template(doc_type: str) -> OcrDocumentTemplate:
     if not OcrDocumentTemplate.objects.exists():
         seed_templates_from_yaml()
     try:
-        return OcrDocumentTemplate.objects.get(doc_type=doc_type)
+        template = OcrDocumentTemplate.objects.get(doc_type=doc_type)
     except OcrDocumentTemplate.DoesNotExist as exc:
         raise TemplateRegistryError(f"Unknown doc_type: {doc_type}") from exc
+    return _persist_passport_identity(template)
 
 
 def template_schema_for(doc_type: str) -> dict[str, Any]:
     template = get_template(doc_type)
+    fields = dict(template.field_schema or {})
+    required = list(template.required_fields or [])
+    if doc_type == "passport":
+        fields, required = ensure_passport_identity_schema(fields, required)
     return {
         "doc_type": template.doc_type,
         "title": template.title,
         "template_version": str(template.template_version),
-        "required_fields": list(template.required_fields or []),
-        "fields": dict(template.field_schema or {}),
+        "required_fields": required,
+        "fields": fields,
         "confidence_min": float(template.confidence_min),
     }
 
@@ -80,6 +129,13 @@ def template_to_dict(
     *,
     include_samples: bool = False,
 ) -> dict[str, Any]:
+    if template.doc_type == "passport":
+        field_schema, required_fields = ensure_passport_identity_schema(
+            template.field_schema, list(template.required_fields or [])
+        )
+    else:
+        field_schema = dict(template.field_schema or {})
+        required_fields = list(template.required_fields or [])
     payload: dict[str, Any] = {
         "id": template.pk,
         "doc_type": template.doc_type,
@@ -87,8 +143,8 @@ def template_to_dict(
         "description": template.description,
         "template_version": template.template_version,
         "status": template.status,
-        "required_fields": list(template.required_fields or []),
-        "field_schema": dict(template.field_schema or {}),
+        "required_fields": required_fields,
+        "field_schema": field_schema,
         "confidence_min": float(template.confidence_min),
         "sample_prompt": template.sample_prompt,
         "owner": template.owner,

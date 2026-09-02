@@ -19,6 +19,7 @@ import {
   savePersistedChat,
   type ChatDialogSummary,
 } from './chatPersistence'
+import { filterOcrFields } from '../ai-hub/ocr/fieldQuality'
 import {
   DEFAULT_TOOLS,
   SEED_MESSAGES,
@@ -46,16 +47,28 @@ const OCR_FIELD_LABELS: Record<string, string> = {
   amount: 'Сумма',
   purpose: 'Назначение',
   currency: 'Валюта',
+  address: 'Адрес',
+  issued_by: 'Кем выдан',
+  birth_place: 'Место рождения',
+  personal_number: 'Личный номер',
+  nationality: 'Гражданство',
 }
 
 function toAssistantOcr(attachment: ChatAttachmentPayload): AssistantOcrResult | null {
   const ocr = attachment.ocr
   if (!ocr?.job_id) return null
-  const fields = Object.entries(ocr.fields || {}).map(([id, raw]) => ({
-    id,
-    label: OCR_FIELD_LABELS[id] || id,
-    value: fieldDisplayValue(raw),
-    confidence: fieldConfidencePercent(raw),
+  const fields = filterOcrFields(Object.entries(ocr.fields || {}).map(([id, raw]) => {
+    const explicit = (
+      raw && typeof raw === 'object' && raw !== null && 'label' in raw
+        ? String((raw as { label?: unknown }).label || '').trim()
+        : ''
+    )
+    return {
+      id,
+      label: OCR_FIELD_LABELS[id] || explicit || id,
+      value: fieldDisplayValue(raw),
+      confidence: fieldConfidencePercent(raw),
+    }
   }))
   return {
     jobId: ocr.job_id,

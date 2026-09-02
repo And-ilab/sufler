@@ -39,6 +39,7 @@ import {
   StatusBadge,
   canWriteAssistantChat,
   getAllowedLauncherModules,
+  getSettingsMenuEntry,
   type LauncherModule,
 } from './components'
 import './App.css'
@@ -127,6 +128,8 @@ function StandaloneModule({
       username={username ?? 'Пользователь ИИ-ассистента'}
       demoMode={import.meta.env.VITE_SUFLER_DEMO === '1'}
       readOnly={!canWriteAssistantChat(roles)}
+      settingsHref={getSettingsMenuEntry(roles)?.href ?? '/ai-hub/admin'}
+      settingsLabel={getSettingsMenuEntry(roles)?.label ?? 'Центр настроек'}
     />
   )
 }

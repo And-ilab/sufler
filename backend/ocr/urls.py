@@ -6,6 +6,7 @@ from ocr.views import (
     ocr_job_approve,
     ocr_job_detail,
     ocr_job_export,
+    ocr_job_original,
     ocr_job_result,
     ocr_jobs_list,
     ocr_template_detail,
@@ -37,6 +38,11 @@ urlpatterns = [
         "jobs/<str:job_id>/result/",
         ocr_job_result,
         name="ocr_job_result",
+    ),
+    path(
+        "jobs/<str:job_id>/original/",
+        ocr_job_original,
+        name="ocr_job_original",
     ),
     path(
         "jobs/<str:job_id>/approve/",

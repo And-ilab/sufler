@@ -117,6 +117,8 @@ def list_document_types(path: Path = DEFAULT_RULES_PATH) -> list[dict[str, Any]]
                 "title": spec.get("title") or name,
                 "template_version": str(spec.get("template_version") or "1"),
                 "required_fields": list(spec.get("required_fields") or []),
+                "field_schema": dict(spec.get("fields") or {}),
+                "confidence_min": spec.get("confidence_min"),
             }
         )
     return items

@@ -12,6 +12,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from ocr.archives import ArchiveError, extract_archive, is_archive_filename
 from ocr.engine import OcrEngineError, recognize_document, resolve_ocr_model
 from ocr.models import OcrJob
 from ocr.storage import ObjectStoreError, get_object_store
@@ -73,6 +74,8 @@ def create_job_from_upload(
     created_by: str = "",
     document_type_hint: str = "",
     run_inline: bool = False,
+    batch_id: str = "",
+    source_archive: str = "",
 ) -> OcrJob:
     """Persist original to object storage and enqueue (or run) OCR job."""
     raw = upload.read()
@@ -103,6 +106,8 @@ def create_job_from_upload(
             ocr_model=model_info["model"],
             document_type=(document_type_hint or "")[:64],
             created_by=created_by[:150],
+            batch_id=(batch_id or "")[:64],
+            source_archive=(source_archive or "")[:255],
         )
 
     if run_inline:
@@ -122,6 +127,73 @@ def create_job_from_upload(
     return job
 
 
+def create_jobs_from_upload(
+    upload: BinaryIO,
+    *,
+    filename: str,
+    content_type: str = "",
+    created_by: str = "",
+    document_type_hint: str = "",
+    run_inline: bool = False,
+) -> dict[str, Any]:
+    """Create one job, or one job per ZIP/RAR member (IV.3 queue)."""
+    raw = upload.read()
+    safe_name = _normalize_filename(filename)
+    if is_archive_filename(safe_name):
+        max_bytes = int(getattr(settings, "OCR_MAX_UPLOAD_BYTES", 25 * 1024 * 1024))
+        archive_cap = int(
+            getattr(settings, "OCR_ARCHIVE_MAX_UPLOAD_BYTES", max_bytes * 4)
+        )
+        if len(raw) <= 0:
+            raise OcrPipelineError("empty file")
+        if len(raw) > archive_cap:
+            raise OcrPipelineError(f"file exceeds max size of {archive_cap} bytes")
+        try:
+            members = extract_archive(raw, safe_name)
+        except ArchiveError as exc:
+            raise OcrPipelineError(str(exc)) from exc
+        batch_id = f"ocrbatch-{uuid.uuid4().hex}"
+        jobs: list[OcrJob] = []
+        from io import BytesIO
+
+        for member in members:
+            jobs.append(
+                create_job_from_upload(
+                    BytesIO(member.data),
+                    filename=member.filename,
+                    content_type=member.content_type,
+                    created_by=created_by,
+                    document_type_hint=document_type_hint,
+                    run_inline=run_inline,
+                    batch_id=batch_id,
+                    source_archive=safe_name,
+                )
+            )
+        return {
+            "jobs": jobs,
+            "batch_id": batch_id,
+            "archive": safe_name,
+            "skipped": [],
+        }
+
+    from io import BytesIO
+
+    job = create_job_from_upload(
+        BytesIO(raw),
+        filename=safe_name,
+        content_type=content_type,
+        created_by=created_by,
+        document_type_hint=document_type_hint,
+        run_inline=run_inline,
+    )
+    return {
+        "jobs": [job],
+        "batch_id": "",
+        "archive": "",
+        "skipped": [],
+    }
+
+
 def _attach_structuring(
     result: dict[str, Any],
     *,
@@ -129,9 +201,10 @@ def _attach_structuring(
     document_type_hint: str = "",
 ) -> dict[str, Any]:
     pages = result.get("pages") or []
-    ocr_text = "\n\n".join(
+    page_texts = [
         str(page.get("text") or "") for page in pages if isinstance(page, dict)
-    )
+    ]
+    ocr_text = "\n\n".join(page_texts)
     schema = None
     hint = document_type_hint or None
     if hint and hint != "unknown":
@@ -148,11 +221,14 @@ def _attach_structuring(
         document_type_hint=hint,
         field_schema=schema,
         use_gateway=True,
+        pages=page_texts,
     )
     doc_type = structured["document_type"]
     fields = structured["fields"]
 
-    # Validate only schema-known keys; keep extras in result for UI (surname, etc.).
+    if hint and hint not in {"unknown", ""}:
+        doc_type = hint
+
     known_fields = dict(fields)
     if doc_type and doc_type != "unknown":
         try:
@@ -193,9 +269,16 @@ def _attach_structuring(
                 "fields": known_fields,
             }
 
+    try:
+        from ocr.page_templates import detect_page_kind
+
+        result["page_kinds"] = [detect_page_kind(text) for text in page_texts]
+    except Exception:
+        result["page_kinds"] = []
+
     result["document_type_candidate"] = doc_type
     result["document_type"] = doc_type
-    result["fields"] = fields
+    result["fields"] = known_fields if (hint and hint not in {"unknown", ""}) else fields
     result["field_count"] = len(fields)
     result["llm_proposal"] = structured.get("llm_proposal")
     result["validation"] = (
@@ -315,6 +398,8 @@ def job_to_dict(job: OcrJob) -> dict[str, Any]:
         "completed_at": (
             job.completed_at.isoformat() if job.completed_at else None
         ),
+        "batch_id": job.batch_id or None,
+        "source_archive": job.source_archive or None,
         "pipeline": "IV.5+IV.8",
         "fr": ["FR-OCR-04", "FR-OCR-06", "FR-OCR-08", "FR-OCR-13", "FR-OCR-14"],
     }

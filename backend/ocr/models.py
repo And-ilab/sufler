@@ -35,6 +35,8 @@ class OcrJob(models.Model):
     validation_status = models.CharField(max_length=32, blank=True)
     error_message = models.TextField(blank=True)
     created_by = models.CharField(max_length=150, blank=True)
+    batch_id = models.CharField(max_length=64, blank=True, db_index=True)
+    source_archive = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)

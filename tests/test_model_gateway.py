@@ -222,6 +222,8 @@ class ModelGatewayTest(unittest.TestCase):
                     sufler_call = post.call_args
                     gateway.chat("assistant_bank", self.messages)
                     assistant_call = post.call_args
+                    gateway.chat("docs_ocr", self.messages)
+                    ocr_call = post.call_args
 
         self.assertEqual(
             sufler_call.args[0],
@@ -242,6 +244,15 @@ class ModelGatewayTest(unittest.TestCase):
         )
         self.assertEqual(
             assistant_call.kwargs["headers"]["Authorization"],
+            "Bearer test-sufler-key",
+        )
+        self.assertEqual(
+            ocr_call.args[0],
+            "https://api.deepseek.com/v1/chat/completions",
+        )
+        self.assertEqual(ocr_call.kwargs["json"]["model"], "deepseek-chat")
+        self.assertEqual(
+            ocr_call.kwargs["headers"]["Authorization"],
             "Bearer test-sufler-key",
         )
 
@@ -287,6 +298,41 @@ class ModelGatewayTest(unittest.TestCase):
         self.assertEqual(
             assistant_call.kwargs["headers"]["Authorization"],
             "Bearer ollama",
+        )
+
+    def test_docs_ocr_prefers_dedicated_ocr_llm(self):
+        env = {
+            "MODEL_GATEWAY_MODE": "stub",
+            "SUFLER_LLM_BASE_URL": "https://api.deepseek.com/v1",
+            "SUFLER_LLM_API_KEY": "test-sufler-key",
+            "SUFLER_LLM_MODEL": "deepseek-chat",
+            "OCR_LLM_BASE_URL": "https://api.deepseek.com/v1",
+            "OCR_LLM_API_KEY": "test-ocr-key",
+            "OCR_LLM_MODEL": "deepseek-chat",
+        }
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "id": "chatcmpl-ocr",
+            "object": "chat.completion",
+            "choices": [],
+        }
+        with patch.dict("os.environ", env, clear=False):
+            gateway = ModelGateway.from_registry()
+            with patch(
+                "core.model_gateway.requests.post",
+                return_value=response,
+            ) as post:
+                gateway.chat("docs_ocr", self.messages)
+
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://api.deepseek.com/v1/chat/completions",
+        )
+        self.assertEqual(post.call_args.kwargs["json"]["model"], "deepseek-chat")
+        self.assertEqual(
+            post.call_args.kwargs["headers"]["Authorization"],
+            "Bearer test-ocr-key",
         )
 
 

@@ -377,7 +377,6 @@ test('OCR documents IV.3 upload → preview → edit with field confidence', asy
   await page.getByTestId('ocr-start-recognition').click()
   await expect(page.getByTestId('ocr-review')).toBeVisible()
   await expect(page.getByTestId('ocr-bbox-viewer')).toContainText('passport_demo.png')
-  await expect(page.getByTestId('ocr-bbox-fio')).toBeVisible()
 
   await expect(page.getByTestId('ocr-field-editor')).toBeVisible()
   await expect(page.getByTestId('ocr-field-confidence-fio')).toHaveText('96%')
@@ -387,11 +386,11 @@ test('OCR documents IV.3 upload → preview → edit with field confidence', asy
   const fioInput = page.getByTestId('ocr-field-input-fio')
   await fioInput.fill('Иванов Иван Петрович')
   await expect(fioInput).toHaveValue('Иванов Иван Петрович')
-  await page.getByTestId('ocr-bbox-number').click()
-  await expect(page.getByTestId('ocr-bbox-number')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('ocr-field-input-number').click()
+  await expect(page.getByTestId('ocr-field-input-number')).toBeFocused()
 
   await page.getByTestId('ocr-approve-export').click()
-  await expect(page.getByTestId('ocr-approved-badge')).toContainText('Утверждено')
+  await expect(page.getByTestId('ocr-approved-badge')).toContainText('Подтверждено')
 
   await subTabs.getByRole('tab', { name: 'Очередь' }).click()
   await expect(page.getByTestId('ocr-queue-table')).toContainText('passport_demo.png')

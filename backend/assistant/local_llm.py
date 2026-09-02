@@ -182,7 +182,7 @@ def _deepseek_status() -> dict[str, Any]:
         "models": [
             {
                 "id": model,
-                "label": "DeepSeek",
+                "label": "модель 1",
                 "description": "",
                 "available": True,
             }

@@ -181,7 +181,7 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
   },
   doc_types: {
     title: 'Типы документов',
-    subtitle: 'Шаблоны полей, правила OCR и валидация документов.',
+    subtitle: 'Какие поля обязательны после распознавания.',
     status: '8 типов',
     cards: [['Кредитная заявка', '24 поля', 'Активна'], ['Паспорт', '12 полей', 'Активен'], ['Справка о доходах', '16 полей', 'Черновик']],
   },
@@ -512,6 +512,15 @@ export function AiHubAdminApp({
                 aria-label="Открыть ИИ-чат"
               >
                 <span className="admin-topbar__chat-fab-mark" aria-hidden="true">AI</span>
+              </a>
+              <a
+                href="/assistant?ocr=1"
+                className="admin-topbar__chat-fab"
+                data-testid="admin-open-ocr"
+                title="Открыть OCR"
+                aria-label="Открыть OCR на весь экран"
+              >
+                <span className="admin-topbar__chat-fab-mark" aria-hidden="true">OCR</span>
               </a>
             </div>
           </div>

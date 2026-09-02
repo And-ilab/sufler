@@ -15,6 +15,7 @@ websockets==12.0
 Pillow>=10.0.0
 pytesseract>=0.3.10
 pypdf>=4.0.0
+pypdfium2>=4.30.0
+rarfile>=4.2
 vosk
-# Heavier optional engine (not in default image):
-# paddleocr
+# Optional: pip install -r requirements-ocr-paddle.txt

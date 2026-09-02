@@ -59,9 +59,9 @@ class OcrPipelineApiTest(TestCase):
     def test_celery_task_registered(self):
         self.assertIn(run_ocr_job.name, current_app.tasks)
 
-    def test_model_registry_ocr_slot_is_tesseract_stub(self):
+    def test_model_registry_ocr_slot_is_auto_paddle(self):
         slot = ModelRegistry.load().get_slot("ocr")
-        self.assertEqual(slot.dev_model, "stub:tesseract")
+        self.assertEqual(slot.dev_model, "auto:paddle+tesseract")
         self.assertEqual(slot.status, "evaluating")
 
     def test_upload_returns_job_id_and_celery_completes(self):
@@ -87,7 +87,7 @@ class OcrPipelineApiTest(TestCase):
 
         job = OcrJob.objects.get(pk=body["job_id"])
         self.assertEqual(job.status, OcrJob.STATUS_COMPLETED)
-        self.assertEqual(job.ocr_model, "stub:tesseract")
+        self.assertEqual(job.ocr_model, "auto:paddle+tesseract")
         self.assertTrue(job.result_object_key)
 
         store = get_object_store()
@@ -104,6 +104,10 @@ class OcrPipelineApiTest(TestCase):
         status = client.get(f"/api/v1/ocr/jobs/{job.job_id}/")
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.json()["status"], "completed")
+
+        original = client.get(f"/api/v1/ocr/jobs/{job.job_id}/original/")
+        self.assertEqual(original.status_code, 200)
+        self.assertEqual(original.content, payload)
 
         fetched = client.get(f"/api/v1/ocr/jobs/{job.job_id}/result/")
         self.assertEqual(fetched.status_code, 200)

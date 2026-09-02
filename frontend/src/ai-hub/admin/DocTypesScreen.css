@@ -60,6 +60,7 @@
 }
 
 .doc-types__form input,
+.doc-types__form select,
 .doc-types__form textarea {
   width: 100%;
   padding: 8px 10px;
@@ -74,46 +75,83 @@
   grid-column: 1 / -1;
 }
 
+.doc-types__fields-head,
+.doc-types__fields-row--head,
+.doc-types__fields-row {
+  grid-column: 1 / -1;
+}
+
+.doc-types__fields-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.doc-types__fields-head h3 {
+  margin: 0;
+  font-size: .95rem;
+}
+
+.doc-types__fields {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.doc-types__fields-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) auto 2.25rem;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.doc-types__fields-row--head {
+  color: var(--color-text-muted);
+  font-size: .75rem;
+}
+
+.doc-types__required {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .8rem;
+}
+
+.doc-types__json-inline {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.doc-types__json-inline p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: .8125rem;
+}
+
+.doc-types__json-example {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--color-text);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-info-bg) 40%, var(--color-surface));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .75rem;
+  white-space: pre-wrap;
+}
+
+.doc-types__json-inline textarea {
+  min-height: 260px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .8rem;
+}
+
 .doc-types__actions {
   grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-}
-
-.doc-types__train {
-  margin-top: var(--space-5);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border);
-}
-
-.doc-types__train h3 {
-  margin: 0 0 var(--space-2);
-}
-
-.doc-types__train-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: center;
-}
-
-.doc-types__samples {
-  display: grid;
-  gap: var(--space-2);
-  margin: var(--space-3) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.doc-types__samples li {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding: var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: .8125rem;
 }
 
 .doc-types__error {

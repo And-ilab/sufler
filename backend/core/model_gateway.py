@@ -30,6 +30,7 @@ PROFILE_TO_SLOT = {
     "assistant_bank": "llm_assistant_bank",
     "docs_ocr": "llm_docs_ocr",
 }
+DOCS_OCR_PROFILE = "docs_ocr"
 SUPPORTED_MODES = frozenset({"stub", "openai"})
 SUFLER_PROFILE = "sufler_cc"
 RESERVED_PARAMETERS = frozenset({"model", "messages", "stream"})
@@ -280,6 +281,14 @@ class ModelGateway:
             ):
                 return "openai"
             return self._mode_override or profile.gateway_mode
+        if profile.profile == DOCS_OCR_PROFILE:
+            if (
+                (os.environ.get("OCR_LLM_BASE_URL") or "").strip()
+                or (os.environ.get("SUFLER_LLM_BASE_URL") or "").strip()
+                or _is_deepseek_url(self._base_url_for(profile))
+            ):
+                return "openai"
+            return self._mode_override or profile.gateway_mode
         if _assistant_dedicated_base() or _is_deepseek_url(
             _assistant_base_url(self._base_url or "")
         ):
@@ -289,6 +298,11 @@ class ModelGateway:
     def _base_url_for(self, profile: GatewayProfile) -> str:
         if profile.profile == SUFLER_PROFILE:
             return _sufler_base_url(self._base_url or "")
+        if profile.profile == DOCS_OCR_PROFILE:
+            dedicated = (os.environ.get("OCR_LLM_BASE_URL") or "").strip()
+            if dedicated:
+                return dedicated.rstrip("/")
+            return _assistant_base_url(self._base_url or "")
         return _assistant_base_url(self._base_url or "")
 
     def _api_key_for(self, profile: GatewayProfile) -> str:
@@ -297,6 +311,10 @@ class ModelGateway:
             if dedicated:
                 return dedicated
             return self._api_key or os.environ.get("OPENAI_API_KEY") or ""
+        if profile.profile == DOCS_OCR_PROFILE:
+            dedicated = (os.environ.get("OCR_LLM_API_KEY") or "").strip()
+            if dedicated:
+                return dedicated
         assistant_key = (os.environ.get("ASSISTANT_LLM_API_KEY") or "").strip()
         if assistant_key:
             return assistant_key
@@ -309,16 +327,22 @@ class ModelGateway:
     def _openai_endpoint(self, profile: GatewayProfile) -> str:
         base_url = self._base_url_for(profile)
         if not base_url:
-            raise ModelGatewayConfigurationError(
-                "OPENAI_BASE_URL is required in openai mode"
-                if profile.profile == SUFLER_PROFILE
-                else (
+            if profile.profile == SUFLER_PROFILE:
+                message = "OPENAI_BASE_URL is required in openai mode"
+            elif profile.profile == DOCS_OCR_PROFILE:
+                message = (
+                    "OCR_LLM_BASE_URL, SUFLER_LLM_BASE_URL, "
+                    "ASSISTANT_LLM_BASE_URL or OPENAI_BASE_URL is required "
+                    "for docs_ocr openai mode"
+                )
+            else:
+                message = (
                     "ASSISTANT_LLM_BASE_URL, SUFLER_LLM_BASE_URL, "
                     "OPENAI_BASE_URL or OLLAMA_BASE_URL is required "
                     "for assistant openai mode"
                 )
-            )
-        if profile.model.startswith("stub:"):
+            raise ModelGatewayConfigurationError(message)
+        if self._resolve_model(profile).startswith("stub:"):
             raise ModelGatewayConfigurationError(
                 f"Profile {profile.profile!r} requires a real model "
                 "in openai mode"
@@ -343,6 +367,22 @@ class ModelGateway:
                 if openai_model and "deepseek" in openai_model.lower():
                     return openai_model
                 return "deepseek-chat"
+            return profile.model
+        if profile.profile == DOCS_OCR_PROFILE:
+            dedicated = (os.environ.get("OCR_LLM_MODEL") or "").strip()
+            if dedicated:
+                return dedicated
+            if _is_deepseek_url(self._base_url_for(profile)):
+                sufler_model = (os.environ.get("SUFLER_LLM_MODEL") or "").strip()
+                if sufler_model:
+                    return sufler_model
+                openai_model = (os.environ.get("OPENAI_MODEL") or "").strip()
+                if openai_model and "deepseek" in openai_model.lower():
+                    return openai_model
+                return "deepseek-chat"
+            openai_model = (os.environ.get("OPENAI_MODEL") or "").strip()
+            if openai_model and not openai_model.startswith("stub:"):
+                return openai_model
             return profile.model
         assistant_model = (os.environ.get("ASSISTANT_LLM_MODEL") or "").strip()
         if assistant_model:
@@ -408,6 +448,8 @@ class ModelGateway:
         timeout = self._timeout_seconds
         if configured.profile == SUFLER_PROFILE:
             timeout = min(timeout, 45.0)
+        elif configured.profile == DOCS_OCR_PROFILE:
+            timeout = min(max(timeout, 20.0), 60.0)
         try:
             response = requests.post(
                 endpoint,

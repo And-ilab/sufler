@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import mimetypes
+from pathlib import Path
 from typing import Any, Mapping
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -12,9 +14,10 @@ from auth.decorators import require_permissions
 from auth.roles import PERM_OCR_ADMIN, PERM_OCR_USE
 from ocr.export import build_export, export_filename, normalize_export_format
 from ocr.models import OcrJob
+from ocr.storage import ObjectStoreError, get_object_store
 from ocr.pipeline import (
     OcrPipelineError,
-    create_job_from_upload,
+    create_jobs_from_upload,
     job_to_dict,
     load_result,
     recognize_bytes_inline,
@@ -77,7 +80,7 @@ def ocr_upload(request: HttpRequest) -> JsonResponse:
         run_inline = str(
             request.POST.get("sync") or request.GET.get("sync") or ""
         ).lower() in {"1", "true", "yes"}
-        job = create_job_from_upload(
+        bundle = create_jobs_from_upload(
             upload,
             filename=getattr(upload, "name", "") or "upload.bin",
             content_type=getattr(upload, "content_type", "") or "",
@@ -88,8 +91,17 @@ def ocr_upload(request: HttpRequest) -> JsonResponse:
     except OcrPipelineError as exc:
         return _validation_error(exc)
 
+    jobs = bundle["jobs"]
+    job = jobs[0]
     payload = job_to_dict(job)
-    payload["message"] = "OCR job completed" if run_inline else "OCR job queued"
+    payload["items"] = [job_to_dict(item) for item in jobs]
+    payload["batch_id"] = bundle.get("batch_id") or payload.get("batch_id")
+    payload["archive"] = bundle.get("archive") or None
+    payload["skipped"] = bundle.get("skipped") or []
+    if len(jobs) > 1:
+        payload["message"] = "OCR jobs completed" if run_inline else "OCR jobs queued"
+    else:
+        payload["message"] = "OCR job completed" if run_inline else "OCR job queued"
     if run_inline and job.status == OcrJob.STATUS_COMPLETED:
         try:
             payload["result"] = load_result(job)
@@ -151,6 +163,29 @@ def ocr_job_result(request: HttpRequest, job_id: str) -> JsonResponse:
     except OcrPipelineError as exc:
         return _validation_error(exc)
     return JsonResponse(result)
+
+
+@require_http_methods(["GET"])
+@require_permissions(PERM_OCR_USE, api=True)
+def ocr_job_original(request: HttpRequest, job_id: str) -> HttpResponse:
+    """GET /api/v1/ocr/jobs/<job_id>/original/ — original scan for HITL preview."""
+    try:
+        job = OcrJob.objects.get(pk=job_id)
+    except OcrJob.DoesNotExist:
+        return JsonResponse({"error": "not_found", "job_id": job_id}, status=404)
+    if not job.original_object_key:
+        return JsonResponse({"error": "not_found", "job_id": job_id}, status=404)
+    try:
+        payload = get_object_store().get_bytes(job.original_object_key)
+    except ObjectStoreError:
+        return JsonResponse({"error": "not_found", "job_id": job_id}, status=404)
+    guessed, _ = mimetypes.guess_type(job.filename or "")
+    content_type = job.content_type or guessed or "application/octet-stream"
+    safe_name = Path(job.filename or "document").name.replace('"', "")
+    response = HttpResponse(payload, content_type=content_type)
+    response["Content-Disposition"] = f'inline; filename="{safe_name}"'
+    response["Cache-Control"] = "private, max-age=120"
+    return response
 
 
 @require_http_methods(["POST"])
@@ -224,6 +259,7 @@ def ocr_doc_types(request: HttpRequest) -> JsonResponse:
                 "title": item["title"],
                 "template_version": str(item["template_version"]),
                 "required_fields": item["required_fields"],
+                "field_schema": item.get("field_schema") or {},
                 "confidence_min": item["confidence_min"],
                 "status": item["status"],
             }
@@ -370,7 +406,7 @@ def ocr_validate(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST"])
 @require_permissions(PERM_OCR_USE, api=True)
 def ocr_export(request: HttpRequest) -> HttpResponse:
-    """POST /api/v1/ocr/export/?format=json|csv — validated downstream payload."""
+    """POST /api/v1/ocr/export/?format=json|csv|pdf|docx — validated downstream payload."""
     try:
         body = _parse_json_body(request)
         export_format = normalize_export_format(

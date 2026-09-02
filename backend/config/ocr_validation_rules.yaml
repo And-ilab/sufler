@@ -5,30 +5,47 @@ validator_version: "1.0"
 
 document_types:
   passport:
-    template_version: "2"
-    title: "Удостоверение личности / паспорт"
-    required_fields: [full_name, series, number]
+    template_version: "3"
+    title: "Паспорт"
+    required_fields: [surname, given_name, number]
     confidence_min: 0.6
     fields:
-      full_name:
+      surname:
         type: string
-        min_length: 3
-        max_length: 200
+        min_length: 2
+        max_length: 80
+      given_name:
+        type: string
+        min_length: 2
+        max_length: 80
       series:
         type: string
-        # BY letters (PD) or RF digits (45 11 / 4511)
         pattern: "^([A-ZА-Я]{2}|\\d{2}\\s?\\d{2})$"
+        required: false
       number:
         type: string
-        # BY 7 digits or RF 6 digits
         pattern: "^\\d{6,7}$"
+      birth_date:
+        type: date
+        formats: ["%d.%m.%Y", "%Y-%m-%d"]
+        required: false
       issue_date:
         type: date
         formats: ["%d.%m.%Y", "%Y-%m-%d"]
         required: false
-      birth_date:
+      expiry_date:
         type: date
         formats: ["%d.%m.%Y", "%Y-%m-%d"]
+        required: false
+      personal_number:
+        type: string
+        min_length: 8
+        max_length: 20
+        required: false
+      nationality:
+        type: string
+        min_length: 3
+        max_length: 80
         required: false
 
   payment_order:
@@ -84,7 +101,7 @@ document_types:
 
   loan_agreement:
     template_version: "1"
-    title: "Кредитный договор"
+    title: "Договор"
     required_fields:
       [agreement_number, agreement_date, principal, interest_rate, term]
     confidence_min: 0.6

@@ -37,6 +37,22 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
+/** Hide vendor names in the toolbar; routing still uses the real model id. */
+export function displayModelLabel(id: string, label: string): string {
+  if (`${id} ${label}`.toLowerCase().includes('deepseek')) return 'модель 1'
+  return label
+}
+
+function withPublicModelLabels(payload: LocalLlmStatus): LocalLlmStatus {
+  return {
+    ...payload,
+    models: (payload.models || []).map((model) => ({
+      ...model,
+      label: displayModelLabel(model.id, model.label),
+    })),
+  }
+}
+
 /** Active chat model catalog (DeepSeek or local Ollama). */
 export async function fetchLocalLlmModels(): Promise<LocalLlmStatus> {
   const response = await fetch('/api/v1/assistant/models/', {
@@ -46,7 +62,7 @@ export async function fetchLocalLlmModels(): Promise<LocalLlmStatus> {
   if (!response.ok) {
     throw new Error(await parseError(response))
   }
-  return (await response.json()) as LocalLlmStatus
+  return withPublicModelLabels((await response.json()) as LocalLlmStatus)
 }
 
 /** Select active chat model for subsequent requests (no container restart). */
@@ -64,5 +80,5 @@ export async function selectLocalLlmModel(modelId: string): Promise<LocalLlmStat
   if (!response.ok) {
     throw new Error(await parseError(response))
   }
-  return (await response.json()) as LocalLlmStatus
+  return withPublicModelLabels((await response.json()) as LocalLlmStatus)
 }
