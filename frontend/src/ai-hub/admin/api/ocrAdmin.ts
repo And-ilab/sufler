@@ -1,6 +1,36 @@
+import { ensureCsrfToken, ensureDevSession, isAuthErrorMessage } from '../../../auth/ensureDevSession'
+
 function csrfToken(): string {
   const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/)
   return match ? decodeURIComponent(match[1]) : ''
+}
+
+async function ocrFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  await ensureDevSession()
+  const headers = new Headers(init.headers)
+  if ((init.method || 'GET').toUpperCase() !== 'GET') {
+    const token = await ensureCsrfToken() || csrfToken()
+    if (token) headers.set('X-CSRFToken', token)
+  }
+  const response = await fetch(input, {
+    ...init,
+    credentials: 'include',
+    headers,
+  })
+  if (response.ok || !isAuthErrorMessage(`HTTP ${response.status}`)) {
+    return response
+  }
+  await ensureDevSession()
+  const retryHeaders = new Headers(init.headers)
+  if ((init.method || 'GET').toUpperCase() !== 'GET') {
+    const token = await ensureCsrfToken(true) || csrfToken()
+    if (token) retryHeaders.set('X-CSRFToken', token)
+  }
+  return fetch(input, {
+    ...init,
+    credentials: 'include',
+    headers: retryHeaders,
+  })
 }
 
 async function parseError(response: Response): Promise<string> {
@@ -55,7 +85,7 @@ export interface OcrDocType {
 }
 
 export async function listOcrDocTypes(): Promise<OcrDocType[]> {
-  const response = await fetch('/api/v1/ocr/doc-types/', { credentials: 'include' })
+  const response = await ocrFetch('/api/v1/ocr/doc-types/')
   if (!response.ok) throw new Error(await parseError(response))
   const payload = (await response.json()) as { items?: OcrDocType[] }
   return payload.items ?? []
@@ -129,9 +159,7 @@ export async function uploadTemplateSample(
 }
 
 export async function listOcrJobs(limit = 40): Promise<Array<Record<string, unknown>>> {
-  const response = await fetch(`/api/v1/ocr/jobs/?limit=${limit}`, {
-    credentials: 'include',
-  })
+  const response = await ocrFetch(`/api/v1/ocr/jobs/?limit=${limit}`)
   if (!response.ok) throw new Error(await parseError(response))
   const payload = (await response.json()) as { items?: Array<Record<string, unknown>> }
   return payload.items ?? []
@@ -146,10 +174,8 @@ export async function uploadOcrDocument(
   body.append('file', file, file.name)
   if (documentType) body.append('document_type', documentType)
   if (sync) body.append('sync', '1')
-  const response = await fetch('/api/v1/ocr/documents/', {
+  const response = await ocrFetch('/api/v1/ocr/documents/', {
     method: 'POST',
-    credentials: 'include',
-    headers: { 'X-CSRFToken': csrfToken() },
     body,
   })
   if (!response.ok) throw new Error(await parseError(response))
@@ -157,9 +183,7 @@ export async function uploadOcrDocument(
 }
 
 export async function fetchOcrResult(jobId: string): Promise<Record<string, unknown>> {
-  const response = await fetch(`/api/v1/ocr/jobs/${encodeURIComponent(jobId)}/result/`, {
-    credentials: 'include',
-  })
+  const response = await ocrFetch(`/api/v1/ocr/jobs/${encodeURIComponent(jobId)}/result/`)
   if (!response.ok) throw new Error(await parseError(response))
   return (await response.json()) as Record<string, unknown>
 }
@@ -173,13 +197,9 @@ export async function approveOcrJob(
   documentType: string,
   fields: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(`/api/v1/ocr/jobs/${encodeURIComponent(jobId)}/approve/`, {
+  const response = await ocrFetch(`/api/v1/ocr/jobs/${encodeURIComponent(jobId)}/approve/`, {
     method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRFToken': csrfToken(),
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ document_type: documentType, fields }),
   })
   if (!response.ok && response.status !== 422) {

@@ -140,18 +140,17 @@ const DOC_TYPE_TITLE: Record<string, string> = {
   loan_agreement: OPERATOR_DOC_TITLES.loan_agreement,
 }
 
+const PASSPORT_OPERATOR_FIELDS = [
+  'surname',
+  'given_name',
+  'series',
+  'number',
+  'birth_date',
+  'issue_date',
+] as const
+
 const BUILTIN_SCHEMAS: Record<string, Record<string, unknown>> = {
-  passport: {
-    surname: {},
-    given_name: {},
-    series: {},
-    number: {},
-    birth_date: {},
-    issue_date: {},
-    expiry_date: {},
-    personal_number: {},
-    nationality: {},
-  },
+  passport: Object.fromEntries(PASSPORT_OPERATOR_FIELDS.map((key) => [key, {}])),
   account_statement: {
     account_number: {},
     currency: {},
@@ -425,14 +424,11 @@ function pageKindsFromResult(result: Record<string, unknown> | null | undefined)
 function withPassportIdentity(
   schema: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
-  if (!schema) return { surname: {}, given_name: {} }
-  const next: Record<string, unknown> = {
-    surname: schema.surname && typeof schema.surname === 'object' ? schema.surname : {},
-    given_name: schema.given_name && typeof schema.given_name === 'object' ? schema.given_name : {},
-  }
-  for (const [key, value] of Object.entries(schema)) {
-    if (key === 'surname' || key === 'given_name') continue
-    next[key] = value
+  const source = schema || {}
+  const next: Record<string, unknown> = {}
+  for (const key of PASSPORT_OPERATOR_FIELDS) {
+    const current = source[key]
+    next[key] = current && typeof current === 'object' ? current : {}
   }
   return next
 }
@@ -824,12 +820,14 @@ export function OcrDocumentsPanel({
     }
 
     const inferredType = item.docType !== 'unknown' ? item.docType : inferDocTypeFromName(item.file)
-    const demo = mergeTemplateFields(
-      demoFieldsForFile(item.file, inferredType, templates),
-      schemaForType(inferredType, templates),
-    )
-    setFieldsByJob((prev) => ({ ...prev, [item.id]: demo }))
-    setSelectedFieldId(demo[0]?.id ?? null)
+    const fallback = item.id.startsWith('demo-')
+      ? mergeTemplateFields(
+        demoFieldsForFile(item.file, inferredType, templates),
+        schemaForType(inferredType, templates),
+      )
+      : mergeTemplateFields([], schemaForType(inferredType, templates))
+    setFieldsByJob((prev) => ({ ...prev, [item.id]: fallback }))
+    setSelectedFieldId(fallback[0]?.id ?? null)
   }, [fieldsByJob, previewByJob, templates])
 
   const addFiles = useCallback((fileList: FileList | File[]) => {
@@ -947,23 +945,49 @@ export function OcrDocumentsPanel({
               nextPreviews[jobId] = ocrJobOriginalUrl(jobId)
             }
           }
-        } catch {
-          // Offline / Storybook: keep UX + visual-test fixtures.
-          const jobId = `demo-${Date.now()}-${index}`
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Не удалось загрузить документ'
+          const storybookDemo = /passport_demo/i.test(file.name)
+          if (storybookDemo) {
+            const jobId = `demo-${Date.now()}-${index}`
+            const fields = forcedType
+              ? demoFieldsForFile(file.name, forcedType, templates)
+              : []
+            const item: OcrQueueItem = {
+              id: jobId,
+              file: file.name,
+              docType: forcedType || ML_DOC_TYPE,
+              status: 'review',
+              progress: 100,
+              confidence: avgConfidence(fields),
+            }
+            created.push(item)
+            nextFields[jobId] = fields
+            rememberChosenType(chosenTypeByJob, jobId, item.docType)
+            if (file.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(file.name)) {
+              nextPreviews[jobId] = URL.createObjectURL(file)
+            }
+            continue
+          }
+          setError(
+            /401|403|authentication|permission|csrf/i.test(message)
+              ? 'Нет доступа к OCR. Обновите страницу и повторите загрузку.'
+              : `Распознавание не запустилось: ${message}`,
+          )
+          const jobId = `error-${Date.now()}-${index}`
           const fields = forcedType
-            ? demoFieldsForFile(file.name, forcedType, templates)
+            ? mergeTemplateFields([], schemaForType(forcedType, templates))
             : []
-          const item: OcrQueueItem = {
+          created.push({
             id: jobId,
             file: file.name,
             docType: forcedType || ML_DOC_TYPE,
-            status: 'review',
-            progress: 100,
-            confidence: avgConfidence(fields),
-          }
-          created.push(item)
+            status: 'error',
+            progress: 0,
+            confidence: null,
+          })
           nextFields[jobId] = fields
-          rememberChosenType(chosenTypeByJob, jobId, item.docType)
+          rememberChosenType(chosenTypeByJob, jobId, forcedType || ML_DOC_TYPE)
           if (file.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(file.name)) {
             nextPreviews[jobId] = URL.createObjectURL(file)
           }
@@ -1367,6 +1391,7 @@ export function OcrDocumentsPanel({
 
           <section className="ocr-docs__fields" data-testid="ocr-field-editor" aria-label="Извлечённые поля">
             <h2>Извлечённые поля</h2>
+            {error ? <p className="ocr-docs__hint" role="alert">{error}</p> : null}
             {fields.every((field) => !field.value.trim()) ? (
               <p className="ocr-docs__hint">Поля шаблона пустые. Проверьте скан или введите значения вручную.</p>
             ) : null}

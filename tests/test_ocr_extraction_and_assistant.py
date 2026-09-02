@@ -630,10 +630,16 @@ class OcrAssistantAndTemplatesTest(TestCase):
         from ocr.templates_registry import template_schema_for
 
         schema = template_schema_for("passport")
-        self.assertEqual(list(schema["fields"])[:2], ["surname", "given_name"])
+        self.assertEqual(
+            list(schema["fields"]),
+            ["surname", "given_name", "series", "number", "birth_date", "issue_date"],
+        )
         self.assertIn("number", schema["fields"])
         self.assertIn("surname", schema["required_fields"])
         self.assertIn("given_name", schema["required_fields"])
+        self.assertNotIn("expiry_date", schema["fields"])
+        self.assertNotIn("personal_number", schema["fields"])
+        self.assertNotIn("nationality", schema["fields"])
 
     def test_zip_archive_creates_queue_jobs(self):
         buffer = io.BytesIO()

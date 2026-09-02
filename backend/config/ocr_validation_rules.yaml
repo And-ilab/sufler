@@ -5,7 +5,7 @@ validator_version: "1.0"
 
 document_types:
   passport:
-    template_version: "3"
+    template_version: "4"
     title: "Паспорт"
     required_fields: [surname, given_name, number]
     confidence_min: 0.6
@@ -32,20 +32,6 @@ document_types:
       issue_date:
         type: date
         formats: ["%d.%m.%Y", "%Y-%m-%d"]
-        required: false
-      expiry_date:
-        type: date
-        formats: ["%d.%m.%Y", "%Y-%m-%d"]
-        required: false
-      personal_number:
-        type: string
-        min_length: 8
-        max_length: 20
-        required: false
-      nationality:
-        type: string
-        min_length: 3
-        max_length: 80
         required: false
 
   payment_order:

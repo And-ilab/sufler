@@ -15,29 +15,31 @@ class TemplateRegistryError(ValueError):
     """Invalid template admin operation."""
 
 
-_PASSPORT_IDENTITY_FIELDS: tuple[tuple[str, dict[str, Any]], ...] = (
+_PASSPORT_OPERATOR_FIELDS: tuple[tuple[str, dict[str, Any]], ...] = (
     ("surname", {"type": "string", "min_length": 2, "max_length": 80}),
     ("given_name", {"type": "string", "min_length": 2, "max_length": 80}),
+    ("series", {"type": "string", "pattern": r"^([A-ZА-Я]{2}|\d{2}\s?\d{2})$"}),
+    ("number", {"type": "string", "pattern": r"^\d{6,7}$"}),
+    ("birth_date", {"type": "date", "formats": ["%d.%m.%Y", "%Y-%m-%d"]}),
+    ("issue_date", {"type": "date", "formats": ["%d.%m.%Y", "%Y-%m-%d"]}),
 )
+
+_PASSPORT_REQUIRED = ("surname", "given_name", "number")
 
 
 def ensure_passport_identity_schema(
     field_schema: Mapping[str, Any] | None,
     required_fields: list[str] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
-    """Keep Фамилия / Имя on the passport template even if the DB row was trimmed."""
+    """Keep the operator passport slots; drop extra keys like expiry/nationality."""
     schema = dict(field_schema or {})
-    required = list(required_fields or [])
     ordered: dict[str, Any] = {}
-    for key, spec in _PASSPORT_IDENTITY_FIELDS:
+    for key, spec in _PASSPORT_OPERATOR_FIELDS:
         current = schema.get(key)
         ordered[key] = dict(current) if isinstance(current, Mapping) else dict(spec)
-        if key not in required:
-            required.append(key)
-    for key, value in schema.items():
-        if key not in ordered:
-            ordered[key] = value
-    return ordered, required
+    required = [key for key in _PASSPORT_REQUIRED if key in ordered]
+    extra = [key for key in (required_fields or []) if key in ordered and key not in required]
+    return ordered, required + extra
 
 
 def _persist_passport_identity(template: OcrDocumentTemplate) -> OcrDocumentTemplate:
