@@ -16,6 +16,7 @@ from ocr.archives import ArchiveError, extract_archive, is_archive_filename
 from ocr.engine import OcrEngineError, recognize_document, resolve_ocr_model
 from ocr.models import OcrJob
 from ocr.storage import ObjectStoreError, get_object_store
+from ocr.extraction import is_open_ended_doc_type
 from ocr.structuring import structure_document
 from ocr.validation import ValidationRequestError, validate_document
 
@@ -206,19 +207,21 @@ def _attach_structuring(
     ]
     ocr_text = "\n\n".join(page_texts)
     schema = None
-    hint = document_type_hint or None
-    if hint and hint != "unknown":
+    hint_raw = (document_type_hint or "").strip()
+    open_ended = is_open_ended_doc_type(hint_raw)
+    extract_hint = None if open_ended else hint_raw
+    if extract_hint:
         try:
             from ocr.templates_registry import template_schema_for
 
-            schema = template_schema_for(hint)
+            schema = template_schema_for(extract_hint)
         except Exception:
             schema = None
 
     structured = structure_document(
         ocr_text,
         filename=filename,
-        document_type_hint=hint,
+        document_type_hint=extract_hint,
         field_schema=schema,
         use_gateway=True,
         pages=page_texts,
@@ -226,11 +229,13 @@ def _attach_structuring(
     doc_type = structured["document_type"]
     fields = structured["fields"]
 
-    if hint and hint not in {"unknown", ""}:
-        doc_type = hint
+    if hint_raw.lower() in {"ml", "auto"}:
+        doc_type = "ml"
+    elif extract_hint:
+        doc_type = extract_hint
 
     known_fields = dict(fields)
-    if doc_type and doc_type != "unknown":
+    if not open_ended and doc_type and doc_type != "unknown":
         try:
             from ocr.templates_registry import template_schema_for
             from ocr.validation import _load_rules, DEFAULT_RULES_PATH
@@ -252,7 +257,7 @@ def _attach_structuring(
             }
 
     validation_payload: dict[str, Any] | None = None
-    if doc_type and doc_type != "unknown" and known_fields:
+    if not open_ended and doc_type and doc_type != "unknown" and known_fields:
         try:
             validated = validate_document(
                 doc_type,
@@ -278,7 +283,7 @@ def _attach_structuring(
 
     result["document_type_candidate"] = doc_type
     result["document_type"] = doc_type
-    result["fields"] = known_fields if (hint and hint not in {"unknown", ""}) else fields
+    result["fields"] = known_fields if extract_hint else fields
     result["field_count"] = len(fields)
     result["llm_proposal"] = structured.get("llm_proposal")
     result["validation"] = (

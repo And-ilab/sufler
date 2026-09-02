@@ -24,6 +24,12 @@ from ocr.page_templates import (
 
 FieldValue = dict[str, Any]
 
+OPEN_ENDED_DOC_TYPES = frozenset({"", "unknown", "ml", "auto"})
+
+
+def is_open_ended_doc_type(value: str | None) -> bool:
+    return (value or "").strip().lower() in OPEN_ENDED_DOC_TYPES
+
 
 def _field(value: str, confidence: float, *, source: str = "regex") -> FieldValue:
     return {
@@ -700,10 +706,11 @@ def extract_fields(
 ) -> tuple[str, dict[str, FieldValue]]:
     page_texts = [item for item in (pages or [text]) if item and item.strip()]
     combined = "\n\n".join(page_texts) or text
-    doc_type = document_type or detect_document_type(combined, filename)
+    requested = None if is_open_ended_doc_type(document_type) else document_type
+    doc_type = requested or detect_document_type(combined, filename)
     if doc_type == "unknown":
         doc_type = detect_document_type_from_pages(page_texts or [combined], filename)
-    forced = bool(document_type and document_type not in {"unknown", ""})
+    forced = bool(requested)
     labeled = extract_labeled_fields(combined)
     generic = {} if forced else extract_generic_fields(combined)
     page_kind = detect_page_kind(combined)

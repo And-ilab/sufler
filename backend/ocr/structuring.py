@@ -218,8 +218,10 @@ def structure_document(
         raw_fields = nested if isinstance(nested, Mapping) else field_schema
         if isinstance(raw_fields, Mapping):
             schema_keys = {str(name) for name in raw_fields if name != "fields"}
+    from ocr.extraction import is_open_ended_doc_type
+
     hint = (document_type_hint or "").strip()
-    if hint and hint not in {"unknown", ""}:
+    if hint and not is_open_ended_doc_type(hint):
         doc_type = hint
     if schema_keys:
         fields = {

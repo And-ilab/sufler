@@ -446,6 +446,38 @@ class OcrExtractionUnitTest(TestCase):
         self.assertEqual(structured["fields"]["operation_date"]["value"], "01.09.2026")
         self.assertEqual(structured["fields"]["currency"]["value"], "BYN")
 
+    def test_ml_hint_keeps_freeform_fields_and_type(self):
+        from ocr.pipeline import _attach_structuring
+
+        result = {
+            "pages": [
+                {
+                    "text": (
+                        "ВЫПИСКА ИЗ ЕГРН\n"
+                        "Кадастровый номер: 77:01:0004014:2714\n"
+                        "Кадастровая стоимость, руб: 9504493.62\n"
+                        "Дата запроса: 11.12.2018\n"
+                    )
+                }
+            ],
+            "job_id": "ocrjob-ml",
+            "document_id": "doc-ml",
+        }
+        attached = _attach_structuring(
+            result,
+            filename="egrn.png",
+            document_type_hint="ml",
+        )
+        self.assertEqual(attached["document_type"], "ml")
+        fields = attached["fields"]
+        self.assertTrue(fields)
+        serialized = json.dumps(fields, ensure_ascii=False)
+        self.assertIn("77:01:0004014:2714", serialized)
+        self.assertFalse(
+            {"surname", "given_name", "series"}.issubset(set(fields))
+            and len(fields) <= 8
+        )
+
     def test_german_td3_adenauer_sample(self):
         """Wikimedia public-domain ICAO graphic (P<D<< + 9-digit number)."""
         fields = extract_passport_fields(

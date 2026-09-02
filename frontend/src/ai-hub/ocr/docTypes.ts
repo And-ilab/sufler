@@ -23,3 +23,47 @@ export function operatorDocTitle(docType: string): string {
   if (isOperatorDocType(docType)) return OPERATOR_DOC_TITLES[docType]
   return ''
 }
+
+const CHOSEN_TYPES_KEY = 'sufler.ocr.chosenDocTypes'
+const UPLOAD_TYPE_KEY = 'sufler.ocr.uploadDocType'
+
+export function readChosenDocType(jobId: string): string {
+  try {
+    const raw = sessionStorage.getItem(CHOSEN_TYPES_KEY)
+    if (!raw) return ''
+    const map = JSON.parse(raw) as Record<string, string>
+    return typeof map[jobId] === 'string' ? map[jobId] : ''
+  } catch {
+    return ''
+  }
+}
+
+export function writeChosenDocType(jobId: string, docType: string): void {
+  if (!jobId) return
+  try {
+    const raw = sessionStorage.getItem(CHOSEN_TYPES_KEY)
+    const map = raw ? JSON.parse(raw) as Record<string, string> : {}
+    map[jobId] = docType
+    sessionStorage.setItem(CHOSEN_TYPES_KEY, JSON.stringify(map))
+  } catch {
+    // Private mode / disabled storage: keep the in-memory choice only.
+  }
+}
+
+export function readUploadDocType(fallback = 'passport'): string {
+  try {
+    const stored = sessionStorage.getItem(UPLOAD_TYPE_KEY) || ''
+    if (isMlDocType(stored) || isOperatorDocType(stored)) return stored
+  } catch {
+    // fall through
+  }
+  return fallback
+}
+
+export function writeUploadDocType(docType: string): void {
+  try {
+    sessionStorage.setItem(UPLOAD_TYPE_KEY, docType)
+  } catch {
+    // ignore
+  }
+}
