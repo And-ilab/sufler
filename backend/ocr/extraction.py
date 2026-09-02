@@ -109,6 +109,7 @@ _GEO_WORDS = frozenset(
 
 _DATE_VALUE = (
     r"\d{2}[./-]\d{2}[./-]\d{4}"
+    r"|\d{2}\s*[./-]\s*\d{2}\s*[./-]\s*\d{4}"
     r"|\d{2}\s+\d{2}\s+\d{4}"
     r"|\d{4}-\d{2}-\d{2}"
 )
@@ -129,6 +130,49 @@ def _label_value(
 
 def _normalize_date(raw: str) -> str:
     return normalize_ocr_date(raw)
+
+
+def _date_key(value: str) -> tuple[int, int, int] | None:
+    text = _normalize_date(value)
+    match = re.fullmatch(r"(\d{2})\.(\d{2})\.(\d{4})", text)
+    if not match:
+        return None
+    day, month, year = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    if not (1 <= day <= 31 and 1 <= month <= 12 and 1900 <= year <= 2100):
+        return None
+    return year, month, day
+
+
+def _find_all_dates(text: str) -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(_DATE_VALUE, text):
+        normalized = _normalize_date(match.group(0))
+        if not _date_key(normalized) or normalized in seen:
+            continue
+        seen.add(normalized)
+        found.append(normalized)
+    return found
+
+
+def _issue_date_from_others(text: str, fields: dict[str, FieldValue]) -> FieldValue | None:
+    """ICAO MRZ has birth + expiry, but never issue date — take the leftover visual date."""
+    birth = _normalize_date(str((fields.get("birth_date") or {}).get("value") or ""))
+    expiry = _normalize_date(str((fields.get("expiry_date") or {}).get("value") or ""))
+    leftovers = [item for item in _find_all_dates(text) if item not in {birth, expiry}]
+    if not leftovers:
+        return None
+    birth_key = _date_key(birth)
+    expiry_key = _date_key(expiry)
+    if birth_key and expiry_key:
+        between = [
+            item
+            for item in leftovers
+            if (key := _date_key(item)) and birth_key < key < expiry_key
+        ]
+        if between:
+            leftovers = between
+    return _field(leftovers[0], 0.76, source="date_remainder")
 
 
 def _is_geo_or_junk_name(value: str) -> bool:
@@ -372,13 +416,14 @@ def extract_passport_fields(
             "Issued",
             "Выдан",
             "Дата выдачы",
+            "Дата выдач",
         ),
         pattern=_DATE_VALUE,
         confidence=0.9,
     )
     if not issue_date:
         date_match = re.search(
-            rf"(?im)(?:выдач|issued).{{0,80}}?({_DATE_VALUE})",
+            rf"(?is)(?:выдач|issued|issve|issue\b).{{0,80}}?({_DATE_VALUE})",
             normalized,
         )
         if date_match:
@@ -413,6 +458,10 @@ def extract_passport_fields(
             float(issue_date["confidence"]),
             source=str(issue_date.get("source") or "regex"),
         )
+    if "issue_date" not in fields:
+        remainder = _issue_date_from_others(normalized, fields)
+        if remainder:
+            fields["issue_date"] = remainder
 
     if "full_name" not in fields:
         visual = _visual_repeated_names(normalized)

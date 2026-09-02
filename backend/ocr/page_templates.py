@@ -263,6 +263,19 @@ def _label_value(
         match = same_line.search(text)
         if match:
             return _field(match.group(1), confidence, source=f"label:{label}")
+        # Same line after bilingual tail: "DATE OF ISSUE / ДАТА ВЫДАЧЫ 12 09 2014".
+        # Only for structured values (dates / IDs) — names would eat ПРОЗВІШЧА / ІМЯ.
+        if len(label) >= 3 and r"\d{" in pattern:
+            same_line_tail = re.compile(
+                rf"(?im)(?:^|\n)\s*{re.escape(label)}\b[^\n]{{0,80}}?({pattern})\s*(?:\n|$)",
+            )
+            match = same_line_tail.search(text)
+            if match:
+                return _field(
+                    match.group(1),
+                    confidence - 0.02,
+                    source=f"label_tail:{label}",
+                )
         # ICAO data page: "DATE OF BIRTH / ДАТА НАРАДЖЭННЯ" then "23 02 1992".
         if len(label) >= 3:
             bilingual = re.compile(

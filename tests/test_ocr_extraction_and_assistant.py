@@ -182,6 +182,32 @@ class OcrExtractionUnitTest(TestCase):
         self.assertEqual(fields["surname"]["value"].upper(), "HUTSU")
         self.assertEqual(fields["given_name"]["value"].upper(), "ALEH")
 
+    def test_issue_date_on_same_line_as_bilingual_label(self):
+        text = (
+            "SURNAME / ПРОЗВІШЧА HUTSU\n"
+            "GIVEN NAMES / ІМЯ ALEH\n"
+            "PASSPORT NO. / НУМАР ПАШПАРТА KH2430485\n"
+            "DATE OF BIRTH / ДАТА НАРАДЖЭННЯ 23 02 1992\n"
+            "DATE OF ISSUE / ДАТА ВЫДАЧЫ 12 09 2014\n"
+            "DATE OF EXPIRY / ДАТА СКАНЧЭННЯ 12 09 2024\n"
+        )
+        fields = extract_passport_fields(text, allow_name_guess=False)
+        self.assertEqual(fields["issue_date"]["value"], "12.09.2014")
+        self.assertEqual(fields["birth_date"]["value"], "23.02.1992")
+
+    def test_issue_date_from_leftover_when_mrz_has_birth_and_expiry(self):
+        text = (
+            "HUTSU ALEH\n"
+            "KH2430485\n"
+            "12 09 2014\n"
+            "P<BLRHUTSU<<ALEH<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n"
+            "KH24304857BLR9202231M24091233230292A012PB64<\n"
+        )
+        fields = extract_passport_fields(text, allow_name_guess=False)
+        self.assertEqual(fields["birth_date"]["value"], "23.02.1992")
+        self.assertEqual(fields["expiry_date"]["value"], "12.09.2024")
+        self.assertEqual(fields["issue_date"]["value"], "12.09.2014")
+
     def test_chained_ocr_fragments_are_not_fields(self):
         text = (
             "слкд\n"

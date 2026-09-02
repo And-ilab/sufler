@@ -23,6 +23,7 @@ import {
 import {
   OPERATOR_DOC_TITLES,
   OPERATOR_DOC_TYPES,
+  isMlDocType,
   isOperatorDocType,
   ML_DOC_TYPE,
   operatorDocTitle,
@@ -418,10 +419,61 @@ function schemaForType(
   templates: OcrDocType[],
   _pageKinds: string[] = [],
 ): Record<string, unknown> | undefined {
-  const type = isOperatorDocType(docType) ? docType : 'passport'
+  if (isMlDocType(docType) || !docType || docType === 'unknown' || docType === 'other') {
+    return undefined
+  }
+  const type = isPassportPageType(docType)
+    ? 'passport'
+    : isOperatorDocType(docType) ? docType : ''
+  if (!type) return undefined
   const raw = templates.find((tpl) => tpl.doc_type === type)?.field_schema
     || BUILTIN_SCHEMAS[type]
   return type === 'passport' ? withPassportIdentity(raw) : raw
+}
+
+function looksLikePassportFields(fields: OcrField[]): boolean {
+  const values = new Map(
+    fields.map((field) => [field.apiKey || field.id, String(field.value || '').trim()]),
+  )
+  return Boolean(
+    (values.get('surname') && values.get('given_name'))
+    || (values.get('series') && values.get('number')),
+  )
+}
+
+function typeForExtractedFields(
+  rawType: string,
+  parsed: OcrField[],
+  pageKinds: string[] = [],
+  forcedType = '',
+): string {
+  if (forcedType && isOperatorDocType(forcedType)) {
+    return resolveDisplayType(forcedType, pageKinds)
+  }
+  const detected = rawType && rawType !== 'unknown' ? rawType : ''
+  if (isMlDocType(detected)) return ML_DOC_TYPE
+  if (detected === 'passport' || isPassportPageType(detected)) {
+    return looksLikePassportFields(parsed)
+      ? resolveDisplayType(detected, pageKinds)
+      : (parsed.length ? ML_DOC_TYPE : resolveDisplayType(detected, pageKinds))
+  }
+  if (isOperatorDocType(detected)) return detected
+  if (detected) return detected
+  return looksLikePassportFields(parsed) ? 'passport' : ML_DOC_TYPE
+}
+
+function fieldsForExtractedType(
+  parsed: OcrField[],
+  resolvedType: string,
+  templates: OcrDocType[],
+): OcrField[] {
+  if (isMlDocType(resolvedType) || !schemaForType(resolvedType, templates)) {
+    return parsed
+  }
+  if (resolvedType === 'passport' && parsed.length && !looksLikePassportFields(parsed)) {
+    return parsed
+  }
+  return mergeTemplateFields(parsed, schemaForType(resolvedType, templates))
 }
 
 function demoFieldsForFile(fileName: string, docType: string, templates: OcrDocType[] = []): OcrField[] {
@@ -525,7 +577,7 @@ export function OcrDocumentsPanel({
   const [typeFilter, setTypeFilter] = useState('any')
   const [search, setSearch] = useState('')
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
-  const [docType, setDocType] = useState(ML_DOC_TYPE)
+  const [docType, setDocType] = useState('passport')
   const [dragOver, setDragOver] = useState(false)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [fieldsByJob, setFieldsByJob] = useState<Record<string, OcrField[]>>({})
@@ -541,7 +593,7 @@ export function OcrDocumentsPanel({
   const activeItem = queue.find((item) => item.id === activeId) ?? queue[0]
   const fields = mergeTemplateFields(
     filterOcrFields(activeId ? fieldsByJob[activeId] || [] : []),
-    schemaForType(activeItem?.docType || docType, templates),
+    schemaForType(activeItem?.docType || '', templates),
   )
 
   const loadQueue = useCallback(async () => {
@@ -604,15 +656,14 @@ export function OcrDocumentsPanel({
       try {
         const result = await fetchOcrResult(item.id)
         if (cancelled) return
-        const resolvedType = resolveDisplayType(
-          [item.docType, String(result.document_type || ''), inferDocTypeFromName(item.file)]
-            .find((value) => value && value !== 'unknown') || 'unknown',
+        const parsed = fieldsFromResult(rawResultFields(result))
+        const resolvedType = typeForExtractedFields(
+          [String(result.document_type || ''), item.docType, inferDocTypeFromName(item.file)]
+            .find((value) => value && value !== 'unknown' && !isMlDocType(value)) || item.docType,
+          parsed,
           pageKindsFromResult(result),
         )
-        const nextFields = mergeTemplateFields(
-          fieldsFromResult(rawResultFields(result)),
-          schemaForType(resolvedType, templates),
-        )
+        const nextFields = fieldsForExtractedType(parsed, resolvedType, templates)
         if (fieldsAreEmpty(nextFields)) return
         setFieldsByJob((prev) => ({ ...prev, [item.id]: nextFields }))
         setQueue((prev) => prev.map((row) => (
@@ -667,15 +718,14 @@ export function OcrDocumentsPanel({
 
     try {
       const result = await fetchOcrResult(item.id)
-      const resolvedType = resolveDisplayType(
-        [item.docType, String(result.document_type || ''), inferDocTypeFromName(item.file)]
-          .find((value) => value && value !== 'unknown') || 'unknown',
+      const parsed = fieldsFromResult(rawResultFields(result))
+      const resolvedType = typeForExtractedFields(
+        [String(result.document_type || ''), item.docType, inferDocTypeFromName(item.file)]
+          .find((value) => value && value !== 'unknown' && !isMlDocType(value)) || item.docType,
+        parsed,
         pageKindsFromResult(result),
       )
-      const nextFields = mergeTemplateFields(
-        fieldsFromResult(rawResultFields(result)),
-        schemaForType(resolvedType, templates),
-      )
+      const nextFields = fieldsForExtractedType(parsed, resolvedType, templates)
       const shown = nextFields.some((field) => field.value.trim()) ? nextFields : cached
       if (shown.length) {
         setFieldsByJob((prev) => ({ ...prev, [item.id]: shown }))
@@ -782,18 +832,14 @@ export function OcrDocumentsPanel({
               || inferDocTypeFromName(file.name)
               || 'unknown',
             )
-            const resolvedType = forcedType
-              ? resolveDisplayType(detected || forcedType, pageKindsFromResult(result))
-              : (
-                isOperatorDocType(detected) || isPassportPageType(detected)
-                  ? resolveDisplayType(detected, pageKindsFromResult(result))
-                  : detected
-              )
             const parsed = fieldsFromResult(rawResultFields(result))
-            const fields = mergeTemplateFields(
+            const resolvedType = typeForExtractedFields(
+              detected,
               parsed,
-              schemaForType(resolvedType, templates),
+              pageKindsFromResult(result),
+              forcedType,
             )
+            const fields = fieldsForExtractedType(parsed, resolvedType, templates)
             const mapped = jobToQueueItem({
               ...job,
               job_id: jobId,
@@ -819,11 +865,13 @@ export function OcrDocumentsPanel({
         } catch {
           // Offline / Storybook: keep UX + visual-test fixtures.
           const jobId = `demo-${Date.now()}-${index}`
-          const fields = demoFieldsForFile(file.name, forcedType || 'passport', templates)
+          const fields = forcedType
+            ? demoFieldsForFile(file.name, forcedType, templates)
+            : []
           const item: OcrQueueItem = {
             id: jobId,
             file: file.name,
-            docType: forcedType || inferDocTypeFromName(file.name) || 'passport',
+            docType: forcedType || inferDocTypeFromName(file.name) || ML_DOC_TYPE,
             status: 'review',
             progress: 100,
             confidence: avgConfidence(fields),
@@ -879,7 +927,9 @@ export function OcrDocumentsPanel({
   }, [templates])
 
   const applyDocType = (jobId: string, nextType: string) => {
-    const type = isOperatorDocType(nextType) ? nextType : 'passport'
+    const type = isOperatorDocType(nextType)
+      ? nextType
+      : isMlDocType(nextType) ? ML_DOC_TYPE : nextType || ML_DOC_TYPE
     setQueue((prev) => prev.map((item) => (
       item.id === jobId ? { ...item, docType: type } : item
     )))
@@ -1122,6 +1172,7 @@ export function OcrDocumentsPanel({
                       {item.title || item.doc_type}
                     </option>
                   ))}
+                  <option value={ML_DOC_TYPE}>ML распознавание</option>
                 </select>
               </label>
               <p className="ocr-docs__hint">
@@ -1263,7 +1314,9 @@ export function OcrDocumentsPanel({
                       {item.title || item.doc_type}
                     </option>
                   ))}
-                  {!templateOptions.some((item) => item.doc_type === activeItem.docType) ? (
+                  <option value={ML_DOC_TYPE}>ML распознавание</option>
+                  {!templateOptions.some((item) => item.doc_type === activeItem.docType)
+                    && !isMlDocType(activeItem.docType) ? (
                     <option value={activeItem.docType}>{typeTitle(activeItem.docType)}</option>
                   ) : null}
                 </select>
