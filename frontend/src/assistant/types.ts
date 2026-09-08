@@ -58,6 +58,7 @@ export interface AssistantMessage {
   feedback?: FeedbackKind | null
   tools?: ToolId[]
   attachments?: AssistantAttachmentRef[]
+  skill?: { alias: string }
   ocr?: AssistantOcrResult
   shortContent?: string
   detailContent?: string

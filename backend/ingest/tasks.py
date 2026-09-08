@@ -45,6 +45,14 @@ def reconcile_suz_changes(limit: int | None = None) -> dict[str, Any]:
     return run_reconciliation(limit=page_limit)
 
 
+@shared_task(name="ingest.crawl_assistant_website")
+def crawl_assistant_website(job_id: int) -> dict[str, Any]:
+    """P5-07: crawl a website source into assistant_* RAG. Not called from chat."""
+    from hub.website_crawl import run_website_crawl
+
+    return run_website_crawl(job_id)
+
+
 def enqueue_ingest_chain(payload_data: Mapping[str, Any]) -> AsyncResult:
     """Enqueue reindexing followed by debounced QU retraining."""
     payload = SuzPayload.from_mapping(payload_data)

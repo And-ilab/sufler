@@ -137,6 +137,20 @@ class ModelRegistryAdminIntegrationTest(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_assistant_rejects_max_response_below_ten(self):
+        client = Client()
+        client.force_login(
+            self.user_for_role("llm_knowledge_base_administrator")
+        )
+        payload = self.payload(generation={"response_chars_max": 9})
+        response = client.put(
+            f"{self.url}?profile=assistant_bank",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("response_chars_max", response.json()["details"])
+
     def test_anonymous_request_is_rejected(self):
         response = Client().get(f"{self.url}?profile=assistant_bank")
 

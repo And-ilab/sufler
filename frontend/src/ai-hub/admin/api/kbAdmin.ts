@@ -102,20 +102,30 @@ async function authedFetch(
   init: RequestInit & { csrf?: boolean } = {},
 ): Promise<Response> {
   const { csrf = false, headers: initHeaders, ...rest } = init
-  await ensureDevSession()
-  const headers = new Headers(initHeaders)
-  if (csrf) {
-    const token = await ensureCsrfToken()
-    if (!token) {
-      throw new KnowledgeBaseApiError('csrf_failed')
+  const send = async () => {
+    await ensureDevSession()
+    const headers = new Headers(initHeaders)
+    if (csrf) {
+      const token = await ensureCsrfToken()
+      if (!token) {
+        throw new KnowledgeBaseApiError('csrf_failed')
+      }
+      headers.set('X-CSRFToken', token)
     }
-    headers.set('X-CSRFToken', token)
+    return fetch(input, {
+      ...rest,
+      credentials: 'include',
+      headers,
+    })
   }
-  return fetch(input, {
-    ...rest,
-    credentials: 'include',
-    headers,
-  })
+  let response = await send()
+  if (response.status === 401 || response.status === 403) {
+    const { resetDevSessionCache } = await import('../../../auth/ensureDevSession')
+    resetDevSessionCache()
+    await ensureDevSession(true)
+    response = await send()
+  }
+  return response
 }
 
 export async function listKnowledgeBases(): Promise<KnowledgeBase[]> {

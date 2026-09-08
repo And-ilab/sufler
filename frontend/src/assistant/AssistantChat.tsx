@@ -48,6 +48,13 @@ import {
   ocrExportRows,
 } from '../ai-hub/admin/api/ocrAdmin'
 import { OcrDocumentsPanel } from '../ai-hub/ocr/OcrDocumentsPanel'
+import {
+  DEMO_BANK_SKILLS,
+  fetchAssistantSkills,
+  filterSkills,
+  type AssistantSkill,
+} from './api/skills'
+import { MySkillsPanel } from './MySkillsPanel'
 import { filterOcrFields } from '../ai-hub/ocr/fieldQuality'
 import { useAssistantChat } from './useAssistantChat'
 import './AssistantChat.css'
@@ -228,6 +235,8 @@ function FeedbackBar({
 }
 
 function sourceHref(source: AssistantSource): string | null {
+  const link = (source.permalink || '').trim()
+  if (/^https?:\/\//i.test(link)) return link
   const articleId =
     source.article_id != null && String(source.article_id).trim()
       ? String(source.article_id)
@@ -239,7 +248,6 @@ function sourceHref(source: AssistantSource): string | null {
       + `&article_id=${encodeURIComponent(articleId)}`
     )
   }
-  const link = (source.permalink || '').trim()
   if (!link || link === '#') return null
   return link
 }
@@ -392,6 +400,24 @@ function SourcesList({
   const visible = showAll ? sources : sources.slice(0, 1)
   const hiddenCount = sources.length - visible.length
 
+  if (!sources.length) {
+    return (
+      <div className="asst-sources" data-testid={`sources-${messageId}`}>
+        <strong>Источники (0)</strong>
+        <ul>
+          <li className="asst-source-item" data-testid={`source-empty-${messageId}`}>
+            <div className="asst-source-item__row">
+              <StatusBadge status="warning">0%</StatusBadge>
+              <span className="asst-source-item__title">
+                В выбранных базах нет подходящих статей
+              </span>
+            </div>
+          </li>
+        </ul>
+      </div>
+    )
+  }
+
   return (
     <div className="asst-sources" data-testid={`sources-${messageId}`}>
       <strong>Источники ({sources.length})</strong>
@@ -533,6 +559,11 @@ function MessageLenta({
           </div>
           {message.role === 'user' ? (
             <div className="asst-turn__user-block">
+              {message.skill?.alias ? (
+                <span className="asst-turn__skill" data-testid="asst-msg-skill">
+                  /{message.skill.alias}
+                </span>
+              ) : null}
               {message.attachments?.length ? (
                 <ul className="asst-turn__files" aria-label="Вложения">
                   {message.attachments.map((file) => (
@@ -579,20 +610,22 @@ function MessageLenta({
                   onChange={(text) => onDraftChange(message.id, text)}
                 />
               ) : null}
-              {message.sources && message.sources.length > 0 ? (
-                <SourcesList messageId={message.id} sources={message.sources} />
+              {!message.pending && message.content ? (
+                <SourcesList messageId={message.id} sources={message.sources ?? []} />
               ) : null}
               {!readOnly && !message.pending && message.content ? (
                 <div className="asst-answer-actions">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={streaming}
-                    onClick={() => onExpand(message.id)}
-                    data-testid={`asst-expand-${message.id}`}
-                  >
-                    {message.expanded ? 'Скрыть' : 'Подробнее'}
-                  </Button>
+                  {(message.sources?.length ?? 0) > 0 ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={streaming}
+                      onClick={() => onExpand(message.id)}
+                      data-testid={`asst-expand-${message.id}`}
+                    >
+                      {message.expanded ? 'Скрыть' : 'Подробнее'}
+                    </Button>
+                  ) : null}
                   {previousMediaTranscripts(messages, index).map((file) => (
                     <Button
                       key={`${file.name}-txt`}
@@ -1240,10 +1273,18 @@ export function AssistantChat({
   const [modelError, setModelError] = useState('')
   const [docgenOpen, setDocgenOpen] = useState(false)
   const [docgenFilter, setDocgenFilter] = useState<DocTemplateFormat[] | undefined>()
+  const [skills, setSkills] = useState<AssistantSkill[]>(() =>
+    demoMode ? DEMO_BANK_SKILLS : [],
+  )
+  const [selectedSkill, setSelectedSkill] = useState<AssistantSkill | null>(null)
+  const [pickerIndex, setPickerIndex] = useState(0)
+  const [mySkillsOpen, setMySkillsOpen] = useState(false)
   const kbSlugsRef = useRef<string[]>([])
   kbSlugsRef.current = kbCatalog
     .filter((kb) => kbSelected[kb.id])
     .map((kb) => kb.slug)
+  const skillIdRef = useRef<number | null>(null)
+  skillIdRef.current = selectedSkill?.id ?? null
 
   const {
     messages,
@@ -1268,6 +1309,8 @@ export function AssistantChat({
   } = useAssistantChat({
     demoMode,
     getKbSlugs: () => kbSlugsRef.current,
+    getSkillId: () => skillIdRef.current,
+    getSkillAlias: () => selectedSkill?.alias ?? null,
   })
   const maxChars = 500
   const charCount = draft.length
@@ -1311,6 +1354,29 @@ export function AssistantChat({
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (demoMode) {
+      setSkills((current) => {
+        const mine = current.filter((item) => item.scope === 'user')
+        return [...DEMO_BANK_SKILLS, ...mine]
+      })
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        await ensureDevSession()
+        const items = await fetchAssistantSkills()
+        if (!cancelled) setSkills(items)
+      } catch {
+        if (!cancelled) setSkills([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [demoMode])
 
   const onModelChange = async (modelId: string) => {
     if (!modelId || modelId === activeModelId || modelStatus === 'switching') {
@@ -1579,6 +1645,30 @@ export function AssistantChat({
     }
   }
 
+  const slashMatch = draft.match(/(?:^|\s)\/([^\s]*)$/)
+  const pickerOpen = Boolean(slashMatch) && !readOnly && !mySkillsOpen
+  const pickerQuery = slashMatch?.[1] ?? ''
+  const bankSkills = filterSkills(
+    skills.filter((item) => item.scope === 'org' && item.enabled),
+    pickerQuery,
+  )
+  const mySkills = filterSkills(
+    skills.filter((item) => item.scope === 'user'),
+    pickerQuery,
+  )
+  const pickerItems = [...bankSkills, ...mySkills]
+  const highlightedSkill = pickerItems[Math.min(pickerIndex, Math.max(pickerItems.length - 1, 0))] ?? null
+  const skillAttachHint =
+    selectedSkill?.needs_attachment && attachments.length === 0
+      ? 'К этому навыку желательно приложить файл'
+      : ''
+
+  const applySkill = (skill: AssistantSkill) => {
+    setSelectedSkill(skill)
+    setPickerIndex(0)
+    setDraft((current) => current.replace(/(?:^|\s)\/[^\s]*$/, '').replace(/\s+$/, ''))
+  }
+
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
     if (readOnly || streaming || attachBusy) return
@@ -1593,26 +1683,24 @@ export function AssistantChat({
 
   return (
     <div
-      className={`asst-chat${compact ? ' asst-chat--compact' : ' asst-chat--wide'}${
-        compact ? ' is-history-open' : ''
-      }${readOnly ? ' asst-chat--readonly' : ''}`}
+      className={`asst-chat${compact ? ' asst-chat--compact' : ' asst-chat--wide'} is-history-open${
+        readOnly ? ' asst-chat--readonly' : ''
+      }`}
       data-testid="assistant-chat"
       data-readonly={readOnly ? 'true' : undefined}
     >
-      {compact ? (
-        <ChatSidebar
-          dialogs={dialogs}
-          activeId={sessionId}
-          readOnly={readOnly}
-          onOpen={openDialog}
-          onNew={() => {
-            newDialog()
-            setAttachments([])
-            setAttachError('')
-          }}
-          onDelete={deleteDialog}
-        />
-      ) : null}
+      <ChatSidebar
+        dialogs={dialogs}
+        activeId={sessionId}
+        readOnly={readOnly}
+        onOpen={openDialog}
+        onNew={() => {
+          newDialog()
+          setAttachments([])
+          setAttachError('')
+        }}
+        onDelete={deleteDialog}
+      />
       <div className="asst-chat__main">
       {readOnly ? (
         <div className="asst-readonly-banner" role="status" data-testid="asst-readonly-banner">
@@ -1734,6 +1822,19 @@ export function AssistantChat({
         <div className="asst-toolbar__extras">
           <Button
             type="button"
+            variant={mySkillsOpen ? 'secondary' : 'ghost'}
+            disabled={readOnly}
+            onClick={() => {
+              setMySkillsOpen((value) => !value)
+              setToolsOpen(false)
+              setKbOpen(false)
+            }}
+            data-testid="asst-my-skills"
+          >
+            Мои навыки
+          </Button>
+          <Button
+            type="button"
             variant={toolsOpen ? 'secondary' : 'ghost'}
             aria-expanded={toolsOpen}
             aria-controls="asst-tools-panel"
@@ -1741,6 +1842,7 @@ export function AssistantChat({
             onClick={() => {
               setToolsOpen((value) => !value)
               setKbOpen(false)
+              setMySkillsOpen(false)
             }}
             data-testid="asst-composer-tools"
           >
@@ -1783,6 +1885,15 @@ export function AssistantChat({
               )),
             }))
           }
+        />
+      ) : null}
+
+      {mySkillsOpen && !readOnly ? (
+        <MySkillsPanel
+          skills={skills}
+          demoMode={demoMode}
+          onClose={() => setMySkillsOpen(false)}
+          onChange={setSkills}
         />
       ) : null}
 
@@ -1860,6 +1971,11 @@ export function AssistantChat({
       ) : null}
 
       <form className="asst-composer" onSubmit={onSubmit} data-testid="asst-composer">
+        {skillAttachHint ? (
+          <p className="asst-composer__skill-hint" data-testid="asst-skill-attach-hint">
+            {skillAttachHint}
+          </p>
+        ) : null}
         {attachments.length > 0 ? (
           <ul className="asst-composer__attachments" data-testid="asst-attach-list">
             {attachments.map((file) => (
@@ -1921,8 +2037,63 @@ export function AssistantChat({
           onChange={(event) => void onPickOcr(event.target.files)}
           data-testid="asst-ocr-input"
         />
+        {pickerOpen ? (
+          <div className="asst-skill-picker" role="listbox" data-testid="asst-skill-picker">
+            <p className="asst-skill-picker__group">Банк</p>
+            {bankSkills.map((item) => (
+              <button
+                key={`org-${item.id}`}
+                type="button"
+                role="option"
+                aria-selected={highlightedSkill?.id === item.id}
+                className={`asst-skill-picker__item${
+                  highlightedSkill?.id === item.id ? ' is-active' : ''
+                }`}
+                onClick={() => applySkill(item)}
+                data-testid={`asst-skill-${(item.code || item.alias).toLowerCase()}`}
+              >
+                /{item.alias}
+              </button>
+            ))}
+            {!bankSkills.length ? (
+              <p className="asst-skill-picker__empty">Нет навыков банка</p>
+            ) : null}
+            <p className="asst-skill-picker__group">Мои</p>
+            {mySkills.map((item) => (
+              <button
+                key={`user-${item.id}`}
+                type="button"
+                role="option"
+                aria-selected={highlightedSkill?.id === item.id}
+                className={`asst-skill-picker__item${
+                  highlightedSkill?.id === item.id ? ' is-active' : ''
+                }`}
+                onClick={() => applySkill(item)}
+                data-testid={`asst-skill-mine-${item.alias}`}
+              >
+                /{item.alias}
+              </button>
+            ))}
+            {!mySkills.length ? (
+              <p className="asst-skill-picker__empty">Нет личных навыков</p>
+            ) : null}
+          </div>
+        ) : null}
         <div className="asst-composer__row">
-          <div className="asst-composer__field">
+          <div className={`asst-composer__field${selectedSkill ? ' asst-composer__field--skill' : ''}`}>
+            {selectedSkill ? (
+              <span className="asst-composer__skill-inline" data-testid="asst-skill-chip">
+                /{selectedSkill.alias}
+                <button
+                  type="button"
+                  aria-label={`Убрать навык ${selectedSkill.name}`}
+                  onClick={() => setSelectedSkill(null)}
+                  data-testid="asst-skill-chip-clear"
+                >
+                  ×
+                </button>
+              </span>
+            ) : null}
             <textarea
               id="asst-draft"
               value={draft}
@@ -1937,8 +2108,35 @@ export function AssistantChat({
               data-testid="asst-draft"
               disabled={readOnly}
               readOnly={readOnly}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => {
+                setDraft(event.target.value)
+                setPickerIndex(0)
+              }}
               onKeyDown={(event) => {
+                if (event.key === 'Escape' && pickerOpen) {
+                  event.preventDefault()
+                  setDraft((current) =>
+                    current.replace(/(?:^|\s)\/[^\s]*$/, '').replace(/\s+$/, ''),
+                  )
+                  return
+                }
+                if (pickerOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+                  event.preventDefault()
+                  if (!pickerItems.length) return
+                  const delta = event.key === 'ArrowDown' ? 1 : -1
+                  setPickerIndex((current) => {
+                    const next = current + delta
+                    if (next < 0) return pickerItems.length - 1
+                    if (next >= pickerItems.length) return 0
+                    return next
+                  })
+                  return
+                }
+                if (event.key === 'Enter' && !event.shiftKey && pickerOpen) {
+                  event.preventDefault()
+                  if (highlightedSkill) applySkill(highlightedSkill)
+                  return
+                }
                 if (event.key !== 'Enter' || event.shiftKey) return
                 event.preventDefault()
                 if (readOnly || streaming || attachBusy) return
@@ -1983,37 +2181,38 @@ export function AssistantChat({
               )}
             </button>
           </div>
-          <div className="asst-composer__footer">
-            <span data-testid="asst-char-count">
-              {charCount}/{maxChars}
+          <Button
+            type="submit"
+            className="asst-composer__send"
+            disabled={
+              readOnly
+              || streaming
+              || attachBusy
+              || (!draft.trim() && !attachments.length)
+            }
+            data-testid="asst-send"
+          >
+            {streaming ? 'Стриминг…' : 'Отправить'}
+          </Button>
+          <div className="asst-composer__usage">
+            <span className="asst-composer__usage-count" data-testid="asst-char-count">
+              {charCount} / {maxChars} символов
             </span>
-            <Button
-              type="submit"
-              disabled={
-                readOnly
-                || streaming
-                || attachBusy
-                || (!draft.trim() && !attachments.length)
-              }
-              data-testid="asst-send"
+            <div
+              className={`asst-composer__meter asst-composer__meter--${charMeterTone}`}
+              role="meter"
+              aria-valuemin={0}
+              aria-valuemax={maxChars}
+              aria-valuenow={charCount}
+              aria-label="Индикатор количества введённых символов"
+              data-testid="asst-char-meter"
             >
-              {streaming ? 'Стриминг…' : 'Отправить'}
-            </Button>
+              <div
+                className="asst-composer__meter-fill"
+                style={{ width: `${charProgress}%` }}
+              />
+            </div>
           </div>
-        </div>
-        <div
-          className={`asst-composer__meter asst-composer__meter--${charMeterTone}`}
-          role="meter"
-          aria-valuemin={0}
-          aria-valuemax={maxChars}
-          aria-valuenow={charCount}
-          aria-label="Индикатор количества введённых символов"
-          data-testid="asst-char-meter"
-        >
-          <div
-            className="asst-composer__meter-fill"
-            style={{ width: `${charProgress}%` }}
-          />
         </div>
       </form>
       </div>

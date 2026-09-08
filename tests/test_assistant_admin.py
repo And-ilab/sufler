@@ -105,6 +105,49 @@ class AssistantAdminApiTest(TestCase):
         detail = client.get(f"/api/admin/assistant/kb/{kb_id}/")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(len(detail.json()["documents"]), 1)
+        self.assertEqual(detail.json()["documents"][0]["index_percent"], 100)
+
+    def test_upload_without_reindex_exposes_live_percent(self):
+        from hub.kb_admin import document_index_percent
+        from hub.models import AssistantKnowledgeBaseDocument
+
+        self.assertEqual(document_index_percent("indexed", ""), 100)
+        self.assertEqual(document_index_percent("uploaded", "Индексация 42%"), 42)
+        self.assertEqual(document_index_percent("uploaded", ""), 0)
+
+        client = Client()
+        client.force_login(
+            self.user_for_role("ai_assistant_module_administrator")
+        )
+        created = client.post(
+            "/api/admin/assistant/kb/",
+            data=json.dumps({"name": "Live percent", "slug": "live_percent"}),
+            content_type="application/json",
+        )
+        self.assertEqual(created.status_code, 201)
+        kb_id = created.json()["id"]
+        upload = client.post(
+            f"/api/admin/assistant/kb/{kb_id}/upload/",
+            data={
+                "file": SimpleUploadedFile(
+                    "big.txt",
+                    b"Live percent marker SUFLER-BIG-001.\n" * 40,
+                    content_type="text/plain",
+                ),
+                "reindex": "0",
+            },
+        )
+        self.assertEqual(upload.status_code, 201, upload.content)
+        self.assertNotEqual(upload.json()["knowledge_base"]["status"], "ready")
+        self.assertEqual(upload.json()["document"]["index_percent"], 0)
+        document = AssistantKnowledgeBaseDocument.objects.get(
+            pk=upload.json()["document"]["id"]
+        )
+        document.status_message = "Индексация 37%"
+        document.save(update_fields=("status_message",))
+        detail = client.get(f"/api/admin/assistant/kb/{kb_id}/")
+        self.assertEqual(detail.json()["documents"][0]["index_percent"], 37)
+        self.assertEqual(detail.json()["index_percent"], 37)
 
     def test_prompts_crud_and_capabilities_toggle(self):
         client = Client()

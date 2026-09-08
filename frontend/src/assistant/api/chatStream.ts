@@ -69,6 +69,7 @@ export async function* streamAssistantChat(input: {
   kbSlugs?: string[]
   attachments?: ChatAttachmentPayload[]
   expand?: boolean
+  skillId?: number
   signal?: AbortSignal
 }): AsyncGenerator<ChatStreamChunk> {
   let response: Response
@@ -87,6 +88,7 @@ export async function* streamAssistantChat(input: {
         kb_slugs: input.kbSlugs ?? [],
         attachments: input.attachments?.length ? input.attachments : undefined,
         expand: input.expand || undefined,
+        skill_id: input.skillId && input.skillId > 0 ? input.skillId : undefined,
         stream: true,
       }),
       signal: input.signal,

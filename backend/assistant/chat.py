@@ -16,6 +16,7 @@ from assistant.idp import (
     wants_summary,
 )
 from qu.assistant_retrieval import preview_assistant_query
+from hub.skill_store import apply_skill_layer
 
 PROFILE = "assistant_bank"
 _ANSWER_STYLE = (
@@ -30,6 +31,13 @@ DEFAULT_SYSTEM_PROMPT = (
     "Заканчивай законченным предложением и законченной мыслью. "
     + _ANSWER_STYLE
 )
+_NO_KB_RULE = (
+    "Запрещено использовать общие знания, догадки и информацию вне "
+    "фрагментов. Не придумывай процедуры, сроки и правила. "
+    "Если фрагменты по теме вопроса есть — ответь по ним, даже если "
+    "формулировка не дословная. Скажи, что в базе знаний нет информации, "
+    "только если фрагменты про другое и ответа там нет."
+)
 GROUNDED_SYSTEM_PROMPT = (
     "Ты внутренний ИИ-ассистент банка. Отвечай ТОЛЬКО фактами из "
     "переданных фрагментов базы знаний. Внимательно читай каждый фрагмент "
@@ -40,20 +48,26 @@ GROUNDED_SYSTEM_PROMPT = (
     "Если во фрагментах несколько разных сроков — ответь по документу, "
     "который прямо отвечает на вопрос пользователя, и не смешивай "
     "чужие условия. "
-    "Если действительно нет нужных фактов — скажи об этом. "
-    "Ответ по делу: закончи законченным предложением и законченной "
+    + _NO_KB_RULE
+    + " Ответ по делу: закончи законченным предложением и законченной "
     "мыслью, не обрывай фразу, список или абзац на середине. "
     + _ANSWER_STYLE
 )
 EXPAND_SYSTEM_PROMPT = (
-    "Ты внутренний ИИ-ассистент банка. Дай полный ответ по фактам "
+    "Ты внутренний ИИ-ассистент банка. Дай полный ответ только по фактам "
     "из переданных фрагментов: все условия, кому подходит, как оформить, "
     "лимиты и документы. Не обрывай текст на середине предложения. "
     "Числа и сроки бери дословно из фрагментов. "
+    + _NO_KB_RULE
+    + " "
     + _ANSWER_STYLE
 )
+NO_KB_ANSWER = (
+    "В выбранных базах знаний нет информации по этому вопросу. "
+    "Ответить могу только по статьям из базы знаний."
+)
 # Local llama often runs with -c 4096; five full .doc chunks overflow (~10k tokens).
-DEFAULT_RAG_LIMIT = 3
+DEFAULT_RAG_LIMIT = 5
 # Per-chunk budget for the LLM (UI citations still use short snippet).
 LLM_CHUNK_CHARS = 2800
 # Soft cap for all RAG bodies combined (leaves room for system + question + answer).
@@ -185,12 +199,18 @@ def parse_chat_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(expand, bool):
         raise AssistantChatError("expand must be a boolean")
 
+    skill_id = payload.get("skill_id")
+    if skill_id is not None:
+        if isinstance(skill_id, bool) or not isinstance(skill_id, int):
+            raise AssistantChatError("skill_id must be an integer")
+
     return {
         "messages": messages,
         "session_id": session_id.strip(),
         "stream": True,
         "kb_slugs": _parse_kb_slugs(payload),
         "expand": expand,
+        "skill_id": skill_id,
     }
 
 
@@ -234,12 +254,16 @@ def _last_user_text(messages: Sequence[Mapping[str, str]]) -> str:
     return ""
 
 
+def _is_http_permalink(permalink: str) -> bool:
+    return permalink.startswith("http://") or permalink.startswith("https://")
+
+
 def _citation(document: Mapping[str, Any]) -> dict[str, Any]:
     kb_slug = str(document.get("kb_slug") or "")
     article_id = document.get("article_id")
     permalink = str(document.get("permalink") or "")
-    # Always prefer download API so chat sources open the file, not admin UI.
-    if kb_slug and article_id is not None:
+    # File chunks use the download API. Website pages keep their http(s) URL.
+    if not _is_http_permalink(permalink) and kb_slug and article_id is not None:
         try:
             from hub.assistant_admin import assistant_source_download_url
 
@@ -358,7 +382,10 @@ def _inject_rag_context(
                         "не обрывай фразу, список или абзац на середине. "
                     )
                     + "Числа и сроки бери дословно из тела фрагмента, "
-                    "не из имени файла. Если срока в тексте нет — так и скажи. "
+                    "не из имени файла. Отвечай по смыслу вопроса тем, что есть "
+                    "во фрагментах. Если фрагменты про другую тему и ответа нет — "
+                    "скажи, что в базе знаний нет этой информации, и ничего "
+                    "не добавляй от себя. "
                     "Без markdown и без списка источников в тексте."
                 ),
             }
@@ -397,6 +424,32 @@ def retrieve_assistant_context(
 # +18% on the default (non-expand) cap so the last sentence can finish.
 _DEFAULT_TOKEN_HEADROOM = 1.18
 _EXPAND_TOKEN_FLOOR = 4096
+_MIN_RESPONSE_CHARS = 10
+
+
+def _admin_preset_is_expand() -> bool:
+    try:
+        return str(get_model_settings(PROFILE).preset) == "long"
+    except Exception:
+        return False
+
+
+def _effective_expand(requested: bool) -> bool:
+    return bool(requested) or _admin_preset_is_expand()
+
+
+def _response_char_limit(*, expand: bool) -> int | None:
+    """Hard cap for the default reply. Expand / «Подробнее» keeps the current long form."""
+    if expand:
+        return None
+    try:
+        return max(_MIN_RESPONSE_CHARS, int(get_model_settings(PROFILE).response_chars_max))
+    except Exception:
+        return None
+
+
+def _tokens_for_char_limit(char_limit: int) -> int:
+    return max(8, int(round(char_limit / 2)) + 8)
 
 
 def _generation_parameters(*, expand: bool = False) -> dict[str, Any]:
@@ -408,8 +461,10 @@ def _generation_parameters(*, expand: bool = False) -> dict[str, Any]:
             "top_p": float(settings.top_p),
             "max_tokens": int(settings.max_tokens),
         }
+        char_limit = max(_MIN_RESPONSE_CHARS, int(settings.response_chars_max))
     except Exception:
         parameters = {"max_tokens": 2048}
+        char_limit = None
 
     raw_cap = os.environ.get("ASSISTANT_MAX_TOKENS") or os.environ.get(
         "LLM_MAX_TOKENS"
@@ -419,7 +474,7 @@ def _generation_parameters(*, expand: bool = False) -> dict[str, Any]:
             parameters["max_tokens"] = max(32, int(raw_cap))
         except ValueError:
             pass
-    else:
+    elif expand:
         current = int(parameters.get("max_tokens") or 2048)
         try:
             from assistant.local_llm import is_deepseek_assistant
@@ -431,12 +486,139 @@ def _generation_parameters(*, expand: bool = False) -> dict[str, Any]:
             parameters["max_tokens"] = max(current, 4096)
         else:
             parameters["max_tokens"] = max(current, 1024)
+    elif char_limit is not None:
+        parameters["max_tokens"] = _tokens_for_char_limit(char_limit)
+    else:
+        current = int(parameters.get("max_tokens") or 2048)
+        parameters["max_tokens"] = max(current, 1024)
     base = int(parameters.get("max_tokens") or 2048)
     if expand:
         parameters["max_tokens"] = max(base, _EXPAND_TOKEN_FLOOR)
-    elif base < _EXPAND_TOKEN_FLOOR:
+    elif raw_cap and base < _EXPAND_TOKEN_FLOOR:
         parameters["max_tokens"] = max(32, int(round(base * _DEFAULT_TOKEN_HEADROOM)))
     return parameters
+
+
+def _iter_plain_sse(text: str) -> Iterator[str]:
+    """Stream a fixed reply without calling the LLM."""
+    yield (
+        "data: "
+        + json.dumps(
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant"},
+                        "finish_reason": None,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+        + "\n\n"
+    )
+    step = 24
+    for start in range(0, len(text), step):
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": text[start : start + step]},
+                            "finish_reason": None,
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            )
+            + "\n\n"
+        )
+    yield (
+        "data: "
+        + json.dumps(
+            {
+                "choices": [
+                    {"index": 0, "delta": {}, "finish_reason": "stop"}
+                ],
+            },
+            ensure_ascii=False,
+        )
+        + "\n\n"
+    )
+    yield "data: [DONE]\n\n"
+
+
+def _clip_sse_stream(frames: Iterator[str], limit: int) -> Iterator[str]:
+    """Stop the visible answer at ``limit`` characters."""
+    used = 0
+    stopped = False
+    for frame in frames:
+        if stopped:
+            if frame.strip() == "data: [DONE]":
+                yield frame
+            continue
+        stripped = frame.lstrip()
+        if not stripped.startswith("data:"):
+            yield frame
+            continue
+        payload = stripped[5:].strip()
+        if payload == "[DONE]":
+            yield frame
+            continue
+        try:
+            chunk = json.loads(payload)
+        except json.JSONDecodeError:
+            yield frame
+            continue
+        if not isinstance(chunk, dict):
+            yield frame
+            continue
+        choices = chunk.get("choices")
+        if not isinstance(choices, list) or not choices:
+            yield frame
+            continue
+        first = choices[0]
+        if not isinstance(first, dict):
+            yield frame
+            continue
+        delta = first.get("delta")
+        if not isinstance(delta, dict):
+            yield frame
+            continue
+        text = delta.get("content")
+        if not isinstance(text, str) or not text:
+            yield frame
+            continue
+        remain = limit - used
+        if remain <= 0:
+            stopped = True
+            first["finish_reason"] = "length"
+            delta["content"] = ""
+            yield (
+                "data: "
+                + json.dumps(chunk, ensure_ascii=False)
+                + "\n\n"
+            )
+            yield "data: [DONE]\n\n"
+            continue
+        if len(text) > remain:
+            delta["content"] = text[:remain]
+            first["finish_reason"] = "length"
+            used = limit
+            stopped = True
+            yield (
+                "data: "
+                + json.dumps(chunk, ensure_ascii=False)
+                + "\n\n"
+            )
+            yield "data: [DONE]\n\n"
+            continue
+        used += len(text)
+        yield frame
+    if not stopped:
+        return
 
 
 def iter_chat_sse(
@@ -446,8 +628,11 @@ def iter_chat_sse(
     gateway: ModelGateway | None = None,
     request_id: str | None = None,
     expand: bool = False,
+    skill_instruction: str = "",
 ) -> Iterator[str]:
     """Yield OpenAI-compatible SSE frames from ``assistant_bank`` with RAG."""
+    expand = _effective_expand(expand)
+    char_limit = _response_char_limit(expand=expand)
     active = gateway or ModelGateway.from_registry()
     parameters = _generation_parameters(expand=expand)
 
@@ -492,6 +677,10 @@ def iter_chat_sse(
         + "\n\n"
     )
 
+    if not documents and not attachment_mode and not skill_instruction:
+        yield from _iter_plain_sse(NO_KB_ANSWER)
+        return
+
     outbound = (
         _inject_rag_context(messages, documents, expand=expand)
         if documents
@@ -528,8 +717,29 @@ def iter_chat_sse(
             ],
         ]
 
+    if skill_instruction:
+        outbound = apply_skill_layer(
+            [dict(item) for item in outbound],
+            skill_instruction,
+        )
+
+    if char_limit is not None:
+        length_hint = f" Ответ строго не длиннее {char_limit} символов."
+        outbound = [
+            {
+                **item,
+                "content": f"{item['content']}{length_hint}",
+            }
+            if item.get("role") == "system"
+            else item
+            for item in outbound
+        ]
+
     try:
-        yield from active.stream(PROFILE, outbound, **parameters)
+        stream = active.stream(PROFILE, outbound, **parameters)
+        if char_limit is not None:
+            stream = _clip_sse_stream(stream, char_limit)
+        yield from stream
     except ModelGatewayConfigurationError as exc:
         raise AssistantChatError(str(exc)) from exc
     except Exception as exc:

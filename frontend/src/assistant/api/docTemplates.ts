@@ -112,9 +112,23 @@ export async function generateFromPrompt(
 }
 
 export function looksLikeContentPrompt(message: string): boolean {
-  return /записк|справк|отч[её]т|докладн|инструкц|презентац|слайд|\bppt\b|bpmn|диаграмм|блок-?схем|er[\s-]?диаграмм/i.test(
-    message,
-  )
+  const text = message.trim()
+  if (!text) return false
+  // Questions about how to file a report/memo must go to the knowledge base.
+  if (
+    /^(как|какой|какая|какие|какое|что|чем|зачем|почему|когда|где|кто|можно ли|нужно ли|за чей|есть ли)\b/i.test(
+      text,
+    )
+  ) {
+    return false
+  }
+  const hasKind =
+    /записк|справк|отч[её]т|докладн|инструкц|презентац|слайд|\bppt\b|bpmn|диаграмм|блок-?схем|er[\s-]?диаграмм/i.test(
+      text,
+    )
+  const hasVerb =
+    /подготов|сделай|сгенерир|напиши|создай|нужн[аоы]|нарисуй|собери/i.test(text)
+  return hasKind && hasVerb
 }
 
 export async function downloadGeneratedDocument(

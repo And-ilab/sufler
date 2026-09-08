@@ -89,6 +89,9 @@ export interface UseAssistantChatOptions {
   sessionId?: string
   /** Selected assistant_* KB slugs for RAG. */
   getKbSlugs?: () => string[]
+  /** Active slash skill for this send (org or personal). */
+  getSkillId?: () => number | null
+  getSkillAlias?: () => string | null
   /** Persist chat across remounts / full-page open (localStorage history). */
   persist?: boolean
 }
@@ -98,6 +101,8 @@ export function useAssistantChat({
   initialMessages,
   sessionId: sessionIdProp,
   getKbSlugs,
+  getSkillId,
+  getSkillAlias,
   persist = true,
 }: UseAssistantChatOptions = {}) {
   const history = persist && !demoMode ? loadChatHistory() : null
@@ -246,6 +251,9 @@ export function useAssistantChat({
           id: userId,
           role: 'user',
           content: displayText,
+          skill: getSkillAlias?.()
+            ? { alias: getSkillAlias() as string }
+            : undefined,
           attachments: readyAttachments.map((item) => ({
             name: item.name,
             type: item.type,
@@ -349,6 +357,7 @@ export function useAssistantChat({
               message: trimmed || displayText,
               sessionId,
               kbSlugs: getKbSlugs?.() ?? [],
+              skillId: getSkillId?.() ?? undefined,
               attachments: readyAttachments.map((item) => ({
                 name: item.name,
                 type: item.type,
@@ -361,7 +370,7 @@ export function useAssistantChat({
             })
 
         for await (const chunk of stream) {
-          if (chunk.sources?.length) {
+          if (Array.isArray(chunk.sources)) {
             setMessages((current) =>
               current.map((item) =>
                 item.id === assistantId
@@ -433,7 +442,7 @@ export function useAssistantChat({
         setStreaming(false)
       }
     },
-    [demoMode, getKbSlugs, sessionId, streaming],
+    [demoMode, getKbSlugs, getSkillAlias, getSkillId, sessionId, streaming],
   )
 
   const expandAnswer = useCallback(
@@ -500,6 +509,7 @@ export function useAssistantChat({
               message: question.content,
               sessionId,
               kbSlugs: getKbSlugs?.() ?? [],
+              skillId: getSkillId?.() ?? undefined,
               expand: true,
               signal: controller.signal,
             })
@@ -565,7 +575,7 @@ export function useAssistantChat({
         setStreaming(false)
       }
     },
-    [demoMode, getKbSlugs, sessionId, streaming],
+    [demoMode, getKbSlugs, getSkillAlias, getSkillId, sessionId, streaming],
   )
 
   const newDialog = useCallback(() => {

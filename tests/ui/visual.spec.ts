@@ -536,6 +536,36 @@ test('assistant window III.3 streams tokens, shows tools and feedback', async ({
   await expect(page.getByTestId('asst-streaming-flag')).toHaveCount(0)
 })
 
+test('assistant slash picker selects SKL-01 chip and CRUD personal skill', async ({ page }) => {
+  await openStory(page, 'assistant-window--chat-with-sources')
+  await expect(page.getByTestId('asst-draft')).toBeVisible()
+
+  await page.getByTestId('asst-draft').fill('/за')
+  await expect(page.getByTestId('asst-skill-picker')).toBeVisible()
+  await expect(page.getByTestId('asst-skill-skl-01')).toBeVisible()
+  await expect(page.getByTestId('asst-skill-skl-01')).toContainText('записка')
+  await page.getByTestId('asst-skill-skl-01').click()
+  await expect(page.getByTestId('asst-skill-chip')).toBeVisible()
+  await expect(page.getByTestId('asst-skill-chip')).toContainText('/записка')
+  await expect(page.getByTestId('asst-skill-chip')).not.toContainText('SKL-01')
+
+  await page.getByTestId('asst-my-skills').click()
+  await expect(page.getByTestId('asst-my-skills-panel')).toBeVisible()
+  await page.getByTestId('asst-my-skill-add').click()
+  await expect(page.getByTestId('asst-my-skill-name')).toHaveValue('Мой навык')
+  await page.getByTestId('asst-my-skill-name').fill('Личный тон')
+  await page.getByTestId('asst-my-skill-alias').fill('lichny')
+  await page.getByTestId('asst-my-skill-instruction').fill('Отвечай коротко.')
+  await page.getByTestId('asst-my-skill-save').click()
+  await page.getByTestId('asst-my-skills-close').click()
+
+  await page.getByTestId('asst-draft').fill('/li')
+  await expect(page.getByTestId('asst-skill-picker')).toBeVisible()
+  await expect(page.getByTestId('asst-skill-mine-lichny')).toBeVisible()
+  await page.getByTestId('asst-skill-mine-lichny').click()
+  await expect(page.getByTestId('asst-skill-chip')).toContainText('lichny')
+})
+
 for (const [snapshotName, storyId] of stories) {
   test(snapshotName, async ({ page }) => {
     await openStory(page, storyId)

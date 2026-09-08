@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from unittest import mock
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +24,13 @@ from assistant.openapi import (  # noqa: E402
     generate_openapi_yaml,
 )
 from auth.roles import ROLES_BY_CODE  # noqa: E402
-from assistant.chat import _generation_parameters, parse_chat_request  # noqa: E402
+from assistant.chat import (  # noqa: E402
+    NO_KB_ANSWER,
+    _effective_expand,
+    _generation_parameters,
+    parse_chat_request,
+)
+from hub.model_registry_store import get_model_settings  # noqa: E402
 from assistant.idp import (  # noqa: E402
     build_attachment_prompt,
     split_fragments,
@@ -88,8 +95,9 @@ class AssistantChatApiTest(TestCase):
         raw = b"".join(response.streaming_content)
         content, done = parse_sse_content(raw)
         self.assertTrue(done)
-        self.assertEqual(content, STUB_RESPONSES["assistant_bank"])
-        self.assertIn("ассистент", content.casefold())
+        self.assertEqual(content, NO_KB_ANSWER)
+        self.assertIn("нет информации", content.casefold())
+        self.assertIn('"sources": []', raw.decode("utf-8"))
 
     def test_messages_history_roundtrip(self):
         client = Client()
@@ -110,7 +118,7 @@ class AssistantChatApiTest(TestCase):
         self.assertEqual(response.status_code, 200)
         content, done = parse_sse_content(b"".join(response.streaming_content))
         self.assertTrue(done)
-        self.assertEqual(content, STUB_RESPONSES["assistant_bank"])
+        self.assertEqual(content, NO_KB_ANSWER)
 
     def test_parse_expand_flag(self):
         parsed = parse_chat_request({"message": "Автокредит", "stream": True})
@@ -177,6 +185,63 @@ class AssistantChatApiTest(TestCase):
         self.assertEqual(int(short["max_tokens"]), 302)
         self.assertGreaterEqual(int(long["max_tokens"]), 4096)
         self.assertGreater(int(long["max_tokens"]), int(short["max_tokens"]))
+
+    def test_default_answer_respects_max_response_chars(self):
+        settings = get_model_settings("assistant_bank")
+        settings.response_chars_max = 10
+        settings.preset = "standard"
+        settings.save(update_fields=("response_chars_max", "preset"))
+
+        client = Client()
+        client.force_login(self.user_for_role("ai_assistant_user"))
+        from assistant.chat import _clip_sse_stream, _iter_plain_sse
+
+        long_text = STUB_RESPONSES["assistant_bank"]
+        raw = "".join(_clip_sse_stream(_iter_plain_sse(long_text), 10))
+        content, done = parse_sse_content(raw)
+        self.assertTrue(done)
+        self.assertEqual(len(content), 10)
+        self.assertEqual(content, long_text[:10])
+
+    def test_expand_ignores_short_char_cap(self):
+        settings = get_model_settings("assistant_bank")
+        settings.response_chars_max = 10
+        settings.preset = "standard"
+        settings.save(update_fields=("response_chars_max", "preset"))
+
+        client = Client()
+        client.force_login(self.user_for_role("ai_assistant_user"))
+        from assistant.chat import _iter_plain_sse
+
+        long_text = STUB_RESPONSES["assistant_bank"]
+        raw = "".join(_iter_plain_sse(long_text))
+        content, done = parse_sse_content(raw)
+        self.assertTrue(done)
+        self.assertEqual(content, long_text)
+        self.assertGreater(len(content), 10)
+
+    def test_no_kb_hit_does_not_invent_answer(self):
+        client = Client()
+        client.force_login(self.user_for_role("ai_assistant_user"))
+        response = client.post(
+            self.url,
+            data=json.dumps({"message": "Какая погода на Марсе?", "stream": True}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        content, done = parse_sse_content(b"".join(response.streaming_content))
+        self.assertTrue(done)
+        self.assertEqual(content, NO_KB_ANSWER)
+        self.assertIn("нет информации", content.casefold())
+
+    def test_long_preset_uses_expand_mode_by_default(self):
+        settings = get_model_settings("assistant_bank")
+        settings.preset = "long"
+        settings.response_chars_max = 10
+        settings.save(update_fields=("preset", "response_chars_max"))
+        self.assertTrue(_effective_expand(False))
+        params = _generation_parameters(expand=_effective_expand(False))
+        self.assertGreaterEqual(int(params["max_tokens"]), 4096)
 
     def test_validation_and_rbac(self):
         client = Client()

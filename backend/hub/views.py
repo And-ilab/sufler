@@ -45,6 +45,7 @@ from hub.assistant_admin import (
     update_prompt,
     upload_assistant_document,
 )
+from hub.website_crawl import get_latest_crawl, start_website_crawl
 from hub.kb_admin import (
     KnowledgeBaseError,
     create_knowledge_base,
@@ -60,7 +61,7 @@ from hub.model_registry_store import (
     serialize_model_settings,
     update_model_settings,
 )
-from hub.models import ContactCenterKnowledgeBase
+from hub.models import AssistantKnowledgeBase, ContactCenterKnowledgeBase
 from hub.sufler_policy import (
     get_sufler_policy,
     serialize_sufler_policy,
@@ -73,6 +74,16 @@ from hub.scenario_service import (
     list_scenarios,
     serialize_scenario,
     update_scenario,
+)
+from hub.skill_store import (
+    SkillNotFound,
+    SkillStoreError,
+    create_org_skill,
+    delete_org_skill,
+    get_org_skill,
+    list_org_skills,
+    serialize_skill,
+    update_org_skill,
 )
 from orchestrator.scenario_engine import run_test_dialog
 from qu.admin_service import (
@@ -594,7 +605,7 @@ def assistant_knowledge_bases(request: HttpRequest) -> JsonResponse:
     return JsonResponse(created, status=201)
 
 
-@require_http_methods(["GET", "DELETE"])
+@require_http_methods(["GET", "DELETE", "PATCH"])
 @require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
 def assistant_knowledge_base_detail(
     request: HttpRequest,
@@ -604,11 +615,47 @@ def assistant_knowledge_base_detail(
         if request.method == "DELETE":
             delete_assistant_kb(kb_id)
             return JsonResponse({"ok": True})
+        if request.method == "PATCH":
+            from hub.website_crawl import apply_website_settings
+            from hub.models import AssistantKnowledgeBase
+
+            body = _parse_json_object(request)
+            kb = AssistantKnowledgeBase.objects.get(pk=kb_id)
+            apply_website_settings(kb, body)
+            kb.save()
+            return JsonResponse(get_assistant_kb(kb_id))
         return JsonResponse(get_assistant_kb(kb_id))
+    except AssistantKnowledgeBase.DoesNotExist:
+        return JsonResponse({"error": "not_found"}, status=404)
     except AssistantAdminError as exc:
         if str(exc) in {"KB not found", "document not found"}:
             return JsonResponse({"error": "not_found"}, status=404)
         return _assistant_validation_error(exc)
+
+
+@require_http_methods(["GET", "POST"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_knowledge_base_crawl(
+    request: HttpRequest,
+    kb_id: int,
+) -> JsonResponse:
+    try:
+        if request.method == "GET":
+            return JsonResponse(get_latest_crawl(kb_id))
+        body = _parse_json_object(request)
+        result = start_website_crawl(
+            kb_id,
+            body,
+            username=request.user.get_username(),
+            request=request,
+        )
+    except AssistantKnowledgeBase.DoesNotExist:
+        return JsonResponse({"error": "not_found"}, status=404)
+    except AssistantAdminError as exc:
+        if str(exc) == "KB not found":
+            return JsonResponse({"error": "not_found"}, status=404)
+        return _assistant_validation_error(exc)
+    return JsonResponse(result, status=202)
 
 
 @require_http_methods(["POST"])
@@ -721,6 +768,48 @@ def assistant_capabilities(request: HttpRequest) -> JsonResponse:
             "note": "VII.5 D4 stub registry — RPA/SQL policies in III.6.5",
         }
     )
+
+
+@require_http_methods(["GET", "POST"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_skills(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        return JsonResponse({"items": list_org_skills()})
+    try:
+        body = _parse_json_object(request)
+        created = create_org_skill(body, username=request.user.get_username())
+    except SkillStoreError as exc:
+        return _assistant_validation_error(exc)
+    except AssistantAdminError as exc:
+        return _assistant_validation_error(exc)
+    return JsonResponse(created, status=201)
+
+
+@require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
+@require_permissions(*ASSISTANT_ADMIN_PERMS, require_all=False, api=True)
+def assistant_skill_detail(
+    request: HttpRequest,
+    skill_id: int,
+) -> JsonResponse:
+    try:
+        if request.method == "GET":
+            return JsonResponse(serialize_skill(get_org_skill(skill_id)))
+        if request.method == "DELETE":
+            delete_org_skill(skill_id)
+            return JsonResponse({"ok": True})
+        body = _parse_json_object(request)
+        updated = update_org_skill(
+            skill_id,
+            body,
+            username=request.user.get_username(),
+        )
+    except SkillNotFound:
+        return JsonResponse({"error": "not_found"}, status=404)
+    except SkillStoreError as exc:
+        return _assistant_validation_error(exc)
+    except AssistantAdminError as exc:
+        return _assistant_validation_error(exc)
+    return JsonResponse(updated)
 
 
 @require_http_methods(["PATCH", "PUT"])

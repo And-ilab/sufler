@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import math
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 
 
 class ModelRegistrySettings(models.Model):
@@ -68,9 +70,10 @@ class ModelRegistrySettings(models.Model):
         if not 1 <= self.max_tokens <= 32768:
             errors["max_tokens"] = "Max tokens must be between 1 and 32768."
         response_max = 500 if self.profile == self.PROFILE_SUFLER_CC else 4000
-        if not 1 <= self.response_chars_max <= response_max:
+        response_min = 1 if self.profile == self.PROFILE_SUFLER_CC else 10
+        if not response_min <= self.response_chars_max <= response_max:
             errors["response_chars_max"] = (
-                f"Response length must be between 1 and {response_max} characters."
+                f"Response length must be between {response_min} and {response_max} characters."
             )
         if self.preset not in {
             self.PRESET_SHORT,
@@ -221,10 +224,28 @@ class AssistantKnowledgeBase(models.Model):
         (STATUS_ERROR, "Error"),
     )
 
+    SOURCE_MANUAL = "manual"
+    SOURCE_WEBSITE = "website"
+    SOURCE_CHOICES = (
+        (SOURCE_MANUAL, "Ручная загрузка"),
+        (SOURCE_WEBSITE, "Сайт"),
+    )
+
     name = models.CharField(max_length=200, unique=True)
     slug = models.SlugField(max_length=200, unique=True)
     scope = models.CharField(max_length=64, default="department")
     description = models.TextField(blank=True)
+    source = models.CharField(
+        max_length=32,
+        choices=SOURCE_CHOICES,
+        default=SOURCE_MANUAL,
+        db_index=True,
+    )
+    start_url = models.URLField(max_length=1000, blank=True)
+    crawl_depth = models.PositiveSmallIntegerField(default=3)
+    max_pages = models.PositiveIntegerField(default=200)
+    ignore_robots = models.BooleanField(default=False)
+    allowed_hosts = models.JSONField(default=list, blank=True)
     status = models.CharField(
         max_length=16,
         choices=STATUS_CHOICES,
@@ -287,6 +308,82 @@ class AssistantKnowledgeBaseDocument(models.Model):
 
     def __str__(self) -> str:
         return self.filename
+
+
+class AssistantWebsitePage(models.Model):
+    """Crawled page for an assistant_* website KB (idempotent by URL)."""
+
+    knowledge_base = models.ForeignKey(
+        AssistantKnowledgeBase,
+        on_delete=models.CASCADE,
+        related_name="website_pages",
+    )
+    url = models.URLField(max_length=1000)
+    title = models.CharField(max_length=500, blank=True)
+    extracted_text = models.TextField(blank=True)
+    http_status = models.PositiveSmallIntegerField(default=0)
+    content_type = models.CharField(max_length=128, blank=True)
+    size_bytes = models.PositiveIntegerField(default=0)
+    article_id = models.BigIntegerField(unique=True)
+    checksum = models.CharField(max_length=80, blank=True)
+    skipped_reason = models.CharField(max_length=64, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("url",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("knowledge_base", "url"),
+                name="asst_website_page_url_uniq",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.url
+
+
+class AssistantWebsiteCrawlJob(models.Model):
+    """Long-running same-domain crawl + index job."""
+
+    STATUS_QUEUED = "queued"
+    STATUS_CRAWLING = "crawling"
+    STATUS_INDEXING = "indexing"
+    STATUS_READY = "ready"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_QUEUED, "Queued"),
+        (STATUS_CRAWLING, "Crawling"),
+        (STATUS_INDEXING, "Indexing"),
+        (STATUS_READY, "Ready"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    knowledge_base = models.ForeignKey(
+        AssistantKnowledgeBase,
+        on_delete=models.CASCADE,
+        related_name="crawl_jobs",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_QUEUED,
+        db_index=True,
+    )
+    status_message = models.CharField(max_length=500, blank=True)
+    pages_ok = models.PositiveIntegerField(default=0)
+    pages_4xx = models.PositiveIntegerField(default=0)
+    pages_5xx = models.PositiveIntegerField(default=0)
+    pages_skipped = models.PositiveIntegerField(default=0)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"{self.knowledge_base_id}:{self.status}"
 
 
 class AssistantPromptTemplate(models.Model):
@@ -355,6 +452,63 @@ class AssistantCapability(models.Model):
 
     def __str__(self) -> str:
         return self.code
+
+
+class AssistantSkill(models.Model):
+    """Slash-command skill library (org «Банк» / user «Мои»). Not a capability."""
+
+    SCOPE_ORG = "org"
+    SCOPE_USER = "user"
+    SCOPE_CHOICES = (
+        (SCOPE_ORG, "Банк"),
+        (SCOPE_USER, "Мои"),
+    )
+
+    code = models.CharField(max_length=32, blank=True, default="")
+    scope = models.CharField(
+        max_length=8,
+        choices=SCOPE_CHOICES,
+        db_index=True,
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="assistant_skills",
+    )
+    name = models.CharField(max_length=200)
+    alias = models.CharField(max_length=64)
+    instruction = models.TextField()
+    needs_attachment = models.BooleanField(default=False)
+    enabled = models.BooleanField(default=True)
+    department_scope = models.CharField(max_length=128, blank=True, default="")
+    updated_by = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("scope", "code", "name")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("alias",),
+                condition=Q(scope="org"),
+                name="uniq_assistant_skill_org_alias",
+            ),
+            models.UniqueConstraint(
+                fields=("owner", "alias"),
+                condition=Q(scope="user"),
+                name="uniq_assistant_skill_user_alias",
+            ),
+            models.UniqueConstraint(
+                fields=("code",),
+                condition=~Q(code=""),
+                name="uniq_assistant_skill_code",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.scope}:{self.alias}"
 
 
 class AssistantDocumentTemplate(models.Model):

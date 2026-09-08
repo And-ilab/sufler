@@ -184,6 +184,18 @@ def serialize_model_settings(instance: ModelRegistrySettings) -> dict[str, Any]:
         if instance.profile == ModelRegistrySettings.PROFILE_SUFLER_CC
         else 4000
     )
+    response_min = (
+        1
+        if instance.profile == ModelRegistrySettings.PROFILE_SUFLER_CC
+        else 10
+    )
+    if instance.profile == ModelRegistrySettings.PROFILE_ASSISTANT:
+        preset_choices = (
+            (ModelRegistrySettings.PRESET_STANDARD, "По умолчанию"),
+            (ModelRegistrySettings.PRESET_LONG, "Подробнее"),
+        )
+    else:
+        preset_choices = ModelRegistrySettings.PRESET_CHOICES
     return {
         "profile": instance.profile,
         "slot": slot_name,
@@ -214,7 +226,7 @@ def serialize_model_settings(instance: ModelRegistrySettings) -> dict[str, Any]:
                 "label": label,
                 "values": GENERATION_PRESETS[instance.profile][key],
             }
-            for key, label in ModelRegistrySettings.PRESET_CHOICES
+            for key, label in preset_choices
         },
         "platform_defaults": defaults_for_profile(instance.profile),
         "constraints": {
@@ -225,7 +237,7 @@ def serialize_model_settings(instance: ModelRegistrySettings) -> dict[str, Any]:
             },
             "top_p": {"min": 0.01, "max": 1, "step": 0.01},
             "max_tokens": {"min": 1, "max": 32768},
-            "response_chars_max": {"min": 1, "max": response_max},
+            "response_chars_max": {"min": response_min, "max": response_max},
         },
         "revision": instance.revision,
         "updated_at": instance.updated_at.isoformat(),

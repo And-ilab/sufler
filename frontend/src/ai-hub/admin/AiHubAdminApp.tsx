@@ -81,7 +81,7 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
   },
   model_params: {
     title: 'Параметры модели LLM',
-    subtitle: 'Генерация · RAG / индексация · preset краткий/стандарт/развёрнутый',
+    subtitle: 'Генерация · RAG / индексация · preset по умолчанию / подробнее',
     status: 'Черновик',
     cards: [['Температура', '0.35', 'Генерация'], ['Preset', 'Стандарт', '§3.3.2'], ['Контекст', '≥8200', 'read-only']],
   },

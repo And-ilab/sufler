@@ -17,11 +17,13 @@ from ingest.models import AssistantProductionChunk, CCProductionChunk
 from qu.models import QuReferenceExample
 from qu.service import (
     EXAMPLE_MATCH_FLOOR,
+    _distinctive_terms,
     _lexical_score,
     boost_chunks_with_examples,
     extractive_answer,
     focused_snippet,
     matching_training_examples,
+    topical_relevance_score,
     training_example_score,
 )
 
@@ -133,6 +135,92 @@ def _split_slugs(slugs: Sequence[str]) -> tuple[list[str], bool, list[int]]:
     return assistant_slugs, include_suz, cc_article_ids
 
 
+def _kb_display_names(slugs: Sequence[str]) -> dict[str, str]:
+    """Human KB titles for topical ranking (file name alone is often Latin)."""
+    from hub.models import AssistantKnowledgeBase
+
+    names: dict[str, str] = {}
+    wanted = [slug for slug in slugs if slug]
+    if not wanted:
+        return names
+    for slug, name in AssistantKnowledgeBase.objects.filter(slug__in=wanted).values_list(
+        "slug", "name"
+    ):
+        names[str(slug)] = str(name or "")
+    for slug, name in ContactCenterKnowledgeBase.objects.filter(slug__in=wanted).values_list(
+        "slug", "name"
+    ):
+        names.setdefault(str(slug), str(name or ""))
+    return names
+
+
+def _rerank_scored_chunks(
+    query: str,
+    scored_chunks: list[tuple[float, Any, str]],
+) -> list[tuple[float, Any, str]]:
+    """Down-rank long off-topic dumps; boost the file that actually answers."""
+    if not scored_chunks:
+        return scored_chunks
+    if len(_distinctive_terms(query)) < 2:
+        return scored_chunks
+    labels = _kb_display_names({slug for _score, _chunk, slug in scored_chunks})
+    rescored: list[tuple[float, Any, str]] = []
+    for score, chunk, slug in scored_chunks:
+        topical = topical_relevance_score(
+            query,
+            chunk.title or "",
+            chunk.content or "",
+            extra=labels.get(slug, ""),
+        )
+        original = float(score)
+        mixed = min(1.0, 0.74 * topical + 0.26 * original)
+        # Keep ANN/lexical only when the passage is clearly on-topic.
+        # Otherwise a long credit dump with 80% stem-recall stays on top.
+        if topical >= 0.55:
+            blended = max(original, mixed)
+        elif topical >= 0.42:
+            blended = mixed
+        else:
+            blended = min(original, mixed)
+        rescored.append((blended, chunk, slug))
+    rescored.sort(
+        key=lambda item: (
+            -item[0],
+            item[2],
+            item[1].article_id,
+            item[1].chunk_index,
+        )
+    )
+    return rescored
+
+
+def _select_ranked_chunks(
+    scored_chunks: list[tuple[float, Any, str]],
+    *,
+    limit: int,
+) -> list[tuple[float, Any, str]]:
+    """Best article first (several chunks), then one chunk from each next file."""
+    by_article: dict[tuple[str, int], list[tuple[float, Any, str]]] = {}
+    for item in scored_chunks:
+        _score, chunk, slug = item
+        key = (slug, int(chunk.article_id))
+        by_article.setdefault(key, []).append(item)
+    for items in by_article.values():
+        items.sort(key=lambda row: (-row[0], row[1].chunk_index))
+    article_order = sorted(
+        by_article,
+        key=lambda key: (-by_article[key][0][0], key[0], key[1]),
+    )
+    picked: list[tuple[float, Any, str]] = []
+    for index, key in enumerate(article_order):
+        quota = MAX_CHUNKS_PER_ARTICLE if index == 0 else 1
+        for item in by_article[key][:quota]:
+            picked.append(item)
+            if len(picked) >= limit:
+                return picked
+    return picked
+
+
 def _score_queryset(
     chunk_query: QuerySet,
     query_embedding: list[float],
@@ -187,21 +275,21 @@ def _rank_chunks_hybrid(
             max(float(vector_score), lexical),
             chunk,
         )
-    best = max((score for score, _ in combined.values()), default=0.0)
-    if best < 0.25:
-        for chunk in list(chunk_query[:1500]):
-            key = (int(chunk.article_id), int(chunk.chunk_index))
-            lexical = _lexical_score(query_text, chunk.title, chunk.content)
-            if lexical <= 0:
-                continue
-            previous = combined.get(key)
-            if previous is None or lexical > previous[0]:
-                combined[key] = (lexical, chunk)
+    # Always keep lexical hits: a later-indexed file can lose the ANN window
+    # when stub/e5 cosine is high on a long unrelated dump.
+    for chunk in list(chunk_query[:2500]):
+        key = (int(chunk.article_id), int(chunk.chunk_index))
+        lexical = _lexical_score(query_text, chunk.title, chunk.content)
+        if lexical <= 0.2:
+            continue
+        previous = combined.get(key)
+        if previous is None or lexical > previous[0]:
+            combined[key] = (lexical, chunk)
     ranked = sorted(
         combined.values(),
         key=lambda item: (-item[0], item[1].article_id, item[1].chunk_index),
     )
-    return ranked[: limit * 20]
+    return ranked[: max(limit * 40, 200)]
 
 
 def _document_from_chunk(
@@ -324,6 +412,15 @@ def preview_assistant_query(
             )
             scored_chunks.append((score, chunk, kb_slug))
 
+    single_scope = (
+        bool(slugs)
+        and not search_all
+        and len(assistant_slugs) <= 1
+        and not include_suz
+        and not cc_article_ids
+    )
+    if not single_scope:
+        scored_chunks = _rerank_scored_chunks(normalized_query, scored_chunks)
     matches = matching_training_examples(normalized_query)
     pin_ids = [int(matches[0][1].article_id)] if matches else []
     extra_pairs: list[tuple[Any, str]] = []
@@ -391,14 +488,6 @@ def preview_assistant_query(
             for score, chunk in boosted
         ]
 
-    scored_chunks.sort(
-        key=lambda item: (
-            -item[0],
-            item[2],
-            item[1].article_id,
-            item[1].chunk_index,
-        )
-    )
     threshold = get_model_settings(
         "assistant_bank"
     ).context_inclusion_threshold
@@ -443,17 +532,7 @@ def preview_assistant_query(
             )
         ]
     else:
-        per_article: dict[tuple[str, int], int] = {}
-        ranked: list[tuple[float, Any, str]] = []
-        for score, chunk, kb_slug in scored_chunks:
-            key = (kb_slug, chunk.article_id)
-            taken = per_article.get(key, 0)
-            if taken >= MAX_CHUNKS_PER_ARTICLE:
-                continue
-            per_article[key] = taken + 1
-            ranked.append((score, chunk, kb_slug))
-            if len(ranked) >= limit:
-                break
+        ranked = _select_ranked_chunks(scored_chunks, limit=limit)
         documents = [
             _document_from_chunk(
                 rank=rank,

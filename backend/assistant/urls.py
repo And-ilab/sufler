@@ -10,6 +10,8 @@ from assistant.views import (
     assistant_knowledge_bases,
     assistant_models,
     assistant_openapi,
+    assistant_skill_detail,
+    assistant_skills,
     assistant_report_detail,
     assistant_reports_analytics,
     assistant_reports_catalog,
@@ -36,6 +38,12 @@ urlpatterns = [
     ),
     path("models/", assistant_models, name="assistant_models"),
     path("kbs/", assistant_knowledge_bases, name="assistant_knowledge_bases"),
+    path("skills/", assistant_skills, name="assistant_user_skills"),
+    path(
+        "skills/<int:skill_id>/",
+        assistant_skill_detail,
+        name="assistant_user_skill_detail",
+    ),
     path(
         "doc-templates/",
         assistant_doc_templates,

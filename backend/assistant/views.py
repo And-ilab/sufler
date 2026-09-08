@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 from urllib.parse import quote
 
 from django.http import (
@@ -41,6 +41,18 @@ from assistant.chat import (
     AssistantChatError,
     iter_chat_sse,
     parse_chat_request,
+)
+from hub.skill_store import (
+    SkillNotAvailable,
+    SkillNotFound,
+    SkillStoreError,
+    create_user_skill,
+    delete_user_skill,
+    get_owned_skill,
+    list_catalog_for_user,
+    resolve_visible_skill_instruction,
+    serialize_skill,
+    update_user_skill,
 )
 from assistant.media_asr import (
     CHAT_MEDIA_EXTENSIONS,
@@ -626,10 +638,18 @@ def assistant_chat(request: HttpRequest) -> StreamingHttpResponse | JsonResponse
         if not isinstance(body, Mapping):
             raise AssistantChatError("Request body must be a JSON object")
         parsed = parse_chat_request(body)
+        skill_instruction = ""
+        if parsed.get("skill_id") is not None:
+            skill_instruction = resolve_visible_skill_instruction(
+                parsed["skill_id"],
+                request.user,
+            )
     except json.JSONDecodeError:
         return _validation_error(
             AssistantChatError("Request body must be valid JSON")
         )
+    except SkillNotAvailable as exc:
+        return _validation_error(AssistantChatError(str(exc)))
     except AssistantChatError as exc:
         return _validation_error(exc)
 
@@ -643,6 +663,7 @@ def assistant_chat(request: HttpRequest) -> StreamingHttpResponse | JsonResponse
             kb_slugs=parsed.get("kb_slugs") or [],
             request_id=str(request_id),
             expand=bool(parsed.get("expand")),
+            skill_instruction=skill_instruction,
         )
 
     response = StreamingHttpResponse(
@@ -820,3 +841,63 @@ def assistant_content_from_prompt(request: HttpRequest) -> JsonResponse:
         return validation_error(exc)
     except DocgenError as exc:
         return validation_error(exc)
+
+
+def _skill_validation_error(exc: Exception) -> JsonResponse:
+    return JsonResponse(
+        {
+            "error": "validation_error",
+            "details": {"request": [str(exc)]},
+        },
+        status=400,
+    )
+
+
+def _parse_skill_body(request: HttpRequest) -> Mapping[str, Any]:
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError as exc:
+        raise SkillStoreError("Request body must be valid JSON") from exc
+    if not isinstance(body, Mapping):
+        raise SkillStoreError("Request body must be a JSON object")
+    return body
+
+
+@require_http_methods(["GET", "POST"])
+@require_permissions(PERM_ASSISTANT_USE, api=True)
+def assistant_skills(request: HttpRequest) -> JsonResponse:
+    """GET catalog (Банк + Мои) / POST personal skill."""
+    if request.method == "GET":
+        return JsonResponse({"items": list_catalog_for_user(request.user)})
+    try:
+        created = create_user_skill(
+            _parse_skill_body(request),
+            user=request.user,
+        )
+    except SkillStoreError as exc:
+        return _skill_validation_error(exc)
+    return JsonResponse(created, status=201)
+
+
+@require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
+@require_permissions(PERM_ASSISTANT_USE, api=True)
+def assistant_skill_detail(
+    request: HttpRequest,
+    skill_id: int,
+) -> JsonResponse:
+    try:
+        if request.method == "GET":
+            return JsonResponse(serialize_skill(get_owned_skill(skill_id, request.user)))
+        if request.method == "DELETE":
+            delete_user_skill(skill_id, request.user)
+            return JsonResponse({"ok": True})
+        updated = update_user_skill(
+            skill_id,
+            _parse_skill_body(request),
+            user=request.user,
+        )
+    except SkillNotFound:
+        return JsonResponse({"error": "not_found"}, status=404)
+    except SkillStoreError as exc:
+        return _skill_validation_error(exc)
+    return JsonResponse(updated)
