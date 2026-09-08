@@ -48,6 +48,7 @@ export const ModelParameters: Story = {
         llm_model_label: 'assist-v2',
       },
       presets: {
+        short: { label: 'Краткий', values: { temperature: 0.2, response_chars_max: 600 } },
         standard: { label: 'По умолчанию', values: { temperature: 0.35, response_chars_max: 1200 } },
         long: { label: 'Подробнее', values: { temperature: 0.5, response_chars_max: 2000 } },
       },

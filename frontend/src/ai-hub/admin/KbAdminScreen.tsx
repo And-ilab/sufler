@@ -980,7 +980,11 @@ export function KbAdminScreen({ canEdit = true, demoKb }: KbAdminScreenProps) {
                           <StatusBadge status="neutral">{document.source_label}</StatusBadge>
                         </td>
                         <td>
-                          <IndexBar percent={document.index_percent} compact />
+                          <IndexBar
+                            percent={document.index_percent}
+                            compact
+                            flash={flashDocIds.includes(document.id)}
+                          />
                         </td>
                         {!isSuz && !isWebsite && (
                           <td>
