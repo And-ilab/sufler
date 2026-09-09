@@ -77,6 +77,7 @@ def create_job_from_upload(
     run_inline: bool = False,
     batch_id: str = "",
     source_archive: str = "",
+    user_template_id: int | None = None,
 ) -> OcrJob:
     """Persist original to object storage and enqueue (or run) OCR job."""
     raw = upload.read()
@@ -109,6 +110,7 @@ def create_job_from_upload(
             created_by=created_by[:150],
             batch_id=(batch_id or "")[:64],
             source_archive=(source_archive or "")[:255],
+            user_template_id=user_template_id,
         )
 
     if run_inline:
@@ -119,6 +121,11 @@ def create_job_from_upload(
             if job.status != OcrJob.STATUS_ERROR:
                 raise OcrPipelineError(str(exc)) from exc
             raise OcrPipelineError(job.error_message or str(exc)) from exc
+        job.refresh_from_db()
+        return job
+
+    if getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
+        process_job(job.job_id)
         job.refresh_from_db()
         return job
 
@@ -136,6 +143,7 @@ def create_jobs_from_upload(
     created_by: str = "",
     document_type_hint: str = "",
     run_inline: bool = False,
+    user_template_id: int | None = None,
 ) -> dict[str, Any]:
     """Create one job, or one job per ZIP/RAR member (IV.3 queue)."""
     raw = upload.read()
@@ -168,6 +176,7 @@ def create_jobs_from_upload(
                     run_inline=run_inline,
                     batch_id=batch_id,
                     source_archive=safe_name,
+                    user_template_id=user_template_id,
                 )
             )
         return {
@@ -186,6 +195,7 @@ def create_jobs_from_upload(
         created_by=created_by,
         document_type_hint=document_type_hint,
         run_inline=run_inline,
+        user_template_id=user_template_id,
     )
     return {
         "jobs": [job],
@@ -200,6 +210,7 @@ def _attach_structuring(
     *,
     filename: str,
     document_type_hint: str = "",
+    user_template: Any | None = None,
 ) -> dict[str, Any]:
     pages = result.get("pages") or []
     page_texts = [
@@ -207,10 +218,16 @@ def _attach_structuring(
     ]
     ocr_text = "\n\n".join(page_texts)
     schema = None
-    hint_raw = (document_type_hint or "").strip()
+    user_schema_keys: list[str] = []
+    if user_template is not None:
+        from ocr.user_templates import field_schema_for, schema_keys
+
+        schema = field_schema_for(user_template)
+        user_schema_keys = schema_keys(user_template)
+    hint_raw = "" if user_template is not None else (document_type_hint or "").strip()
     open_ended = is_open_ended_doc_type(hint_raw)
     extract_hint = None if open_ended else hint_raw
-    if extract_hint:
+    if extract_hint and schema is None:
         try:
             from ocr.templates_registry import template_schema_for
 
@@ -235,12 +252,20 @@ def _attach_structuring(
         doc_type = extract_hint
 
     known_fields = dict(fields)
-    if not open_ended and doc_type and doc_type != "unknown":
+    if user_schema_keys:
+        known_fields = {}
+        for key in user_schema_keys:
+            payload = fields.get(key)
+            if payload is None:
+                known_fields[key] = {"value": "", "confidence": 0}
+            else:
+                known_fields[key] = payload
+    elif not open_ended and doc_type and doc_type != "unknown":
         try:
             from ocr.templates_registry import template_schema_for
             from ocr.validation import _load_rules, DEFAULT_RULES_PATH
 
-            schema_keys = set((template_schema_for(doc_type).get("fields") or {}).keys())
+            org_schema_keys = set((template_schema_for(doc_type).get("fields") or {}).keys())
         except Exception:
             try:
                 from ocr.validation import DEFAULT_RULES_PATH, _load_rules
@@ -248,16 +273,19 @@ def _attach_structuring(
                 yaml_spec = _load_rules(DEFAULT_RULES_PATH)["document_types"].get(
                     doc_type
                 ) or {}
-                schema_keys = set((yaml_spec.get("fields") or {}).keys())
+                org_schema_keys = set((yaml_spec.get("fields") or {}).keys())
             except Exception:
-                schema_keys = set()
-        if schema_keys:
+                org_schema_keys = set()
+        if org_schema_keys:
             known_fields = {
-                key: value for key, value in fields.items() if key in schema_keys
+                key: value for key, value in fields.items() if key in org_schema_keys
             }
 
     validation_payload: dict[str, Any] | None = None
-    if not open_ended and doc_type and doc_type != "unknown" and known_fields:
+    if user_schema_keys:
+        validation_payload = None
+        doc_type = ""
+    elif not open_ended and doc_type and doc_type != "unknown" and known_fields:
         try:
             validated = validate_document(
                 doc_type,
@@ -283,7 +311,10 @@ def _attach_structuring(
 
     result["document_type_candidate"] = doc_type
     result["document_type"] = doc_type
-    result["fields"] = known_fields if extract_hint else fields
+    result["fields"] = known_fields if (extract_hint or user_schema_keys) else fields
+    if user_template is not None:
+        result["user_template_id"] = user_template.id
+        result["user_template_name"] = user_template.name
     result["field_count"] = len(fields)
     result["llm_proposal"] = structured.get("llm_proposal")
     result["validation"] = (
@@ -301,7 +332,7 @@ def _attach_structuring(
     try:
         from ocr.templates_registry import get_template
 
-        if doc_type and doc_type != "unknown":
+        if user_template is None and doc_type and doc_type != "unknown":
             template = get_template(doc_type)
             result["template"] = {
                 "id": template.doc_type,
@@ -337,10 +368,16 @@ def process_job(job_id: str) -> dict[str, Any]:
             job_id=job.job_id,
             sha256=job.sha256,
         )
+        user_template = None
+        if job.user_template_id:
+            from ocr.models import OcrUserTemplate
+
+            user_template = OcrUserTemplate.objects.filter(pk=job.user_template_id).first()
         result = _attach_structuring(
             result,
             filename=job.filename,
-            document_type_hint=job.document_type,
+            document_type_hint="" if user_template is not None else job.document_type,
+            user_template=user_template,
         )
         payload = json.dumps(result, ensure_ascii=False, indent=2).encode(
             "utf-8"
@@ -361,7 +398,10 @@ def process_job(job_id: str) -> dict[str, Any]:
     job.status = OcrJob.STATUS_COMPLETED
     job.completed_at = timezone.now()
     job.ocr_model = result["ocr_engine"]["version"]
-    job.document_type = str(result.get("document_type") or "")[:64]
+    if job.user_template_id:
+        job.document_type = ""
+    else:
+        job.document_type = str(result.get("document_type") or "")[:64]
     job.validation_status = str(result.get("validation_status") or "")[:32]
     job.save(
         update_fields=[
@@ -385,11 +425,25 @@ def process_job(job_id: str) -> dict[str, Any]:
     }
 
 
+_JOB_PROGRESS = {
+    OcrJob.STATUS_QUEUED: 0,
+    OcrJob.STATUS_OCR_PROCESSING: 50,
+    OcrJob.STATUS_COMPLETED: 100,
+    OcrJob.STATUS_ERROR: 0,
+}
+
+
+def job_progress(status: str) -> int:
+    return int(_JOB_PROGRESS.get(status, 0))
+
+
 def job_to_dict(job: OcrJob) -> dict[str, Any]:
+    error = job.error_message or None
     return {
         "job_id": job.job_id,
         "document_id": job.document_id,
         "status": job.status,
+        "progress": job_progress(job.status),
         "filename": job.filename,
         "content_type": job.content_type,
         "sha256": job.sha256,
@@ -398,13 +452,15 @@ def job_to_dict(job: OcrJob) -> dict[str, Any]:
         "validation_status": job.validation_status or None,
         "original_object_key": job.original_object_key,
         "result_object_key": job.result_object_key or None,
-        "error_message": job.error_message or None,
+        "error": error,
+        "error_message": error,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "completed_at": (
             job.completed_at.isoformat() if job.completed_at else None
         ),
         "batch_id": job.batch_id or None,
         "source_archive": job.source_archive or None,
+        "user_template_id": job.user_template_id,
         "pipeline": "IV.5+IV.8",
         "fr": ["FR-OCR-04", "FR-OCR-06", "FR-OCR-08", "FR-OCR-13", "FR-OCR-14"],
     }

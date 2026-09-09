@@ -252,10 +252,26 @@ function sourceHref(source: AssistantSource): string | null {
   return link
 }
 
+function isWebPermalink(href: string | null): boolean {
+  return Boolean(href && /^https?:\/\//i.test(href))
+}
+
+function displayWebUrl(href: string): string {
+  try {
+    const url = new URL(href)
+    const path = `${url.pathname || ''}${url.search || ''}`
+    const compact = path === '/' ? url.host : `${url.host}${path}`
+    return compact.replace(/\/$/, '') || url.host
+  } catch {
+    return href
+  }
+}
+
 function SourceItem({ source }: { source: AssistantSource }) {
   const [open, setOpen] = useState(false)
   const [fileError, setFileError] = useState('')
   const href = sourceHref(source)
+  const webLink = isWebPermalink(href)
   const hasQuote = Boolean(source.snippet?.trim())
   const isDownloadApi = Boolean(href?.includes('/api/v1/assistant/sources/download'))
 
@@ -344,7 +360,24 @@ function SourceItem({ source }: { source: AssistantSource }) {
         <StatusBadge status="success">
           {source.relevance_percent}%
         </StatusBadge>
-        {href ? (
+        {href && webLink ? (
+          <span className="asst-source-item__meta">
+            <span className="asst-source-item__title">{source.title}</span>
+            <a
+              className="asst-source-item__link asst-source-item__url"
+              href={href}
+              title="Открыть страницу на сайте"
+              data-testid={`source-link-${source.id}`}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                void openSourceFile()
+              }}
+            >
+              {displayWebUrl(href)}
+            </a>
+          </span>
+        ) : href ? (
           <a
             className="asst-source-item__link"
             href={href}

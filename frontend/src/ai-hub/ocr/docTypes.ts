@@ -18,6 +18,22 @@ export function isMlDocType(value: string): boolean {
   return value === ML_DOC_TYPE || value === 'auto'
 }
 
+export const MINE_DOC_PREFIX = 'mine:'
+
+export function mineDocType(id: number): string {
+  return `${MINE_DOC_PREFIX}${id}`
+}
+
+export function parseMineTemplateId(value: string): number | null {
+  if (!value.startsWith(MINE_DOC_PREFIX)) return null
+  const parsed = Number(value.slice(MINE_DOC_PREFIX.length))
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+export function isMineDocType(value: string): boolean {
+  return parseMineTemplateId(value) != null
+}
+
 export function operatorDocTitle(docType: string): string {
   if (isMlDocType(docType)) return 'ML распознавание'
   if (isOperatorDocType(docType)) return OPERATOR_DOC_TITLES[docType]
@@ -53,7 +69,9 @@ export function writeChosenDocType(jobId: string, docType: string): void {
 export function readUploadDocType(fallback = 'passport'): string {
   try {
     const stored = sessionStorage.getItem(UPLOAD_TYPE_KEY) || ''
-    if (isMlDocType(stored) || isOperatorDocType(stored)) return stored
+    if (isMlDocType(stored) || isOperatorDocType(stored) || isMineDocType(stored)) {
+      return stored
+    }
   } catch {
     // fall through
   }

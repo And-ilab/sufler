@@ -16,7 +16,7 @@ from django.test import TestCase  # noqa: E402
 
 from ingest.models import AssistantProductionChunk, CCProductionChunk  # noqa: E402
 from ingest.pipeline import deterministic_embedding  # noqa: E402
-from qu.assistant_retrieval import preview_assistant_query  # noqa: E402
+from qu.assistant_retrieval import permalink_signal, preview_assistant_query  # noqa: E402
 from qu.service import topical_relevance_score  # noqa: E402
 
 
@@ -146,3 +146,13 @@ class AssistantRetrievalRankTest(TestCase):
         result = preview_assistant_query(HIRE_Q, search_all=True, limit=5)
         titles = [doc["title"] for doc in result["documents"]]
         self.assertEqual(titles[0], "Регламент учета персонала.doc")
+
+
+class WebsitePermalinkSignalTest(unittest.TestCase):
+    def test_contacts_path_beats_homepage(self):
+        query = "Контакты: телефон горячей линии, адрес головного офиса"
+        home = permalink_signal(query, "https://belarusbank.by/ru")
+        page = permalink_signal(query, "https://belarusbank.by/ru/kontakty")
+        self.assertGreater(page, home)
+        self.assertGreater(page, 0)
+        self.assertLess(home, 0)

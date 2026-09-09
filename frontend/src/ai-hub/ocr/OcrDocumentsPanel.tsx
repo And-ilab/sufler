@@ -10,23 +10,32 @@ import {
 import { Button, Card, StatusBadge, Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from '../../components'
 import {
   approveOcrJob,
+  createMyOcrTemplate,
+  deleteMyOcrTemplate,
   downloadOcrFieldsDocx,
   exportOcrJob,
   ocrExportRows,
   fetchOcrResult,
+  listMyOcrTemplates,
   listOcrDocTypes,
   listOcrJobs,
   ocrJobOriginalUrl,
+  updateMyOcrTemplate,
   uploadOcrDocument,
   type OcrDocType,
+  type OcrUserTemplate,
+  type OcrUserTemplateField,
 } from '../admin/api/ocrAdmin'
 import {
   OPERATOR_DOC_TITLES,
   OPERATOR_DOC_TYPES,
+  isMineDocType,
   isMlDocType,
   isOperatorDocType,
+  mineDocType,
   ML_DOC_TYPE,
   operatorDocTitle,
+  parseMineTemplateId,
   readChosenDocType,
   readUploadDocType,
   writeChosenDocType,
@@ -35,7 +44,7 @@ import {
 import { filterOcrFields } from './fieldQuality'
 import './OcrDocumentsPanel.css'
 
-export type OcrSubTab = 'queue' | 'upload' | 'review'
+export type OcrSubTab = 'queue' | 'upload' | 'review' | 'mine'
 
 export interface OcrField {
   id: string
@@ -55,6 +64,17 @@ export interface OcrQueueItem {
   confidence: number | null
   batchId?: string
   sourceArchive?: string
+}
+
+export function canCreateOcrUserTemplate(
+  status: OcrQueueItem['status'] | undefined,
+  fields: OcrField[],
+  approved: boolean,
+): boolean {
+  if (!status || status === 'queued' || status === 'ocr' || status === 'error') return false
+  if (approved || status === 'done') return true
+  if (status !== 'review' || !fields.length) return false
+  return !fields.some((field) => !field.value.trim() || field.confidence < 0.6)
 }
 
 const STATUS_LABEL: Record<OcrQueueItem['status'], string> = {
@@ -180,8 +200,20 @@ function russianFieldLabel(id: string, apiKey: string, explicit?: string): strin
   ) || humanizeKey(apiKey || id)
 }
 
-function typeTitle(docType: string): string {
+function typeTitle(docType: string, mine: OcrUserTemplate[] = []): string {
+  const mineId = parseMineTemplateId(docType)
+  if (mineId) {
+    return mine.find((item) => item.id === mineId)?.name || 'Мой шаблон'
+  }
   return operatorDocTitle(docType) || DOC_TYPE_TITLE[docType] || docType || DOC_TYPE_TITLE.unknown
+}
+
+function suggestUserTemplateName(item: OcrQueueItem, currentFields: OcrField[]): string {
+  const stamp = new Date().toISOString().slice(0, 10)
+  const typeName = isOperatorDocType(item.docType) ? operatorDocTitle(item.docType) : ''
+  const first = currentFields.find((field) => field.value.trim())
+  const title = typeName || first?.label?.trim() || 'Документ'
+  return `${title} · ${stamp}`.slice(0, 80)
 }
 
 function isPassportPageType(docType: string): boolean {
@@ -430,8 +462,18 @@ function withPassportIdentity(
 function schemaForType(
   docType: string,
   templates: OcrDocType[],
-  _pageKinds: string[] = [],
+  mineTemplates: OcrUserTemplate[] = [],
 ): Record<string, unknown> | undefined {
+  const mineId = parseMineTemplateId(docType)
+  if (mineId) {
+    const mine = mineTemplates.find((item) => item.id === mineId)
+    if (!mine) return undefined
+    const next: Record<string, unknown> = {}
+    for (const field of mine.fields || []) {
+      if (field.key) next[field.key] = field
+    }
+    return next
+  }
   if (isMlDocType(docType) || !docType || docType === 'unknown' || docType === 'other') {
     return undefined
   }
@@ -480,14 +522,18 @@ function fieldsForExtractedType(
   parsed: OcrField[],
   resolvedType: string,
   templates: OcrDocType[],
+  mineTemplates: OcrUserTemplate[] = [],
 ): OcrField[] {
-  if (isMlDocType(resolvedType) || !schemaForType(resolvedType, templates)) {
+  if (isMineDocType(resolvedType)) {
+    return mergeTemplateFields(parsed, schemaForType(resolvedType, templates, mineTemplates))
+  }
+  if (isMlDocType(resolvedType) || !schemaForType(resolvedType, templates, mineTemplates)) {
     return parsed
   }
   if (resolvedType === 'passport' && parsed.length && !looksLikePassportFields(parsed)) {
     return parsed
   }
-  return mergeTemplateFields(parsed, schemaForType(resolvedType, templates))
+  return mergeTemplateFields(parsed, schemaForType(resolvedType, templates, mineTemplates))
 }
 
 function demoFieldsForFile(fileName: string, docType: string, templates: OcrDocType[] = []): OcrField[] {
@@ -506,12 +552,17 @@ function jobToQueueItem(job: Record<string, unknown>): OcrQueueItem {
     status === 'queued' ? 0
       : status === 'ocr' ? 50
         : 100
+  const userTemplateId = Number(job.user_template_id || 0)
+  const rawType = String(job.document_type || '')
+  const docType = userTemplateId > 0
+    ? mineDocType(userTemplateId)
+    : isMlDocType(rawType)
+      ? ML_DOC_TYPE
+      : rawType || inferDocTypeFromName(String(job.filename || job.file || '')) || 'unknown'
   return {
     id: String(job.job_id || job.id || ''),
     file: String(job.filename || job.file || 'document'),
-    docType: isMlDocType(String(job.document_type || ''))
-      ? ML_DOC_TYPE
-      : String(job.document_type || inferDocTypeFromName(String(job.filename || job.file || '')) || 'unknown'),
+    docType,
     status,
     progress,
     confidence: null,
@@ -551,13 +602,22 @@ function mergeTemplateFields(
   const ordered = schemaKeys.filter((key) => !HIDDEN_FIELD_KEYS.has(key))
   if (!ordered.length) return ocrFields.filter((field) => !HIDDEN_FIELD_KEYS.has(field.apiKey))
   return ordered.map((apiKey, index) => {
+    const spec = schema?.[apiKey]
+    const explicitLabel = spec && typeof spec === 'object' && spec !== null && 'label' in spec
+      ? String((spec as { label?: unknown }).label || '').trim()
+      : ''
     const existing = known.get(apiKey)
-    if (existing) return { ...existing, label: russianFieldLabel(existing.id, existing.apiKey) }
+    if (existing) {
+      return {
+        ...existing,
+        label: explicitLabel || russianFieldLabel(existing.id, existing.apiKey),
+      }
+    }
     const id = API_TO_UI[apiKey] || apiKey
     return {
       id,
       apiKey,
-      label: russianFieldLabel(id, apiKey),
+      label: explicitLabel || russianFieldLabel(id, apiKey),
       value: '',
       confidence: 0,
       bbox: DEFAULT_BBOX[id] || {
@@ -576,6 +636,47 @@ function uploadJobs(response: Record<string, unknown>): Record<string, unknown>[
     return items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
   }
   return [response]
+}
+
+function DocTypeSelectGroups({
+  templateOptions,
+  myTemplates,
+  extraValue,
+  extraTitle,
+}: {
+  templateOptions: Array<{ doc_type: string; title: string }>
+  myTemplates: OcrUserTemplate[]
+  extraValue?: string
+  extraTitle?: string
+}) {
+  const extra = extraValue
+    && extraValue !== ML_DOC_TYPE
+    && !isMineDocType(extraValue)
+    && !templateOptions.some((item) => item.doc_type === extraValue)
+  return (
+    <>
+      <option value={ML_DOC_TYPE}>ML без шаблона</option>
+      <optgroup label="Типы банка">
+        {templateOptions.map((item) => (
+          <option key={item.doc_type} value={item.doc_type}>
+            {item.title || item.doc_type}
+          </option>
+        ))}
+      </optgroup>
+      {myTemplates.length ? (
+        <optgroup label="Мои шаблоны">
+          {myTemplates.map((item) => (
+            <option key={item.id} value={mineDocType(item.id)}>
+              {item.name}
+            </option>
+          ))}
+        </optgroup>
+      ) : null}
+      {extra && extraValue ? (
+        <option value={extraValue}>{extraTitle || extraValue}</option>
+      ) : null}
+    </>
+  )
 }
 
 export interface OcrDocumentsPanelProps {
@@ -602,6 +703,14 @@ export function OcrDocumentsPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [templates, setTemplates] = useState<OcrDocType[]>([])
+  const [myTemplates, setMyTemplates] = useState<OcrUserTemplate[]>([])
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createName, setCreateName] = useState('')
+  const [mineError, setMineError] = useState('')
+  const [mineEditorId, setMineEditorId] = useState<number | null>(null)
+  const [mineDraftName, setMineDraftName] = useState('')
+  const [mineDraftFields, setMineDraftFields] = useState<OcrUserTemplateField[]>([])
+  const [mineConfirmDelete, setMineConfirmDelete] = useState(false)
   const [previewByJob, setPreviewByJob] = useState<Record<string, string>>({})
   const [recognizeProgress, setRecognizeProgress] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -610,9 +719,12 @@ export function OcrDocumentsPanel({
 
   const activeItem = queue.find((item) => item.id === activeId) ?? queue[0]
   const rawActiveFields = filterOcrFields(activeId ? fieldsByJob[activeId] || [] : [])
-  const fields = isMlDocType(activeItem?.docType || '')
+  const fields = isMlDocType(activeItem?.docType || '') && !isMineDocType(activeItem?.docType || '')
     ? rawActiveFields
-    : mergeTemplateFields(rawActiveFields, schemaForType(activeItem?.docType || '', templates))
+    : mergeTemplateFields(
+      rawActiveFields,
+      schemaForType(activeItem?.docType || '', templates, myTemplates),
+    )
 
   const loadQueue = useCallback(async () => {
     if (recognizingRef.current) return
@@ -626,7 +738,7 @@ export function OcrDocumentsPanel({
         const merged = remote.map((item) => {
           const was = prevById.get(item.id)
           const chosen = chosenTypeForJob(chosenTypeByJob, item.id, was?.docType || '')
-          if (chosen && (isMlDocType(chosen) || isOperatorDocType(chosen) || isPassportPageType(chosen))) {
+          if (chosen && (isMlDocType(chosen) || isOperatorDocType(chosen) || isPassportPageType(chosen) || isMineDocType(chosen))) {
             return {
               ...item,
               docType: chosen,
@@ -659,6 +771,9 @@ export function OcrDocumentsPanel({
     void listOcrDocTypes()
       .then(setTemplates)
       .catch(() => setTemplates([]))
+    void listMyOcrTemplates()
+      .then(setMyTemplates)
+      .catch(() => setMyTemplates([]))
   }, [loadQueue])
 
   useEffect(() => {
@@ -685,6 +800,22 @@ export function OcrDocumentsPanel({
         if (cancelled) return
         const parsed = fieldsFromResult(rawResultFields(result))
         const chosen = chosenTypeForJob(chosenTypeByJob, item.id, item.docType)
+        if (isMineDocType(chosen)) {
+          const nextFields = fieldsForExtractedType(parsed, chosen, templates, myTemplates)
+          if (fieldsAreEmpty(nextFields)) return
+          rememberChosenType(chosenTypeByJob, item.id, chosen)
+          setFieldsByJob((prev) => ({ ...prev, [item.id]: nextFields }))
+          setQueue((prev) => prev.map((row) => (
+            row.id === item.id
+              ? {
+                  ...row,
+                  docType: chosen,
+                  confidence: avgConfidence(nextFields.filter((field) => field.value)),
+                }
+              : row
+          )))
+          return
+        }
         if (isMlDocType(chosen)) {
           if (fieldsAreEmpty(parsed)) return
           rememberChosenType(chosenTypeByJob, item.id, ML_DOC_TYPE)
@@ -706,7 +837,7 @@ export function OcrDocumentsPanel({
           pageKindsFromResult(result),
           isOperatorDocType(chosen) ? chosen : '',
         )
-        const nextFields = fieldsForExtractedType(parsed, resolvedType, templates)
+        const nextFields = fieldsForExtractedType(parsed, resolvedType, templates, myTemplates)
         if (fieldsAreEmpty(nextFields)) return
         setFieldsByJob((prev) => ({ ...prev, [item.id]: nextFields }))
         setQueue((prev) => prev.map((row) => (
@@ -725,7 +856,7 @@ export function OcrDocumentsPanel({
     return () => {
       cancelled = true
     }
-  }, [fieldsByJob, queue, templates])
+  }, [fieldsByJob, myTemplates, queue, templates])
 
   const filteredQueue = useMemo(() => {
     const needle = search.trim().toLowerCase()
@@ -755,18 +886,33 @@ export function OcrDocumentsPanel({
     }
 
     const chosenOnOpen = chosenTypeForJob(chosenTypeByJob, item.id, item.docType)
-    const cached = isMlDocType(chosenOnOpen)
+    const cached = isMlDocType(chosenOnOpen) && !isMineDocType(chosenOnOpen)
       ? filterOcrFields(fieldsByJob[item.id] || [])
       : mergeTemplateFields(
         filterOcrFields(fieldsByJob[item.id] || []),
-        schemaForType(item.docType, templates),
+        schemaForType(item.docType, templates, myTemplates),
       )
 
     try {
       const result = await fetchOcrResult(item.id)
       const parsed = fieldsFromResult(rawResultFields(result))
       const chosen = chosenOnOpen || chosenTypeForJob(chosenTypeByJob, item.id, item.docType)
-      if (isMlDocType(chosen)) {
+      if (isMineDocType(chosen)) {
+        const nextFields = fieldsForExtractedType(parsed, chosen, templates, myTemplates)
+        const shown = nextFields.some((field) => field.value.trim()) ? nextFields : cached
+        if (shown.length) {
+          rememberChosenType(chosenTypeByJob, item.id, chosen)
+          setFieldsByJob((prev) => ({ ...prev, [item.id]: shown }))
+          setSelectedFieldId(shown[0]?.id ?? null)
+          setQueue((prev) => prev.map((row) => (
+            row.id === item.id
+              ? { ...row, confidence: avgConfidence(shown), docType: chosen }
+              : row
+          )))
+          return
+        }
+      }
+      if (isMlDocType(chosen) && !isMineDocType(chosen)) {
         const shown = parsed.some((field) => field.value.trim()) ? parsed : cached
         if (shown.length) {
           rememberChosenType(chosenTypeByJob, item.id, ML_DOC_TYPE)
@@ -791,7 +937,7 @@ export function OcrDocumentsPanel({
         pageKindsFromResult(result),
         isOperatorDocType(chosen) ? chosen : '',
       )
-      const nextFields = fieldsForExtractedType(parsed, resolvedType, templates)
+      const nextFields = fieldsForExtractedType(parsed, resolvedType, templates, myTemplates)
       const shown = nextFields.some((field) => field.value.trim()) ? nextFields : cached
       if (shown.length) {
         setFieldsByJob((prev) => ({ ...prev, [item.id]: shown }))
@@ -817,12 +963,12 @@ export function OcrDocumentsPanel({
     const fallback = item.id.startsWith('demo-')
       ? mergeTemplateFields(
         demoFieldsForFile(item.file, inferredType, templates),
-        schemaForType(inferredType, templates),
+        schemaForType(inferredType, templates, myTemplates),
       )
-      : mergeTemplateFields([], schemaForType(inferredType, templates))
+      : mergeTemplateFields([], schemaForType(inferredType, templates, myTemplates))
     setFieldsByJob((prev) => ({ ...prev, [item.id]: fallback }))
     setSelectedFieldId(fallback[0]?.id ?? null)
-  }, [fieldsByJob, previewByJob, templates])
+  }, [fieldsByJob, myTemplates, previewByJob, templates])
 
   const addFiles = useCallback((fileList: FileList | File[]) => {
     const files = Array.from(fileList).filter(isSupportedUpload)
@@ -860,12 +1006,12 @@ export function OcrDocumentsPanel({
     const pendingId = `pending-${Date.now()}`
     nextPreviews[pendingId] = firstPreview
     setPreviewByJob((prev) => ({ ...prev, [pendingId]: firstPreview }))
-    rememberChosenType(chosenTypeByJob, pendingId, isMlDocType(docType) ? ML_DOC_TYPE : docType)
+    rememberChosenType(chosenTypeByJob, pendingId, isMlDocType(docType) && !isMineDocType(docType) ? ML_DOC_TYPE : docType)
     setQueue((prev) => [
       {
         id: pendingId,
         file: pendingFiles[0].name,
-        docType: isMlDocType(docType) ? ML_DOC_TYPE : docType,
+        docType: isMlDocType(docType) && !isMineDocType(docType) ? ML_DOC_TYPE : docType,
         status: 'ocr',
         progress: 8,
         confidence: null,
@@ -878,8 +1024,11 @@ export function OcrDocumentsPanel({
     try {
       for (const [index, file] of pendingFiles.entries()) {
         setRecognizeProgress(Math.min(88, 12 + Math.round(((index + 0.4) / pendingFiles.length) * 70)))
-        const forcedType = isOperatorDocType(docType) ? docType : ''
-        const uploadType = forcedType ? apiDocType(forcedType) : ML_DOC_TYPE
+        const mineId = parseMineTemplateId(docType)
+        const forcedType = mineId
+          ? mineDocType(mineId)
+          : isOperatorDocType(docType) ? docType : ''
+        const uploadType = mineId ? '' : (forcedType ? apiDocType(forcedType) : ML_DOC_TYPE)
 
         try {
           const isArchive = /\.(zip|rar)$/i.test(file.name)
@@ -887,6 +1036,7 @@ export function OcrDocumentsPanel({
             file,
             uploadType,
             !isArchive,
+            mineId ?? undefined,
           )
           for (const job of uploadJobs(response)) {
             const jobId = String(job.job_id || response.job_id || `upload-${Date.now()}-${index}`)
@@ -905,16 +1055,18 @@ export function OcrDocumentsPanel({
               || 'unknown',
             )
             const parsed = fieldsFromResult(rawResultFields(result))
-            const resolvedType = forcedType
-              ? typeForExtractedFields(
-                detected,
-                parsed,
-                pageKindsFromResult(result),
-                forcedType,
-              )
-              : ML_DOC_TYPE
+            const resolvedType = mineId
+              ? mineDocType(mineId)
+              : forcedType
+                ? typeForExtractedFields(
+                  detected,
+                  parsed,
+                  pageKindsFromResult(result),
+                  forcedType,
+                )
+                : ML_DOC_TYPE
             const fields = forcedType
-              ? fieldsForExtractedType(parsed, resolvedType, templates)
+              ? fieldsForExtractedType(parsed, resolvedType, templates, myTemplates)
               : parsed
             rememberChosenType(chosenTypeByJob, jobId, resolvedType)
             const mapped = jobToQueueItem({
@@ -945,7 +1097,9 @@ export function OcrDocumentsPanel({
           if (storybookDemo) {
             const jobId = `demo-${Date.now()}-${index}`
             const fields = forcedType
-              ? demoFieldsForFile(file.name, forcedType, templates)
+              ? (isMineDocType(forcedType)
+                ? fieldsForExtractedType([], forcedType, templates, myTemplates)
+                : demoFieldsForFile(file.name, forcedType, templates))
               : []
             const item: OcrQueueItem = {
               id: jobId,
@@ -970,7 +1124,7 @@ export function OcrDocumentsPanel({
           )
           const jobId = `error-${Date.now()}-${index}`
           const fields = forcedType
-            ? mergeTemplateFields([], schemaForType(forcedType, templates))
+            ? mergeTemplateFields([], schemaForType(forcedType, templates, myTemplates))
             : []
           created.push({
             id: jobId,
@@ -1032,19 +1186,160 @@ export function OcrDocumentsPanel({
   }, [templates])
 
   const applyDocType = (jobId: string, nextType: string) => {
-    const type = isOperatorDocType(nextType)
+    const type = isMineDocType(nextType)
       ? nextType
-      : isMlDocType(nextType) ? ML_DOC_TYPE : nextType || ML_DOC_TYPE
+      : isOperatorDocType(nextType)
+        ? nextType
+        : isMlDocType(nextType) ? ML_DOC_TYPE : nextType || ML_DOC_TYPE
     rememberChosenType(chosenTypeByJob, jobId, type)
     setQueue((prev) => prev.map((item) => (
       item.id === jobId ? { ...item, docType: type } : item
     )))
     setFieldsByJob((prev) => ({
       ...prev,
-      [jobId]: isMlDocType(type)
+      [jobId]: isMlDocType(type) && !isMineDocType(type)
         ? filterOcrFields(prev[jobId] || [])
-        : mergeTemplateFields(filterOcrFields(prev[jobId] || []), schemaForType(type, templates)),
+        : mergeTemplateFields(
+          filterOcrFields(prev[jobId] || []),
+          schemaForType(type, templates, myTemplates),
+        ),
     }))
+  }
+
+  const createPreviewFields = fields.filter((field) => (
+    field.value.trim() && (approved || activeItem?.status === 'done' || field.confidence >= 0.6)
+  ))
+  const canSaveMine = canCreateOcrUserTemplate(activeItem?.status, fields, approved)
+
+  const openCreateDialog = () => {
+    if (!activeItem || !canSaveMine) return
+    setCreateName(suggestUserTemplateName(activeItem, fields))
+    setMineError('')
+    setCreateOpen(true)
+  }
+
+  const saveMyTemplate = async () => {
+    if (!activeItem) return
+    const name = createName.trim()
+    if (name.length < 1 || name.length > 80) {
+      setMineError('Имя должно быть от 1 до 80 символов')
+      return
+    }
+    setBusy(true)
+    setMineError('')
+    try {
+      const created = await createMyOcrTemplate(activeItem.id, name)
+      setMyTemplates((prev) => (
+        [...prev.filter((item) => item.id !== created.id), created]
+          .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+      ))
+      setCreateOpen(false)
+      openMineEditor(created)
+    } catch (err) {
+      setMineError(err instanceof Error ? err.message : 'Не удалось сохранить шаблон')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const openMineEditor = (template: OcrUserTemplate) => {
+    setMineEditorId(template.id)
+    setMineDraftName(template.name)
+    setMineDraftFields((template.fields || []).map((field) => ({
+      key: field.key,
+      label: field.label,
+      type: field.type || 'string',
+      pattern: field.pattern || '',
+    })))
+    setMineConfirmDelete(false)
+    setMineError('')
+    setSubTab('mine')
+  }
+
+  const closeMineEditor = () => {
+    setMineEditorId(null)
+    setMineConfirmDelete(false)
+    setMineError('')
+  }
+
+  const updateDraftField = (index: number, patch: Partial<OcrUserTemplateField>) => {
+    setMineDraftFields((prev) => prev.map((field, i) => (
+      i === index ? { ...field, ...patch } : field
+    )))
+  }
+
+  const addDraftField = () => {
+    const next = mineDraftFields.length + 1
+    setMineDraftFields((prev) => [
+      ...prev,
+      { key: `field_${next}`, label: '', type: 'string', pattern: '' },
+    ])
+  }
+
+  const removeDraftField = (index: number) => {
+    setMineDraftFields((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const moveDraftField = (index: number, direction: -1 | 1) => {
+    const target = index + direction
+    if (target < 0 || target >= mineDraftFields.length) return
+    setMineDraftFields((prev) => {
+      const next = [...prev]
+      const [item] = next.splice(index, 1)
+      next.splice(target, 0, item)
+      return next
+    })
+  }
+
+  const saveMineEditor = async () => {
+    if (mineEditorId == null) return
+    const name = mineDraftName.trim()
+    if (name.length < 1 || name.length > 80) {
+      setMineError('Имя должно быть от 1 до 80 символов')
+      return
+    }
+    const fields = mineDraftFields.map((field) => ({
+      key: field.key.trim(),
+      label: field.label.trim() || field.key.trim(),
+      type: field.type || 'string',
+      pattern: (field.pattern || '').trim(),
+    }))
+    if (!fields.length) {
+      setMineError('Добавьте хотя бы одно поле')
+      return
+    }
+    setBusy(true)
+    setMineError('')
+    try {
+      const updated = await updateMyOcrTemplate(mineEditorId, { name, fields })
+      setMyTemplates((prev) => (
+        prev.map((item) => (item.id === updated.id ? updated : item))
+      ))
+      setMineDraftName(updated.name)
+      setMineDraftFields(updated.fields || [])
+    } catch (err) {
+      setMineError(err instanceof Error ? err.message : 'Не удалось сохранить шаблон')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removeMine = async (templateId: number) => {
+    setBusy(true)
+    setMineError('')
+    try {
+      await deleteMyOcrTemplate(templateId)
+      setMyTemplates((prev) => prev.filter((item) => item.id !== templateId))
+      if (parseMineTemplateId(docType) === templateId) {
+        setDocType(ML_DOC_TYPE)
+        writeUploadDocType(ML_DOC_TYPE)
+      }
+      closeMineEditor()
+    } catch (err) {
+      setMineError(err instanceof Error ? err.message : 'Не удалось удалить')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const approveAndExport = async () => {
@@ -1094,6 +1389,7 @@ export function OcrDocumentsPanel({
           ['queue', 'Очередь'],
           ['upload', 'Загрузить'],
           ['review', 'Проверка'],
+          ['mine', 'Мои шаблоны'],
         ] as const).map(([id, label]) => (
           <button
             type="button"
@@ -1193,7 +1489,7 @@ export function OcrDocumentsPanel({
                     ) : null}
                   </TableCell>
                   <TableCell>
-                    {templateOptions.find((tpl) => tpl.doc_type === item.docType)?.title || typeTitle(item.docType)}
+                    {templateOptions.find((tpl) => tpl.doc_type === item.docType)?.title || typeTitle(item.docType, myTemplates)}
                   </TableCell>
                   <TableCell>{STATUS_LABEL[item.status]}</TableCell>
                   <TableCell>
@@ -1277,12 +1573,10 @@ export function OcrDocumentsPanel({
                   }}
                   data-testid="ocr-doc-type"
                 >
-                  <option value={ML_DOC_TYPE}>ML распознавание</option>
-                  {templateOptions.map((item) => (
-                    <option key={item.doc_type} value={item.doc_type}>
-                      {item.title || item.doc_type}
-                    </option>
-                  ))}
+                  <DocTypeSelectGroups
+                    templateOptions={templateOptions}
+                    myTemplates={myTemplates}
+                  />
                 </select>
               </label>
               <p className="ocr-docs__hint">
@@ -1416,20 +1710,20 @@ export function OcrDocumentsPanel({
               <label>
                 <span className="visually-hidden">Тип документа</span>
                 <select
-                  value={isMlDocType(activeItem.docType) ? ML_DOC_TYPE : activeItem.docType}
+                  value={
+                    isMineDocType(activeItem.docType)
+                      ? activeItem.docType
+                      : isMlDocType(activeItem.docType) ? ML_DOC_TYPE : activeItem.docType
+                  }
                   onChange={(event) => applyDocType(activeItem.id, event.target.value)}
                   data-testid="ocr-review-doc-type"
                 >
-                  <option value={ML_DOC_TYPE}>ML распознавание</option>
-                  {templateOptions.map((item) => (
-                    <option key={item.doc_type} value={item.doc_type}>
-                      {item.title || item.doc_type}
-                    </option>
-                  ))}
-                  {!templateOptions.some((item) => item.doc_type === activeItem.docType)
-                    && !isMlDocType(activeItem.docType) ? (
-                    <option value={activeItem.docType}>{typeTitle(activeItem.docType)}</option>
-                  ) : null}
+                  <DocTypeSelectGroups
+                    templateOptions={templateOptions}
+                    myTemplates={myTemplates}
+                    extraValue={activeItem.docType}
+                    extraTitle={typeTitle(activeItem.docType, myTemplates)}
+                  />
                 </select>
               </label>
               <Button
@@ -1440,6 +1734,15 @@ export function OcrDocumentsPanel({
               >
                 Утвердить и экспорт
               </Button>
+              <Button
+                type="button"
+                data-testid="ocr-create-template"
+                disabled={busy || !canSaveMine}
+                title={canSaveMine ? undefined : 'сначала исправьте и утвердите'}
+                onClick={openCreateDialog}
+              >
+                Создать шаблон
+              </Button>
             </div>
             {error && <p className="ocr-docs__hint" role="alert">{error}</p>}
             {approved && (
@@ -1448,6 +1751,253 @@ export function OcrDocumentsPanel({
               </StatusBadge>
             )}
           </section>
+        </div>
+      )}
+
+      {subTab === 'mine' && (
+        <div className="ocr-docs__mine" data-testid="ocr-my-templates">
+          <section className="ocr-docs__mine-list" aria-label="Мои шаблоны">
+            {myTemplates.length === 0 ? (
+              <p className="ocr-docs__hint">
+                Пока нет шаблонов. Сохраните набор полей после проверки документа.
+              </p>
+            ) : myTemplates.map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                className={item.id === mineEditorId ? 'is-active' : undefined}
+                data-testid={`ocr-my-template-${item.id}`}
+                onClick={() => openMineEditor(item)}
+              >
+                <strong>{item.name}</strong>
+                <span>
+                  {(item.fields || []).length ? `${item.fields.length} полей` : 'Нет полей'}
+                  {item.source_file ? ` · ${item.source_file}` : ''}
+                </span>
+              </button>
+            ))}
+          </section>
+
+          <Card className="ocr-docs__mine-editor">
+            {mineEditorId == null ? (
+              <header>
+                <div>
+                  <h2>Мой шаблон</h2>
+                  <p>Выберите шаблон слева, чтобы изменить имя и поля. В каталог банка он не попадает.</p>
+                </div>
+              </header>
+            ) : (
+              <div data-testid="ocr-my-template-editor">
+                <header>
+                  <div>
+                    <h2>Мой шаблон</h2>
+                    <p>
+                      {myTemplates.find((item) => item.id === mineEditorId)?.source_file
+                        ? `Источник: ${myTemplates.find((item) => item.id === mineEditorId)?.source_file}`
+                        : 'Личный набор полей. В каталог банка не публикуется.'}
+                    </p>
+                  </div>
+                </header>
+
+                <div className="ocr-docs__mine-form">
+                  <label className="ocr-docs__mine-wide">
+                    <span>Название</span>
+                    <input
+                      value={mineDraftName}
+                      maxLength={80}
+                      data-testid="ocr-my-template-edit-name"
+                      onChange={(event) => setMineDraftName(event.target.value)}
+                    />
+                  </label>
+
+                  <div className="ocr-docs__mine-fields-head">
+                    <h3>Поля для проверки</h3>
+                  </div>
+                  <div className="ocr-docs__mine-fields" data-testid="ocr-my-template-fields">
+                    <div className="ocr-docs__mine-fields-row ocr-docs__mine-fields-row--head">
+                      <span>Подпись</span>
+                      <span>Ключ</span>
+                      <span>Тип</span>
+                      <span />
+                    </div>
+                    {mineDraftFields.map((field, index) => (
+                      <div
+                        className="ocr-docs__mine-fields-block"
+                        key={`${field.key}-${index}`}
+                        data-testid={`ocr-my-template-field-${index}`}
+                      >
+                        <div className="ocr-docs__mine-fields-row">
+                          <input
+                            value={field.label}
+                            maxLength={80}
+                            placeholder="ФИО"
+                            aria-label={`Подпись поля ${index + 1}`}
+                            data-testid={`ocr-my-template-field-label-${index}`}
+                            onChange={(event) => updateDraftField(index, { label: event.target.value })}
+                          />
+                          <input
+                            value={field.key}
+                            maxLength={64}
+                            placeholder="full_name"
+                            aria-label={`Ключ поля ${index + 1}`}
+                            data-testid={`ocr-my-template-field-key-${index}`}
+                            onChange={(event) => updateDraftField(index, { key: event.target.value })}
+                          />
+                          <select
+                            value={field.type || 'string'}
+                            aria-label={`Тип поля ${index + 1}`}
+                            data-testid={`ocr-my-template-field-type-${index}`}
+                            onChange={(event) => updateDraftField(index, { type: event.target.value })}
+                          >
+                            <option value="string">Текст</option>
+                            <option value="date">Дата</option>
+                            <option value="number">Число</option>
+                          </select>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            disabled={mineDraftFields.length <= 1}
+                            data-testid={`ocr-my-template-field-remove-${index}`}
+                            onClick={() => removeDraftField(index)}
+                          >
+                            ×
+                          </Button>
+                        </div>
+                        <input
+                          className="ocr-docs__mine-pattern"
+                          value={field.pattern || ''}
+                          maxLength={200}
+                          placeholder="Шаблон, необязательно"
+                          aria-label={`Шаблон поля ${index + 1}`}
+                          data-testid={`ocr-my-template-field-pattern-${index}`}
+                          onChange={(event) => updateDraftField(index, { pattern: event.target.value })}
+                        />
+                        <div className="ocr-docs__mine-field-move">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            disabled={index === 0}
+                            aria-label="Выше"
+                            onClick={() => moveDraftField(index, -1)}
+                          >
+                            ↑
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            disabled={index === mineDraftFields.length - 1}
+                            aria-label="Ниже"
+                            onClick={() => moveDraftField(index, 1)}
+                          >
+                            ↓
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      disabled={busy}
+                      data-testid="ocr-my-template-add-field"
+                      onClick={addDraftField}
+                    >
+                      + Поле
+                    </Button>
+                  </div>
+
+                  {mineError ? <p className="ocr-docs__hint" role="alert">{mineError}</p> : null}
+                  <div className="ocr-docs__mine-actions">
+                    <Button
+                      type="button"
+                      data-testid="ocr-my-template-save"
+                      disabled={busy}
+                      onClick={() => void saveMineEditor()}
+                    >
+                      Сохранить
+                    </Button>
+                    {mineConfirmDelete ? (
+                      <>
+                        <Button
+                          type="button"
+                          data-testid="ocr-my-template-delete-confirm"
+                          disabled={busy}
+                          onClick={() => void removeMine(mineEditorId)}
+                        >
+                          Да, удалить
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => setMineConfirmDelete(false)}
+                        >
+                          Отмена
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        data-testid="ocr-my-template-delete"
+                        disabled={busy}
+                        onClick={() => setMineConfirmDelete(true)}
+                      >
+                        Удалить
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {createOpen && activeItem && (
+        <div className="ocr-docs__dialog-backdrop" role="presentation">
+          <div
+            className="ocr-docs__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ocr-create-template-title"
+            data-testid="ocr-create-template-dialog"
+          >
+            <h2 id="ocr-create-template-title">Создать шаблон</h2>
+            <label>
+              <span>Имя</span>
+              <input
+                value={createName}
+                maxLength={80}
+                data-testid="ocr-create-template-name"
+                onChange={(event) => setCreateName(event.target.value)}
+              />
+            </label>
+            <p className="ocr-docs__hint">Поля шаблона</p>
+            <ul className="ocr-docs__mine-preview" data-testid="ocr-create-template-fields">
+              {createPreviewFields.length ? createPreviewFields.map((field) => (
+                <li key={field.id}>{field.label || field.apiKey}</li>
+              )) : (
+                <li>Нет заполненных валидных полей</li>
+              )}
+            </ul>
+            {mineError ? <p className="ocr-docs__hint" role="alert">{mineError}</p> : null}
+            <div className="ocr-docs__mine-actions">
+              <Button
+                type="button"
+                data-testid="ocr-create-template-save"
+                disabled={busy || !createName.trim()}
+                onClick={() => void saveMyTemplate()}
+              >
+                Сохранить
+              </Button>
+              <Button
+                type="button"
+                data-testid="ocr-create-template-cancel"
+                disabled={busy}
+                onClick={() => setCreateOpen(false)}
+              >
+                Отмена
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

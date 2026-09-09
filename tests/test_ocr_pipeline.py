@@ -104,6 +104,8 @@ class OcrPipelineApiTest(TestCase):
         status = client.get(f"/api/v1/ocr/jobs/{job.job_id}/")
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.json()["status"], "completed")
+        self.assertEqual(status.json()["progress"], 100)
+        self.assertIsNone(status.json()["error"])
 
         original = client.get(f"/api/v1/ocr/jobs/{job.job_id}/original/")
         self.assertEqual(original.status_code, 200)
@@ -134,3 +136,60 @@ class OcrPipelineApiTest(TestCase):
         upload = SimpleUploadedFile("scan.png", b"abc", content_type="image/png")
         response = client.post("/api/v1/ocr/documents/", {"file": upload})
         self.assertIn(response.status_code, (401, 403))
+
+    def test_jobs_post_returns_job_id_and_progress(self):
+        client = Client()
+        client.force_login(self.user_for_role("document_recognition_user"))
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        upload = SimpleUploadedFile(
+            "scan.png",
+            b"OCR demo payment order #42\nAmount: 1500.00 BYN\n",
+            content_type="image/png",
+        )
+        response = client.post(
+            "/api/v1/ocr/jobs/",
+            {"file": upload, "mode": "ml"},
+        )
+        self.assertEqual(response.status_code, 202, response.content)
+        body = response.json()
+        self.assertTrue(body["job_id"].startswith("ocrjob-"))
+        self.assertEqual(body["mode"], "ml")
+        self.assertIn(body["progress"], (0, 50, 100))
+
+        fetched = client.get(f"/api/v1/ocr/jobs/{body['job_id']}/result/")
+        self.assertEqual(fetched.status_code, 200)
+        result = fetched.json()
+        self.assertIn("fields", result)
+
+    def test_template_mode_requires_doc_type(self):
+        client = Client()
+        client.force_login(self.user_for_role("document_recognition_user"))
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        upload = SimpleUploadedFile("scan.png", b"abc", content_type="image/png")
+        response = client.post(
+            "/api/v1/ocr/jobs/",
+            {"file": upload, "mode": "template"},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_result_not_ready_is_409(self):
+        client = Client()
+        client.force_login(self.user_for_role("document_recognition_user"))
+        job = OcrJob.objects.create(
+            job_id="ocrjob-not-ready",
+            document_id="doc-not-ready",
+            status=OcrJob.STATUS_QUEUED,
+            filename="scan.png",
+            sha256="a" * 64,
+            original_object_key="originals/doc-not-ready/scan.png",
+            result_object_key="results/ocrjob-not-ready/ocr_result.json",
+        )
+        status = client.get(f"/api/v1/ocr/jobs/{job.job_id}/")
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json()["progress"], 0)
+        self.assertEqual(status.json()["status"], "queued")
+        fetched = client.get(f"/api/v1/ocr/jobs/{job.job_id}/result/")
+        self.assertEqual(fetched.status_code, 409)
+        self.assertEqual(fetched.json()["error"], "not_ready")

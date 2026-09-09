@@ -41,6 +41,14 @@ class OpenApiSchemaTest(SimpleTestCase):
         self.assertIn("post", paths["/api/v1/sufler/suggest"])
         self.assertIn("post", paths["/api/v1/assistant/chat"])
         self.assertIn("post", paths["/api/v1/knowledge/events"])
+        self.assertIn("/api/v1/ocr/jobs/", paths)
+        self.assertIn("post", paths["/api/v1/ocr/jobs/"])
+        self.assertIn("/api/v1/ocr/jobs/{id}/", paths)
+        self.assertIn("get", paths["/api/v1/ocr/jobs/{id}/"])
+        self.assertIn("/api/v1/ocr/jobs/{id}/result/", paths)
+        self.assertIn("get", paths["/api/v1/ocr/jobs/{id}/result/"])
+        tag_names = {tag.get("name") for tag in (schema.get("tags") or [])}
+        self.assertIn("ocr", tag_names)
 
     def test_swagger_ui_available_when_debug(self):
         client = Client()
@@ -50,15 +58,27 @@ class OpenApiSchemaTest(SimpleTestCase):
 
 
 class PostmanExportTest(unittest.TestCase):
-    def test_postman_collection_covers_three_api_groups(self):
+    def test_postman_collection_covers_four_api_groups(self):
         collection = openapi_to_postman(build_openapi_v1())
         folder_names = {item["name"] for item in collection["item"]}
-        self.assertEqual(folder_names, {"assistant", "sufler", "ingest"})
+        self.assertEqual(folder_names, {"assistant", "ingest", "ocr", "sufler"})
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "postman_collection.json"
             export_postman_collection(out)
             loaded = json.loads(out.read_text(encoding="utf-8"))
             self.assertIn("v2.1.0", loaded["info"]["schema"])
+
+    def test_ocr_postman_collection_has_upload_poll_result(self):
+        path = REPOSITORY_ROOT / "docs" / "api" / "ocr.postman_collection.json"
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        names = [item["name"] for item in loaded["item"]]
+        self.assertTrue(any("Upload template" in name for name in names))
+        self.assertTrue(any("Poll" in name for name in names))
+        self.assertTrue(any("result" in name.lower() for name in names))
+        self.assertTrue(any("ML" in name for name in names))
+        keys = {item["key"] for item in loaded["variable"]}
+        self.assertIn("base_url", keys)
+        self.assertIn("access_token", keys)
 
 
 if __name__ == "__main__":

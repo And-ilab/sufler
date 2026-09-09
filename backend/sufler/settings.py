@@ -551,7 +551,7 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "Sufler AI Hub API",
     "DESCRIPTION": (
         "OpenAPI for integrators and приёмка. Curated paths for "
-        "assistant, sufler, and ingest are merged via postprocessing hook."
+        "assistant, sufler, ingest, and ocr are merged via postprocessing hook."
     ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.db import models
 
 
@@ -37,6 +38,13 @@ class OcrJob(models.Model):
     created_by = models.CharField(max_length=150, blank=True)
     batch_id = models.CharField(max_length=64, blank=True, db_index=True)
     source_archive = models.CharField(max_length=255, blank=True)
+    user_template = models.ForeignKey(
+        "OcrUserTemplate",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="jobs",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -111,3 +119,32 @@ class OcrTemplateSample(models.Model):
 
     def __str__(self) -> str:
         return f"sample:{self.filename}@{self.template.doc_type}"
+
+
+class OcrUserTemplate(models.Model):
+    """Personal OCR field set. Isolated from the bank OcrDocumentTemplate catalog."""
+
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ocr_user_templates",
+    )
+    name = models.CharField(max_length=80)
+    name_key = models.CharField(max_length=80)
+    fields = models.JSONField(default=list)
+    source_job_id = models.CharField(max_length=64, blank=True)
+    source_file = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name", "id")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("owner", "name_key"),
+                name="uniq_ocr_user_template_owner_name",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"user-tpl:{self.owner_id}:{self.name}"

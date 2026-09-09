@@ -382,6 +382,13 @@
   line-height: 1;
 }
 
+.asst-source-item__meta {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
 .asst-source-item__link,
 .asst-source-item__title {
   flex: 1;
@@ -393,9 +400,21 @@
   text-underline-offset: 2px;
 }
 
+.asst-source-item__url {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: .75rem;
+  font-weight: 500;
+  word-break: break-all;
+}
+
 .asst-source-item__title {
   color: var(--color-text);
   text-decoration: none;
+}
+
+.asst-source-item__meta .asst-source-item__title {
+  min-width: 0;
 }
 
 .asst-source-item__quote {

@@ -9,6 +9,8 @@ from ocr.views import (
     ocr_job_original,
     ocr_job_result,
     ocr_jobs_list,
+    ocr_my_template_detail,
+    ocr_my_templates,
     ocr_template_detail,
     ocr_template_sample,
     ocr_templates,
@@ -32,6 +34,12 @@ urlpatterns = [
     ),
     path("validate/", ocr_validate, name="ocr_validate"),
     path("export/", ocr_export, name="ocr_export"),
+    path("my-templates/", ocr_my_templates, name="ocr_my_templates"),
+    path(
+        "my-templates/<int:template_id>/",
+        ocr_my_template_detail,
+        name="ocr_my_template_detail",
+    ),
     path("jobs/", ocr_jobs_list, name="ocr_jobs_list"),
     path("jobs/<str:job_id>/", ocr_job_detail, name="ocr_job_detail"),
     path(

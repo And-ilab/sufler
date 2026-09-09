@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Sequence
+from urllib.parse import unquote, urlparse
 
 from django.db import connection
 from django.db.models import QuerySet
@@ -34,6 +36,14 @@ MAX_LIMIT = 8
 SNIPPET_PREVIEW_CHARS = 1200
 # Header-only first chunk often drops the answering clause («до 23 лет»).
 MAX_CHUNKS_PER_ARTICLE = 3
+_PATH_TOKEN_RE = re.compile(r"[a-zа-яё0-9]{3,}", re.IGNORECASE)
+_HOME_PATHS = frozenset({"", "ru", "en", "by", "index", "index.html", "home"})
+_URL_ALIASES = (
+    ("контакт", ("contact", "kontact", "kontakty", "hotline")),
+    ("телефон", ("phone", "tel", "hotline", "call")),
+    ("адрес", ("address", "office", "ofis")),
+    ("офис", ("office", "ofis", "head")),
+)
 
 
 def _joined_article_content(article_id: int) -> str:
@@ -247,6 +257,76 @@ def _score_queryset(
     ]
 
 
+def _permalink_text(permalink: str) -> str:
+    raw = (permalink or "").strip()
+    if not raw.startswith(("http://", "https://")):
+        return ""
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        return ""
+    path = unquote(parsed.path or "").casefold()
+    return f"{parsed.netloc} {path.replace('/', ' ').replace('-', ' ').replace('_', ' ')}"
+
+
+def permalink_signal(query: str, permalink: str) -> float:
+    """Prefer the answering page URL over a site homepage with the same footer."""
+    raw = (permalink or "").strip()
+    if not raw.startswith(("http://", "https://")):
+        return 0.0
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        return 0.0
+    parts = [part for part in unquote(parsed.path or "").casefold().split("/") if part]
+    path_text = " ".join(parts).replace("-", " ").replace("_", " ")
+    query_tokens = {
+        token.casefold()
+        for token in _PATH_TOKEN_RE.findall(query)
+        if len(token) >= 4
+    }
+    hits = 0
+    for token in query_tokens:
+        if token in path_text:
+            hits += 1
+        for russian, aliases in _URL_ALIASES:
+            if token.startswith(russian) and any(alias in path_text for alias in aliases):
+                hits += 1
+                break
+    boost = min(0.12, 0.05 * hits)
+    if not parts or (len(parts) == 1 and parts[0] in _HOME_PATHS):
+        if query_tokens:
+            boost -= 0.05
+    return boost
+
+
+def _chunk_lexical(query: str, chunk: Any) -> float:
+    extra = _permalink_text(str(getattr(chunk, "permalink", "") or ""))
+    return _lexical_score(query, chunk.title, f"{chunk.content}\n{extra}")
+
+
+def _with_permalink_signal(
+    scored: list[tuple[float, Any]],
+    query: str,
+) -> list[tuple[float, Any]]:
+    adjusted = [
+        (
+            max(
+                0.0,
+                min(
+                    1.0,
+                    float(score)
+                    + permalink_signal(query, str(getattr(chunk, "permalink", "") or "")),
+                ),
+            ),
+            chunk,
+        )
+        for score, chunk in scored
+    ]
+    adjusted.sort(key=lambda item: (-item[0], item[1].article_id, item[1].chunk_index))
+    return adjusted
+
+
 def _rank_chunks_hybrid(
     chunk_query: QuerySet,
     query_text: str,
@@ -259,18 +339,18 @@ def _rank_chunks_hybrid(
     if backend in {"http-fallback", "lexical"}:
         scored = []
         for chunk in chunk_query:
-            score = _lexical_score(query_text, chunk.title, chunk.content)
+            score = _chunk_lexical(query_text, chunk)
             if score > 0:
                 scored.append((score, chunk))
         scored.sort(key=lambda item: (-item[0], item[1].article_id))
-        return scored[: limit * 20]
+        return _with_permalink_signal(scored, query_text)[: limit * 20]
 
     vector_scored = _score_queryset(
         chunk_query, query_embedding, limit=limit
     )
     combined: dict[tuple[int, int], tuple[float, Any]] = {}
     for vector_score, chunk in vector_scored:
-        lexical = _lexical_score(query_text, chunk.title, chunk.content)
+        lexical = _chunk_lexical(query_text, chunk)
         combined[(int(chunk.article_id), int(chunk.chunk_index))] = (
             max(float(vector_score), lexical),
             chunk,
@@ -279,15 +359,15 @@ def _rank_chunks_hybrid(
     # when stub/e5 cosine is high on a long unrelated dump.
     for chunk in list(chunk_query[:2500]):
         key = (int(chunk.article_id), int(chunk.chunk_index))
-        lexical = _lexical_score(query_text, chunk.title, chunk.content)
+        lexical = _chunk_lexical(query_text, chunk)
         if lexical <= 0.2:
             continue
         previous = combined.get(key)
         if previous is None or lexical > previous[0]:
             combined[key] = (lexical, chunk)
-    ranked = sorted(
-        combined.values(),
-        key=lambda item: (-item[0], item[1].article_id, item[1].chunk_index),
+    ranked = _with_permalink_signal(
+        list(combined.values()),
+        query_text,
     )
     return ranked[: max(limit * 40, 200)]
 

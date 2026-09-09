@@ -169,10 +169,15 @@ export async function uploadOcrDocument(
   file: File,
   documentType = '',
   sync = true,
+  userTemplateId?: number,
 ): Promise<Record<string, unknown>> {
   const body = new FormData()
   body.append('file', file, file.name)
-  if (documentType) body.append('document_type', documentType)
+  if (userTemplateId) {
+    body.append('user_template_id', String(userTemplateId))
+  } else if (documentType) {
+    body.append('document_type', documentType)
+  }
   if (sync) body.append('sync', '1')
   const response = await ocrFetch('/api/v1/ocr/documents/', {
     method: 'POST',
@@ -180,6 +185,70 @@ export async function uploadOcrDocument(
   })
   if (!response.ok) throw new Error(await parseError(response))
   return (await response.json()) as Record<string, unknown>
+}
+
+export interface OcrUserTemplateField {
+  key: string
+  label: string
+  type?: string
+  pattern?: string
+}
+
+export interface OcrUserTemplate {
+  id: number
+  name: string
+  fields: OcrUserTemplateField[]
+  source_job_id?: string
+  source_file?: string
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export async function listMyOcrTemplates(): Promise<OcrUserTemplate[]> {
+  const response = await ocrFetch('/api/v1/ocr/my-templates/')
+  if (!response.ok) throw new Error(await parseError(response))
+  const payload = (await response.json()) as { items?: OcrUserTemplate[] }
+  return payload.items ?? []
+}
+
+export async function createMyOcrTemplate(
+  jobId: string,
+  name: string,
+): Promise<OcrUserTemplate> {
+  const response = await ocrFetch('/api/v1/ocr/my-templates/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_id: jobId, name }),
+  })
+  if (!response.ok) throw new Error(await parseError(response))
+  return (await response.json()) as OcrUserTemplate
+}
+
+export async function renameMyOcrTemplate(
+  templateId: number,
+  name: string,
+): Promise<OcrUserTemplate> {
+  return updateMyOcrTemplate(templateId, { name })
+}
+
+export async function updateMyOcrTemplate(
+  templateId: number,
+  input: { name?: string; fields?: OcrUserTemplateField[] },
+): Promise<OcrUserTemplate> {
+  const response = await ocrFetch(`/api/v1/ocr/my-templates/${templateId}/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!response.ok) throw new Error(await parseError(response))
+  return (await response.json()) as OcrUserTemplate
+}
+
+export async function deleteMyOcrTemplate(templateId: number): Promise<void> {
+  const response = await ocrFetch(`/api/v1/ocr/my-templates/${templateId}/`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) throw new Error(await parseError(response))
 }
 
 export async function fetchOcrResult(jobId: string): Promise<Record<string, unknown>> {

@@ -755,7 +755,7 @@ def extract_fields(
         if voted != "unknown":
             doc_type = voted
     allowed = _schema_keys_for(doc_type, field_schema)
-    if forced and allowed:
+    if allowed and (forced or field_schema):
         merged = {key: value for key, value in merged.items() if key in allowed}
     return doc_type or "unknown", merged
 
