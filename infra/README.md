@@ -29,6 +29,37 @@ docker compose up --build -d
 docker compose ps
 ```
 
+По умолчанию стартуют только лёгкие сервисы: PostgreSQL, Redis, MinIO,
+Mailpit, backend и frontend. Celery, Telegram-poller и embedding (ML-модель
+~1 GB RAM) выключены — их можно включить через `COMPOSE_PROFILES` в `.env`:
+
+```powershell
+# фоновые задачи онлайн-чата
+COMPOSE_PROFILES=workers
+
+# Telegram long-polling (нужен TELEGRAM_BOT_TOKEN)
+COMPOSE_PROFILES=telegram
+
+# всё вместе + embedding (тяжело для MacBook)
+COMPOSE_PROFILES=workers,telegram,embedding
+EMBEDDING_MODE=http
+```
+
+### macOS: MacBook греется / всё тормозит
+
+Docker Desktop на Mac эмулирует Linux и делит ограниченную RAM с хостом.
+Полный стек (10 контейнеров + embedding + Celery каждые 20 с) легко
+перегружает ноутбук.
+
+1. **Docker Desktop → Settings → Resources**: выделите **8 GB RAM** и **4 CPU**
+   (если сейчас ~4 GB — это главная причина подвисаний).
+2. **Не поднимайте лишнее**: оставьте `EMBEDDING_MODE=stub` и не задавайте
+   `COMPOSE_PROFILES`, пока не нужны фоновые задачи или RAG с embeddings.
+3. **Останавливайте стек**, когда не работаете: `docker compose down`.
+4. **Только UI**: можно запустить frontend на хосте (`cd frontend && npm run dev`),
+   а в Docker оставить `postgres redis minio backend`.
+5. **Профили по необходимости** — см. `COMPOSE_PROFILES` выше.
+
 Backend запускает миграции перед web-сервером и стартует только после
 успешного healthcheck PostgreSQL. Redis и MinIO также должны перейти в
 состояние `healthy`; Celery worker ожидает готовый backend.

@@ -129,13 +129,13 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_ACTIVE_MODEL_PATH: ${OLLAMA_ACTIVE_MODEL_PATH:-/tmp/sufler_active_openai_model}
       LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-}
-      EMBEDDING_MODE: ${EMBEDDING_MODE:-http}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://embedding:8090}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-180}
       VOSK_MODEL_PATH: ${VOSK_MODEL_PATH:-/app/var/vosk-model-small-ru-0.22}
-      VOSK_MODEL_DOWNLOAD: ${VOSK_MODEL_DOWNLOAD:-1}
+      VOSK_MODEL_DOWNLOAD: ${VOSK_MODEL_DOWNLOAD:-0}
       ASSISTANT_MAX_TOKENS: ${ASSISTANT_MAX_TOKENS:-256}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -167,7 +167,7 @@ services:
     command:
       - sh
       - -c
-      - python -m pip install -q vosk && python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000
+      - if [ "$${VOSK_MODEL_DOWNLOAD:-0}" = "1" ]; then python -m pip install -q vosk; fi && python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000
     ports:
       - "${BACKEND_PORT_HOST:-8001}:8000"
     volumes:
@@ -182,8 +182,6 @@ services:
       minio:
         condition: service_healthy
       mailpit:
-        condition: service_started
-      embedding:
         condition: service_started
     healthcheck:
       test:
@@ -215,6 +213,7 @@ services:
       start_period: 5s
 
   embedding:
+    profiles: ["embedding"]
     build:
       context: ../backend/services/embedding
       dockerfile: Dockerfile
@@ -244,6 +243,7 @@ services:
       start_period: 240s
 
   celery-worker:
+    profiles: ["workers"]
     build:
       context: ../backend
       dockerfile: Dockerfile
@@ -313,13 +313,13 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_ACTIVE_MODEL_PATH: ${OLLAMA_ACTIVE_MODEL_PATH:-/tmp/sufler_active_openai_model}
       LOCAL_LLM_MANAGER_URL: ${LOCAL_LLM_MANAGER_URL:-}
-      EMBEDDING_MODE: ${EMBEDDING_MODE:-http}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-stub}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://embedding:8090}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
       EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-180}
       VOSK_MODEL_PATH: ${VOSK_MODEL_PATH:-/app/var/vosk-model-small-ru-0.22}
-      VOSK_MODEL_DOWNLOAD: ${VOSK_MODEL_DOWNLOAD:-1}
+      VOSK_MODEL_DOWNLOAD: ${VOSK_MODEL_DOWNLOAD:-0}
       ASSISTANT_MAX_TOKENS: ${ASSISTANT_MAX_TOKENS:-256}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -365,6 +365,7 @@ services:
       start_period: 30s
 
   celery-beat:
+    profiles: ["workers"]
     build:
       context: ../backend
       dockerfile: Dockerfile
@@ -395,6 +396,7 @@ services:
         condition: service_healthy
 
   telegram-poller:
+    profiles: ["telegram"]
     build:
       context: ../backend
       dockerfile: Dockerfile
@@ -466,7 +468,7 @@ services:
     command:
       - sh
       - -c
-      - npm ci && npm run dev -- --host 0.0.0.0 --port 5173
+      - if [ ! -d node_modules/.bin ]; then npm ci; fi && npm run dev -- --host 0.0.0.0 --port 5173
     depends_on:
       backend:
         condition: service_healthy
