@@ -7,7 +7,7 @@ type ShellProps = React.ComponentProps<typeof ChatPlatformShell>
 
 /**
  * Loads operator avatar for the shell header and persists uploads
- * both locally and to OperatorProfile when a matching operator exists.
+ * to the current OperatorProfile (source of truth for the client widget).
  */
 export function ChatPlatformShellWithAvatar({
   displayName,
@@ -25,21 +25,27 @@ export function ChatPlatformShellWithAvatar({
       return null
     }
   })
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
   useEffect(() => {
     if (photoUrlProp) {
       setPhotoUrl(photoUrlProp)
       return
     }
-    if (!displayName) return
     let cancelled = false
     void operatorsApi
-      .list()
-      .then((items) => {
+      .me(displayName || undefined)
+      .then((profile) => {
         if (cancelled) return
-        const match = items.find((item) => item.name === displayName)
-        if (match?.photo_url) {
-          setPhotoUrl(match.photo_url)
+        if (profile.photo_url) {
+          setPhotoUrl(profile.photo_url)
+          if (storageKey) {
+            try {
+              localStorage.setItem(storageKey, profile.photo_url)
+            } catch {
+              /* quota */
+            }
+          }
           return
         }
         if (storageKey) {
@@ -51,7 +57,15 @@ export function ChatPlatformShellWithAvatar({
           }
         }
       })
-      .catch(() => undefined)
+      .catch(() => {
+        if (cancelled || !storageKey) return
+        try {
+          const cached = localStorage.getItem(storageKey)
+          if (cached) setPhotoUrl(cached)
+        } catch {
+          /* ignore */
+        }
+      })
     return () => {
       cancelled = true
     }
@@ -59,6 +73,7 @@ export function ChatPlatformShellWithAvatar({
 
   const onPhotoChange = (dataUrl: string) => {
     setPhotoUrl(dataUrl)
+    setUploadError(null)
     if (storageKey) {
       try {
         localStorage.setItem(storageKey, dataUrl)
@@ -67,14 +82,15 @@ export function ChatPlatformShellWithAvatar({
       }
     }
     onPhotoChangeProp?.(dataUrl)
-    if (!displayName) return
     void operatorsApi
-      .list()
-      .then(async (items) => {
-        const match = items.find((item) => item.name === displayName)
-        if (match) await operatorsApi.update(match.id, { photo_url: dataUrl })
+      .updateMyPhoto(dataUrl, displayName || undefined)
+      .then((profile) => {
+        if (profile.photo_url) setPhotoUrl(profile.photo_url)
       })
-      .catch(() => undefined)
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Не удалось сохранить фото'
+        setUploadError(message)
+      })
   }
 
   return (
@@ -83,6 +99,7 @@ export function ChatPlatformShellWithAvatar({
       displayName={displayName}
       photoUrl={photoUrl}
       onPhotoChange={onPhotoChange}
+      photoError={uploadError}
     />
   )
 }

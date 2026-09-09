@@ -140,6 +140,8 @@ export interface CatalogPayload {
   catalog: CatalogReportMeta[]
   report: CatalogReportMeta
   rows: Record<string, unknown>[]
+  columns?: { key: string; label: string }[]
+  title?: string
   chart: { label: string; value: number }[]
   summary: Record<string, unknown>
   stub: boolean

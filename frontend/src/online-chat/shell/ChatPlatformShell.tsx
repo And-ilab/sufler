@@ -24,6 +24,7 @@ interface ChatPlatformShellProps {
   onMenuToggle?: () => void
   photoUrl?: string | null
   onPhotoChange?: (dataUrl: string) => void
+  photoError?: string | null
 }
 
 export function ChatPlatformShell({
@@ -46,6 +47,7 @@ export function ChatPlatformShell({
   onMenuToggle,
   photoUrl,
   onPhotoChange,
+  photoError,
 }: ChatPlatformShellProps) {
   const routes = [
     { href: armHref, label: armNavLabel, access: 'arm' as const },
@@ -193,6 +195,7 @@ export function ChatPlatformShell({
           <div className="chat-platform-shell__user-text">
             {displayName && <strong>{displayName}</strong>}
             {jobTitle && <small>{jobTitle}</small>}
+            {photoError ? <small className="chat-platform-shell__photo-error">{photoError}</small> : null}
             {!displayName && !jobTitle && 'Пользователь'}
           </div>
         </div>

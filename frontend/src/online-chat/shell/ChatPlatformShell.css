@@ -206,6 +206,11 @@
   min-width: 0;
 }
 
+.chat-platform-shell__photo-error {
+  color: #ffd4d4;
+  max-width: 220px;
+}
+
 .chat-platform-shell__avatar {
   position: relative;
   display: inline-flex;

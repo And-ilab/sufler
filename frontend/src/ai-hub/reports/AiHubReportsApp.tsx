@@ -11,11 +11,8 @@ interface AiHubReportsAppProps {
 }
 
 function resolveSection(pathname: string, explicit?: ReportsSection): ReportsSection {
-  if (explicit) return explicit
-  if (pathname.includes('/asr')) return 'asr-qa'
+  if (explicit && (explicit === 'chat' || explicit === 'live')) return explicit
   if (pathname.includes('/live')) return 'live'
-  if (pathname.includes('/sufler')) return 'sufler'
-  if (pathname.includes('/chat')) return 'chat'
   return 'chat'
 }
 
@@ -27,22 +24,10 @@ const TABS: { id: ReportsSection; label: string; path: string; title: string }[]
     title: 'Аналитика онлайн-чата',
   },
   {
-    id: 'sufler',
-    label: 'Суфлёр',
-    path: '/ai-hub/reports/sufler',
-    title: 'Аналитика суфлёра',
-  },
-  {
     id: 'live',
     label: 'Оперативная панель',
     path: '/ai-hub/reports/live',
     title: 'Оперативная панель',
-  },
-  {
-    id: 'asr-qa',
-    label: 'Записи разговоров',
-    path: '/ai-hub/reports/asr',
-    title: 'Записи разговоров',
   },
 ]
 
@@ -50,7 +35,6 @@ export function AiHubReportsApp({
   section,
 }: AiHubReportsAppProps) {
   const active = resolveSection(window.location.pathname, section)
-  const tab = TABS.find((item) => item.id === active) || TABS[0]
 
   const go = (next: ReportsSection) => {
     const target = TABS.find((item) => item.id === next) || TABS[0]
@@ -61,16 +45,16 @@ export function AiHubReportsApp({
     <main className="rpt-app" data-testid="reports-app" data-scheme="belarusbank_emerald">
       <div className="rpt-frame">
         <header className="rpt-header">
-          <div className="rpt-header__brand">
-            <a
-              className="rpt-mark"
-              href="/"
-              title="На портал"
-              aria-label="Беларусбанк — на портал"
-            >
-              ББ
-            </a>
-            <h1>{tab.title}</h1>
+          <a
+            className="rpt-header__logo"
+            href="/"
+            title="На портал"
+            aria-label="На портал"
+          >
+            <img src="/assets/belarusbank-logo.png" alt="" />
+          </a>
+          <div className="rpt-header__titles">
+            <h1>Аналитика контакт-центра</h1>
           </div>
         </header>
 

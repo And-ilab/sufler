@@ -48,6 +48,12 @@ logger = logging.getLogger(__name__)
 
 ARM_GROUP = "online_chat_arm"
 
+HOLD_SEND_PHASES = (
+    BaseMessage.SendPhase.HOLD,
+    BaseMessage.SendPhase.MID_DIALOG,
+)
+_WAIT_CYCLE_EVENTS = ("created", "returned_to_queue", "line_closed", "line_opened")
+
 
 def _active_bot_for_department(department_id: object | None) -> BotConfiguration | None:
     if department_id:
@@ -69,7 +75,12 @@ def _active_bot(dialog: Dialog) -> BotConfiguration | None:
     return _active_bot_for_department(dialog.department_id)
 
 
-def _create_bot_message(dialog: Dialog, text: str) -> DialogMessage:
+def _create_bot_message(
+    dialog: Dialog,
+    text: str,
+    *,
+    base_message: BaseMessage | None = None,
+) -> DialogMessage:
     delivery_status = DialogMessage.ChannelDeliveryStatus.NOT_REQUIRED
     if dialog.channel != "widget":
         delivery_status = DialogMessage.ChannelDeliveryStatus.PENDING
@@ -79,6 +90,7 @@ def _create_bot_message(dialog: Dialog, text: str) -> DialogMessage:
         text=text,
         receipt_status=DialogMessage.ReceiptStatus.DELIVERED,
         channel_delivery_status=delivery_status,
+        source_base_message_id=base_message.id if base_message is not None else None,
     )
     payload = serialize_message(message)
     broadcast(dialog_group(str(dialog.id)), "message.created", payload)
@@ -98,26 +110,113 @@ def _base_message_matches(
     dialog: Dialog,
     placement_config: WidgetPlacement | None = None,
 ) -> bool:
-    targets = [str(value) for value in (message.channels or []) if str(value)]
+    targets = [str(value).strip() for value in (message.channels or []) if str(value).strip()]
     if not targets:
         if message.placement_id:
             targets = [f"widget:{message.placement_id}"]
         elif message.channel:
-            targets = [message.channel]
+            targets = [message.channel.strip()]
         else:
             return True
 
     if dialog.channel in targets:
+        return True
+    if dialog.channel == "widget" and "widget" in targets:
         return True
     if dialog.channel != "widget":
         return False
     placement_config = placement_config or WidgetPlacement.objects.filter(
         widget_id=dialog.widget_id
     ).first()
-    return bool(
-        placement_config
-        and f"widget:{placement_config.id}" in targets
+    if placement_config is None:
+        return False
+    placement_id = str(placement_config.id)
+    widget_id = placement_config.widget_id
+    return (
+        f"widget:{placement_id}" in targets
+        or f"widget:{widget_id}" in targets
+        or placement_id in targets
+        or widget_id in targets
     )
+
+
+def _wait_cycle_started_at(dialog: Dialog):
+    event = (
+        dialog.events.filter(type__in=_WAIT_CYCLE_EVENTS)
+        .order_by("-created_at")
+        .first()
+    )
+    if event is None or event.type == "created":
+        return dialog.created_at
+    return event.created_at
+
+
+def _base_message_already_sent(dialog: Dialog, message: BaseMessage) -> bool:
+    since = _wait_cycle_started_at(dialog)
+    qs = DialogMessage.objects.filter(
+        dialog=dialog,
+        speaker=DialogMessage.Speaker.BOT,
+        created_at__gte=since,
+    )
+    if message.id:
+        if qs.filter(source_base_message_id=message.id).exists():
+            return True
+    return qs.filter(text=message.text).exists()
+
+
+def _iter_offline_base_messages():
+    return BaseMessage.objects.filter(
+        is_active=True,
+    ).filter(
+        Q(message_type=BaseMessage.MessageType.OFFLINE)
+        | Q(send_phase=BaseMessage.SendPhase.OFFLINE)
+    ).order_by("sort_order", "created_at")
+
+
+def _hold_delay_offset(
+    dialog: Dialog,
+    placement_config: WidgetPlacement | None = None,
+) -> int:
+    """Keep hold after offline notices when the line is closed."""
+    if dialog.outcome != Dialog.Outcome.OFFLINE:
+        return 0
+    delays = [
+        max(0, int(message.delay_seconds or 0))
+        for message in _iter_offline_base_messages()
+        if _base_message_matches(message, dialog, placement_config)
+    ]
+    return max(delays) if delays else 0
+
+
+def _schedule_base_message(
+    dialog: Dialog,
+    message: BaseMessage,
+    *,
+    extra_delay: int = 0,
+    placement_config: WidgetPlacement | None = None,
+    task=None,
+) -> bool:
+    """Send now (delay 0) or enqueue Celery countdown. Returns True if queued/sent."""
+    if not _base_message_matches(message, dialog, placement_config):
+        return False
+    if _base_message_already_sent(dialog, message):
+        return False
+    delay = max(0, int(message.delay_seconds or 0)) + max(0, int(extra_delay))
+    from online_chat.tasks import send_delayed_base_message
+
+    worker = task or send_delayed_base_message
+    kwargs = {
+        "dialog_id": str(dialog.id),
+        "base_message_id": str(message.id),
+    }
+    if delay == 0:
+        worker(**kwargs)
+    else:
+        try:
+            worker.apply_async(kwargs=kwargs, countdown=delay)
+        except Exception:  # noqa: BLE001 — broker down: run inline
+            worker(**kwargs)
+    return True
 
 
 def _send_base_messages(
@@ -131,8 +230,9 @@ def _send_base_messages(
         send_phase=phase,
     ).order_by("sort_order", "created_at")
     for message in messages:
-        if _base_message_matches(message, dialog, placement_config):
-            _create_bot_message(dialog, message.text)
+        if _schedule_base_message(
+            dialog, message, placement_config=placement_config
+        ):
             sent += 1
     return sent
 
@@ -142,29 +242,58 @@ def _enqueue_hold_base_messages(
     placement_config: WidgetPlacement | None = None,
 ) -> int:
     """Schedule delayed base messages for the waiting-for-operator phase."""
-    if dialog.status != Dialog.Status.WAITING or dialog.outcome == Dialog.Outcome.OFFLINE:
+    if dialog.status != Dialog.Status.WAITING or dialog.bot_active:
         return 0
-    messages = BaseMessage.objects.filter(
-        is_active=True,
-        send_phase=BaseMessage.SendPhase.HOLD,
-    ).order_by("sort_order", "created_at")
-    queued = 0
     from online_chat.tasks import send_hold_base_message
 
+    extra = _hold_delay_offset(dialog, placement_config)
+    queued = 0
+    messages = BaseMessage.objects.filter(
+        is_active=True,
+        send_phase__in=HOLD_SEND_PHASES,
+    ).order_by("sort_order", "created_at")
     for message in messages:
-        if not _base_message_matches(message, dialog, placement_config):
-            continue
-        delay = max(0, int(message.delay_seconds or 0))
-        kwargs = {
-            "dialog_id": str(dialog.id),
-            "base_message_id": str(message.id),
-        }
-        try:
-            send_hold_base_message.apply_async(kwargs=kwargs, countdown=delay)
-        except Exception:  # noqa: BLE001 — broker down: run inline
-            send_hold_base_message(**kwargs)
-        queued += 1
+        if _schedule_base_message(
+            dialog,
+            message,
+            extra_delay=extra,
+            placement_config=placement_config,
+            task=send_hold_base_message,
+        ):
+            queued += 1
     return queued
+
+
+def enqueue_hold_for_waiting_dialogs() -> int:
+    """Re-arm hold messages for live waiting dialogs (line just opened)."""
+    queued = 0
+    waiting = Dialog.objects.filter(
+        status=Dialog.Status.WAITING,
+        bot_active=False,
+    ).exclude(outcome=Dialog.Outcome.OFFLINE)
+    for dialog in waiting:
+        record_event(dialog, "line_opened", actor_name="system")
+        queued += _enqueue_hold_base_messages(dialog)
+    return queued
+
+
+def park_waiting_dialogs_offline() -> dict[str, int]:
+    """Mark waiting dialogs as offline intake and send вне графика notices."""
+    parked = 0
+    notices = 0
+    holds = 0
+    waiting = Dialog.objects.filter(status=Dialog.Status.WAITING)
+    for dialog in waiting:
+        update_fields = ["updated_at"]
+        if dialog.outcome != Dialog.Outcome.OFFLINE:
+            dialog.outcome = Dialog.Outcome.OFFLINE
+            update_fields.insert(0, "outcome")
+        dialog.save(update_fields=update_fields)
+        record_event(dialog, "line_closed", actor_name="system")
+        notices += _send_offline_notice(dialog)
+        holds += _enqueue_hold_base_messages(dialog)
+        parked += 1
+    return {"parked": parked, "offline_notices": notices, "holds_queued": holds}
 
 
 def _send_offline_notice(
@@ -176,15 +305,10 @@ def _send_offline_notice(
     If no offline base message is configured, nothing is sent (per product spec).
     """
     sent = 0
-    messages = BaseMessage.objects.filter(
-        is_active=True,
-    ).filter(
-        Q(message_type=BaseMessage.MessageType.OFFLINE)
-        | Q(send_phase=BaseMessage.SendPhase.OFFLINE)
-    ).order_by("sort_order", "created_at")
-    for message in messages:
-        if _base_message_matches(message, dialog, placement_config):
-            _create_bot_message(dialog, message.text)
+    for message in _iter_offline_base_messages():
+        if _schedule_base_message(
+            dialog, message, placement_config=placement_config
+        ):
             sent += 1
     return sent
 
@@ -235,6 +359,37 @@ def dialog_group(dialog_id: str) -> str:
     return f"online_chat_dialog_{dialog_id}"
 
 
+def _operator_photo_api_path(operator_id: object) -> str:
+    oid = str(operator_id or "").strip()
+    if not oid:
+        return ""
+    return f"/api/v1/online-chat/operators/{oid}/photo/"
+
+
+def _sanitize_operator_avatar(operator_id: str, raw_avatar: str) -> str:
+    """Never put data: URLs on the wire; prefer the stable photo endpoint."""
+    oid = (operator_id or "").strip()
+    photo = (raw_avatar or "").strip()
+    if oid and photo:
+        return _operator_photo_api_path(oid)
+    if photo.startswith("http://") or photo.startswith("https://"):
+        return photo
+    if photo.startswith("/api/") and "/photo/" in photo:
+        return photo
+    return ""
+
+
+def _operator_profile_by_name(display_name: str) -> OperatorProfile | None:
+    name = (display_name or "").strip()
+    if not name:
+        return None
+    return (
+        OperatorProfile.objects.filter(display_name=name)
+        .order_by("-is_active")
+        .first()
+    )
+
+
 def _operator_photo_url(
     *,
     operator: OperatorProfile | None = None,
@@ -242,10 +397,7 @@ def _operator_photo_url(
 ) -> str:
     if operator is not None:
         return getattr(operator, "photo_url", "") or ""
-    name = display_name.strip()
-    if not name:
-        return ""
-    profile = OperatorProfile.objects.filter(display_name=name, is_active=True).first()
+    profile = _operator_profile_by_name(display_name)
     if profile is None:
         return ""
     return getattr(profile, "photo_url", "") or ""
@@ -257,11 +409,13 @@ def _operator_avatar(dialog: Dialog) -> str:
         try:
             url = _operator_photo_url(operator=dialog.operator)
             if url:
-                return url
+                return _operator_photo_api_path(dialog.operator_id)
         except Exception:  # pragma: no cover - defensive for missing relation
             pass
     if dialog.operator_name:
-        return _operator_photo_url(display_name=dialog.operator_name)
+        profile = _operator_profile_by_name(dialog.operator_name)
+        if profile is not None and (profile.photo_url or "").strip():
+            return _operator_photo_api_path(profile.id)
     return ""
 
 
@@ -301,9 +455,8 @@ def _operator_profile_cache(names: set[str]) -> dict[str, OperatorProfile]:
         return {}
     return {
         profile.display_name: profile
-        for profile in OperatorProfile.objects.filter(
-            display_name__in=cleaned,
-            is_active=True,
+        for profile in OperatorProfile.objects.filter(display_name__in=cleaned).order_by(
+            "is_active"
         )
     }
 
@@ -345,10 +498,7 @@ def serialize_message(
         avatar = operator_avatar.strip()
         profile = None
         if not profile_id and name:
-            profile = OperatorProfile.objects.filter(
-                display_name=name,
-                is_active=True,
-            ).first()
+            profile = _operator_profile_by_name(name)
             if profile:
                 profile_id = str(profile.id)
         if not avatar and profile is not None:
@@ -357,8 +507,9 @@ def serialize_message(
             avatar = _operator_photo_url(display_name=name)
         if profile_id:
             payload["operator_id"] = profile_id
-        if avatar:
-            payload["operator_avatar"] = avatar
+        public_avatar = _sanitize_operator_avatar(profile_id, avatar)
+        if public_avatar:
+            payload["operator_avatar"] = public_avatar
     return payload
 
 
@@ -379,6 +530,12 @@ def serialize_messages_for_dialog(
     names = {dialog.operator_name} if dialog.operator_name else set()
     names.update(name for _, name in assignment_timeline)
     profile_cache = _operator_profile_cache(names)
+    current_operator = None
+    if dialog.operator_id:
+        try:
+            current_operator = dialog.operator
+        except Exception:  # pragma: no cover - missing relation
+            current_operator = None
     serialized: list[dict[str, Any]] = []
     for message in rows:
         if message.speaker == DialogMessage.Speaker.OPERATOR:
@@ -388,6 +545,8 @@ def serialize_messages_for_dialog(
                 fallback=dialog.operator_name,
             )
             profile = profile_cache.get(name)
+            if profile is None and current_operator is not None:
+                profile = current_operator
             serialized.append(
                 serialize_message(
                     message,
@@ -940,7 +1099,6 @@ def create_dialog_with_message(
         initiated_by == Dialog.InitiatedBy.CLIENT
         and dialog.status == Dialog.Status.WAITING
         and not dialog.bot_active
-        and dialog.outcome != Dialog.Outcome.OFFLINE
     ):
         _enqueue_hold_base_messages(dialog, placement_config)
     dialog_payload = serialize_dialog(dialog)
@@ -1055,7 +1213,6 @@ def append_message(
         speaker == DialogMessage.Speaker.CLIENT
         and dialog.status == Dialog.Status.WAITING
         and not dialog.bot_active
-        and dialog.outcome != Dialog.Outcome.OFFLINE
     ):
         placement_config = None
         if dialog.channel == "widget":

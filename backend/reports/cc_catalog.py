@@ -9,9 +9,6 @@ from reports.cc_analytics import CHANNEL_ONLINE_CHAT, CcAnalyticsError, parse_an
 from reports.cc_chat_metrics import (
     builder_metric_value,
     report_chat_history,
-    report_chat_offline,
-    report_chat_operators,
-    report_chat_period,
     report_chat_ratings,
     report_chat_sla,
     report_chat_topics,
@@ -23,15 +20,101 @@ from reports.cc_chat_metrics import (
     report_repeats,
     report_usefulness,
 )
+from reports.cc_chat_sample_reports import (
+    report_chat_categories,
+    report_chat_dates_offline,
+    report_chat_dates_online,
+    report_chat_dept_offline,
+    report_chat_dept_online,
+    report_chat_hours_offline,
+    report_chat_hours_online,
+    report_chat_missed,
+    report_chat_operators_daily,
+    report_chat_operators_summary,
+    report_chat_time_usage,
+)
 
-REPORT_TYPES = (
+VISIBLE_REPORT_TYPES = (
+    {
+        "id": "chat-topics",
+        "fr": "FR-RPT-CC-13",
+        "label": "Статистика по категориям",
+        "default_view": "table",
+        "group": "Онлайн-чат",
+    },
+    {
+        "id": "chat-dept-online",
+        "fr": "FR-RPT-CC-11",
+        "label": "По отделам (онлайн)",
+        "default_view": "table",
+        "group": "Онлайн-чат",
+    },
+    {
+        "id": "chat-dept-offline",
+        "fr": "FR-RPT-CC-11",
+        "label": "По отделам (офлайн)",
+        "default_view": "table",
+        "group": "Онлайн-чат",
+    },
     {
         "id": "chat-period",
         "fr": "FR-RPT-CC-11",
-        "label": "Онлайн-чат: обращения за период",
-        "default_view": "bar",
+        "label": "По датам (онлайн)",
+        "default_view": "table",
         "group": "Онлайн-чат",
     },
+    {
+        "id": "chat-dates-offline",
+        "fr": "FR-RPT-CC-11",
+        "label": "По датам (офлайн)",
+        "default_view": "table",
+        "group": "Онлайн-чат",
+    },
+    {
+        "id": "chat-hours-online",
+        "fr": "FR-RPT-CC-11",
+        "label": "По часам (онлайн)",
+        "default_view": "table",
+        "group": "Онлайн-чат",
+    },
+    {
+        "id": "chat-hours-offline",
+        "fr": "FR-RPT-CC-11",
+        "label": "По часам (офлайн)",
+        "default_view": "table",
+        "group": "Онлайн-чат",
+    },
+    {
+        "id": "chat-operators",
+        "fr": "FR-RPT-CC-05",
+        "label": "По операторам",
+        "default_view": "table",
+        "group": "Онлайн-чат",
+    },
+    {
+        "id": "chat-operators-summary",
+        "fr": "FR-RPT-CC-05",
+        "label": "Суммарный по операторам",
+        "default_view": "table",
+        "group": "Онлайн-чат",
+    },
+    {
+        "id": "chat-offline",
+        "fr": "FR-RPT-CC-12",
+        "label": "По пропущенным",
+        "default_view": "table",
+        "group": "Онлайн-чат",
+    },
+    {
+        "id": "chat-time-usage",
+        "fr": "FR-RPT-CC-05",
+        "label": "По времени",
+        "default_view": "table",
+        "group": "Онлайн-чат",
+    },
+)
+
+HIDDEN_REPORT_TYPES = (
     {
         "id": "chat-sla",
         "fr": "FR-RPT-CC-03",
@@ -40,30 +123,9 @@ REPORT_TYPES = (
         "group": "Онлайн-чат",
     },
     {
-        "id": "chat-operators",
-        "fr": "FR-RPT-CC-05",
-        "label": "Нагрузка и эффективность операторов",
-        "default_view": "table",
-        "group": "Онлайн-чат",
-    },
-    {
         "id": "chat-ratings",
         "fr": "FR-RPT-CC-11",
         "label": "Оценки клиентов",
-        "default_view": "pie",
-        "group": "Онлайн-чат",
-    },
-    {
-        "id": "chat-topics",
-        "fr": "FR-RPT-CC-13",
-        "label": "Тематики закрытия диалогов",
-        "default_view": "pie",
-        "group": "Онлайн-чат",
-    },
-    {
-        "id": "chat-offline",
-        "fr": "FR-RPT-CC-12",
-        "label": "Необработанные и отказные обращения",
         "default_view": "pie",
         "group": "Онлайн-чат",
     },
@@ -134,6 +196,8 @@ REPORT_TYPES = (
     },
 )
 
+REPORT_TYPES = VISIBLE_REPORT_TYPES + HIDDEN_REPORT_TYPES
+
 SUFLER_REPORT_IDS = frozenset({"usefulness", "relevance", "errors"})
 
 _REPORT_ALIASES = {
@@ -148,15 +212,25 @@ _REPORT_ALIASES = {
     "rpt-12": "repeats",
     "rpt-11": "executive",
     "rpt-10": "executive",
+    "chat-categories": "chat-topics",
+    "chat-dates-online": "chat-period",
+    "chat-missed": "chat-offline",
 }
 
 _BUILDERS: dict[str, Callable[..., dict[str, Any]]] = {
-    "chat-period": report_chat_period,
+    "chat-topics": report_chat_categories,
+    "chat-dept-online": report_chat_dept_online,
+    "chat-dept-offline": report_chat_dept_offline,
+    "chat-period": report_chat_dates_online,
+    "chat-dates-offline": report_chat_dates_offline,
+    "chat-hours-online": report_chat_hours_online,
+    "chat-hours-offline": report_chat_hours_offline,
+    "chat-operators": report_chat_operators_daily,
+    "chat-operators-summary": report_chat_operators_summary,
+    "chat-offline": report_chat_missed,
+    "chat-time-usage": report_chat_time_usage,
     "chat-sla": report_chat_sla,
-    "chat-operators": report_chat_operators,
     "chat-ratings": report_chat_ratings,
-    "chat-topics": report_chat_topics,
-    "chat-offline": report_chat_offline,
     "chat_history": report_chat_history,
     "usefulness": report_usefulness,
     "relevance": report_relevance,
@@ -183,7 +257,7 @@ def _catalog_for_scope(scope: str) -> list[dict[str, Any]]:
 def _parse_filters(query: Any) -> dict[str, Any]:
     filters = parse_analytics_filters(query)
     scope = _scope(query)
-    default_report = "usefulness" if scope == "sufler" else "chat-period"
+    default_report = "usefulness" if scope == "sufler" else "chat-topics"
     report_id = (query.get("report") or default_report).strip()
     known = {item["id"] for item in REPORT_TYPES}
     if report_id not in known:
@@ -266,9 +340,11 @@ def build_report_payload(query: Any) -> dict[str, Any]:
     summary.pop("p95_ms", None)
     return {
         "filters": filters,
-        "catalog": _catalog_for_scope(scope),
+        "catalog": _catalog_for_scope(scope) if scope == "sufler" else list(VISIBLE_REPORT_TYPES),
         "report": meta,
         "rows": rows,
+        "columns": built.get("columns") or [],
+        "title": built.get("title") or meta.get("label") or report_id,
         "chart": chart,
         "summary": summary,
         "stub": bool(built.get("stub")),
@@ -281,52 +357,45 @@ def list_builder_templates(*, saved: list[dict[str, Any]] | None = None) -> dict
     return {
         "templates": [
             {
-                "id": "tpl-chat-period-week",
-                "name": "Онлайн-чат: обращения за неделю",
-                "metrics": ["dialogs_total", "dialogs_closed", "avg_first_response_sec"],
-                "filters": {"channel": "online_chat", "period": "week", "report": "chat-period"},
-                "view_mode": "bar",
-            },
-            {
-                "id": "tpl-chat-sla-week",
-                "name": "Онлайн-чат: SLA и ожидание",
-                "metrics": ["sla_pct", "avg_first_response_sec", "aht_sec"],
-                "filters": {"channel": "online_chat", "period": "week", "report": "chat-sla"},
+                "id": "tpl-chat-topics-week",
+                "name": "Статистика по категориям за неделю",
+                "metrics": ["topics_top", "dialogs_closed", "dialogs_total"],
+                "filters": {"channel": "online_chat", "period": "week", "report": "chat-topics"},
                 "view_mode": "table",
             },
             {
-                "id": "tpl-chat-operators-month",
-                "name": "Онлайн-чат: операторы за месяц",
+                "id": "tpl-chat-period-week",
+                "name": "По датам (онлайн) за неделю",
+                "metrics": ["dialogs_total", "dialogs_closed", "avg_first_response_sec"],
+                "filters": {"channel": "online_chat", "period": "week", "report": "chat-period"},
+                "view_mode": "table",
+            },
+            {
+                "id": "tpl-chat-operators-week",
+                "name": "По операторам за неделю",
                 "metrics": ["dialogs_total", "aht_sec", "avg_first_response_sec", "sla_pct"],
-                "filters": {"channel": "online_chat", "period": "month", "report": "chat-operators"},
-                "view_mode": "bar",
+                "filters": {"channel": "online_chat", "period": "week", "report": "chat-operators"},
+                "view_mode": "table",
             },
             {
-                "id": "tpl-chat-ratings-week",
-                "name": "Онлайн-чат: оценки клиентов",
-                "metrics": ["csat", "dialogs_closed", "dialogs_total"],
-                "filters": {"channel": "online_chat", "period": "week", "report": "chat-ratings"},
-                "view_mode": "pie",
-            },
-            {
-                "id": "tpl-chat-topics-week",
-                "name": "Онлайн-чат: тематики закрытия",
-                "metrics": ["topics_top", "dialogs_closed", "dialogs_total"],
-                "filters": {"channel": "online_chat", "period": "week", "report": "chat-topics"},
-                "view_mode": "pie",
+                "id": "tpl-chat-operators-summary-month",
+                "name": "Суммарный по операторам за месяц",
+                "metrics": ["dialogs_total", "aht_sec", "csat"],
+                "filters": {"channel": "online_chat", "period": "month", "report": "chat-operators-summary"},
+                "view_mode": "table",
             },
             {
                 "id": "tpl-chat-offline-week",
-                "name": "Онлайн-чат: необработанные и офлайн",
+                "name": "По пропущенным за неделю",
                 "metrics": ["dialogs_total", "dialogs_closed", "avg_first_response_sec"],
                 "filters": {"channel": "online_chat", "period": "week", "report": "chat-offline"},
                 "view_mode": "table",
             },
             {
-                "id": "tpl-chat-history-day",
-                "name": "Онлайн-чат: реестр диалогов за день",
-                "metrics": ["dialogs_total", "aht_sec", "avg_first_response_sec"],
-                "filters": {"channel": "online_chat", "period": "day", "report": "chat_history"},
+                "id": "tpl-chat-time-week",
+                "name": "По времени за неделю",
+                "metrics": ["dialogs_total", "aht_sec"],
+                "filters": {"channel": "online_chat", "period": "week", "report": "chat-time-usage"},
                 "view_mode": "table",
             },
         ],

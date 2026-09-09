@@ -55,40 +55,52 @@ def deliver_channel_message(message_id: str) -> dict[str, str | bool]:
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def send_hold_base_message(dialog_id: str, base_message_id: str) -> dict[str, str | bool]:
-    """Send one delayed `hold` base message if the dialog still waits."""
-    from online_chat.services import _base_message_matches, _create_bot_message
+def send_delayed_base_message(dialog_id: str, base_message_id: str) -> dict[str, str | bool]:
+    """Send one base message after its configured delay, if still applicable."""
+    from online_chat.routing_services import line_is_open
+    from online_chat.services import (
+        HOLD_SEND_PHASES,
+        _base_message_already_sent,
+        _base_message_matches,
+        _create_bot_message,
+    )
 
     dialog = Dialog.objects.filter(pk=dialog_id).first()
     if dialog is None:
         return {"sent": False, "reason": "dialog_not_found"}
-    if (
-        dialog.status != Dialog.Status.WAITING
-        or dialog.bot_active
-        or dialog.outcome == Dialog.Outcome.OFFLINE
-    ):
-        return {"sent": False, "reason": "dialog_not_waiting"}
-    message = BaseMessage.objects.filter(
-        pk=base_message_id,
-        is_active=True,
-        send_phase=BaseMessage.SendPhase.HOLD,
-    ).first()
+    message = BaseMessage.objects.filter(pk=base_message_id, is_active=True).first()
     if message is None:
         return {"sent": False, "reason": "base_message_not_found"}
+    is_hold = message.send_phase in HOLD_SEND_PHASES
+    is_offline = (
+        message.send_phase == BaseMessage.SendPhase.OFFLINE
+        or message.message_type == BaseMessage.MessageType.OFFLINE
+    )
+    if is_hold and (
+        dialog.status != Dialog.Status.WAITING or dialog.bot_active
+    ):
+        return {"sent": False, "reason": "dialog_not_waiting"}
+    if is_offline and line_is_open() and dialog.outcome != Dialog.Outcome.OFFLINE:
+        return {"sent": False, "reason": "line_open"}
     placement_config = None
     if dialog.channel == "widget":
         placement_config = WidgetPlacement.objects.filter(widget_id=dialog.widget_id).first()
     if not _base_message_matches(message, dialog, placement_config):
         return {"sent": False, "reason": "target_mismatch"}
-    already_sent = DialogMessage.objects.filter(
-        dialog=dialog,
-        speaker=DialogMessage.Speaker.BOT,
-        text=message.text,
-    ).exists()
-    if already_sent:
+    if _base_message_already_sent(dialog, message):
         return {"sent": False, "reason": "already_sent"}
-    _create_bot_message(dialog, message.text)
+    _create_bot_message(dialog, message.text, base_message=message)
     return {"sent": True, "reason": "ok"}
+
+
+@shared_task(
+    autoretry_for=(OSError, TimeoutError),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def send_hold_base_message(dialog_id: str, base_message_id: str) -> dict[str, str | bool]:
+    """Hold-phase alias kept for existing callers and tests."""
+    return send_delayed_base_message(dialog_id, base_message_id)
 
 
 @shared_task

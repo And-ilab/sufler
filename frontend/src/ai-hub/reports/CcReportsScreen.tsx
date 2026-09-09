@@ -35,16 +35,24 @@ function toneForIndex(index: number): 'success' | 'warning' | 'danger' | 'info' 
   return tones[index % tones.length]
 }
 
-function rowsToTable(rows: Record<string, unknown>[]): { headers: string[]; rows: string[][] } {
+function rowsToTable(
+  rows: Record<string, unknown>[],
+  columns?: { key: string; label: string }[],
+): { headers: string[]; rows: string[][] } {
   if (!rows.length) return { headers: ['Нет данных'], rows: [['За выбранный период записей нет']] }
-  const keys = Object.keys(rows[0]).filter(
-    (key) => !['dialog_id', 'id', 'role', 'choice', 'outcome', 'channel_label', 'label'].includes(key),
-  )
+  const keys = columns?.length
+    ? columns.map((item) => item.key)
+    : Object.keys(rows[0]).filter(
+        (key) => !['dialog_id', 'id', 'role', 'choice', 'outcome', 'channel_label', 'label', 'is_total', 'is_section'].includes(key),
+      )
+  const headerFor = (key: string) => {
+    const fromColumn = columns?.find((item) => item.key === key)?.label
+    if (fromColumn) return fromColumn
+    if (key === 'operator') return 'Оператор'
+    return fieldLabel(key)
+  }
   return {
-    headers: keys.map((key) => {
-      if (key === 'operator') return 'Оператор'
-      return fieldLabel(key)
-    }),
+    headers: keys.map(headerFor),
     rows: rows.map((row) =>
       keys.map((key) => {
         if (key === 'operator') {
@@ -54,17 +62,11 @@ function rowsToTable(rows: Record<string, unknown>[]): { headers: string[]; rows
           if (role === 'admin') return `${name} · Админ`
           return name
         }
-        if (key === 'comment') {
-          const raw = String(row[key] ?? '')
-          if (!raw || raw.includes('telegram_inline')) return '—'
-          return localizeCell(raw)
-        }
-        if (key === 'metric') {
-          return metricLabel(String(row[key] ?? ''))
-        }
-        if (key === 'unit') {
-          const unit = String(row[key] ?? '').trim()
-          return unit || '—'
+        if (key === 'share_pct' || key === 'pct_10s' || key === 'pct_20s' || key === 'pct_30s' || key === 'pct_40s') {
+          const raw = row[key]
+          if (raw === null || raw === undefined || raw === '') return '—'
+          const num = Number(raw)
+          if (Number.isFinite(num)) return `${num.toFixed(2)}%`
         }
         return localizeCell(row[key])
       }),
@@ -80,22 +82,9 @@ function downloadCsv(filename: string, headers: string[], rows: string[][]) {
   triggerBrowserDownload(blob, filename.endsWith('.csv') ? filename : `${filename}.csv`)
 }
 
-const TOPIC_REPORTS = new Set([
-  'chat-topics',
-  'topics',
-  'relevance',
-  'chat_history',
-  'executive',
-  'errors',
-])
+const TOPIC_REPORTS = new Set<string>([])
 
-const STATUS_REPORTS = new Set([
-  'chat_history',
-  'chat-offline',
-  'chat-period',
-  'chat-operators',
-  'chat-sla',
-])
+const STATUS_REPORTS = new Set<string>([])
 
 const GROUP_BY_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
   relevance: [
@@ -185,7 +174,7 @@ export function CcReportsScreen({
   const [catalogMeta, setCatalogMeta] = useState<CatalogReportMeta[]>([])
   const [reportType, setReportType] = useState(() => {
     const fromUrl = new URLSearchParams(window.location.search).get('report') || ''
-    const fallback = initialReport || (sufler ? 'usefulness' : 'chat-period')
+    const fallback = initialReport || (sufler ? 'usefulness' : 'chat-topics')
     if (sufler && fromUrl && !SUFLER_REPORT_IDS.has(fromUrl)) {
       return fallback
     }
@@ -224,22 +213,6 @@ export function CcReportsScreen({
       catalogMeta.length > 0
         ? catalogMeta
         : [{ id: reportType, label: reportType, fr: '', default_view: 'table' as const }]
-    const filtered = base.filter((item) => {
-      if (domain === 'all') return true
-      const id = item.id.toLowerCase()
-      const isChat =
-        id.startsWith('chat')
-        || id.includes('offline')
-        || id.includes('history')
-        || id.includes('operator')
-        || id.includes('topic')
-        || id.includes('rating')
-        || id.includes('sla')
-        || id.includes('period')
-      if (domain === 'chat') return isChat
-      return !isChat
-    })
-    const source = filtered.length ? filtered : base
     const templates = savedTemplates.map((item) => ({
       id: `saved:${item.id}`,
       label: `★ ${item.name}`,
@@ -247,8 +220,8 @@ export function CcReportsScreen({
       default_view: (item.view_mode as ReportViewMode) || 'table',
       description: undefined as string | undefined,
     }))
-    return [...source, ...templates]
-  }, [catalogMeta, domain, reportType, savedTemplates])
+    return [...base, ...templates]
+  }, [catalogMeta, reportType, savedTemplates])
 
   const selected = useMemo(() => {
     const fromChoices = reportChoices.find((item) => item.id === reportType)
@@ -415,7 +388,10 @@ export function CcReportsScreen({
     }
   }, [reportType])
 
-  const table = useMemo(() => rowsToTable((payload?.rows || []) as Record<string, unknown>[]), [payload])
+  const table = useMemo(
+    () => rowsToTable((payload?.rows || []) as Record<string, unknown>[], payload?.columns),
+    [payload],
+  )
   const chart = payload?.chart || []
 
   const exportCurrentCsv = () => {

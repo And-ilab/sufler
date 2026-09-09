@@ -14,6 +14,7 @@ from online_chat.models import (
     Dialog,
     DialogEvent,
     OperatorAssignmentHold,
+    OperatorPresenceLog,
     OperatorProfile,
     RoutingRule,
     WidgetPlacement,
@@ -351,25 +352,55 @@ def close_working_day() -> dict[str, int]:
             payload={"reason": "shift_end"},
         )
         returned += 1
-    offlined = OperatorProfile.objects.filter(is_active=True).exclude(
-        presence=OperatorProfile.Presence.OFFLINE
-    ).update(presence=OperatorProfile.Presence.OFFLINE, last_seen_at=now)
+    offlined_qs = list(
+        OperatorProfile.objects.filter(is_active=True).exclude(
+            presence=OperatorProfile.Presence.OFFLINE
+        )
+    )
+    offlined = 0
+    for operator in offlined_qs:
+        _record_presence_interval(operator, OperatorProfile.Presence.OFFLINE, at=now)
+        operator.presence = OperatorProfile.Presence.OFFLINE
+        operator.last_seen_at = now
+        operator.save(update_fields=["presence", "last_seen_at", "updated_at"])
+        offlined += 1
     OperatorAssignmentHold.objects.all().delete()
-    return {"returned_to_queue": returned, "operators_offlined": offlined}
+    from online_chat.services import park_waiting_dialogs_offline
+
+    parked = park_waiting_dialogs_offline()
+    return {
+        "returned_to_queue": returned,
+        "operators_offlined": offlined,
+        "parked": parked.get("parked", 0),
+        "offline_notices": parked.get("offline_notices", 0),
+    }
 
 
 def open_working_day() -> dict[str, int]:
     """Start-of-shift transition: bring operators online and flush backlog."""
     now = timezone.now()
-    onlined = OperatorProfile.objects.filter(is_active=True).exclude(
-        presence=OperatorProfile.Presence.ONLINE
-    ).update(
-        presence=OperatorProfile.Presence.ONLINE,
-        last_seen_at=now,
+    onlined_qs = list(
+        OperatorProfile.objects.filter(is_active=True).exclude(
+            presence=OperatorProfile.Presence.ONLINE
+        )
     )
+    onlined = 0
+    for operator in onlined_qs:
+        _record_presence_interval(operator, OperatorProfile.Presence.ONLINE, at=now)
+        operator.presence = OperatorProfile.Presence.ONLINE
+        operator.last_seen_at = now
+        operator.save(update_fields=["presence", "last_seen_at", "updated_at"])
+        onlined += 1
     release_offline_queue()
     assigned = run_assignments()
-    return {"assigned": len(assigned), "operators_onlined": int(onlined)}
+    from online_chat.services import enqueue_hold_for_waiting_dialogs
+
+    holds_queued = enqueue_hold_for_waiting_dialogs()
+    return {
+        "assigned": len(assigned),
+        "operators_onlined": int(onlined),
+        "holds_queued": holds_queued,
+    }
 
 
 def sync_schedule_state(obj: "WorkScheduleSettings | None" = None) -> dict[str, Any]:
@@ -401,11 +432,42 @@ def sync_schedule_state(obj: "WorkScheduleSettings | None" = None) -> dict[str, 
     return result
 
 
+def _record_presence_interval(operator: OperatorProfile, presence: str, *, at=None) -> None:
+    now = at or timezone.now()
+    open_log = (
+        OperatorPresenceLog.objects.filter(operator=operator, ended_at__isnull=True)
+        .order_by("-started_at")
+        .first()
+    )
+    if open_log and open_log.presence == presence:
+        return
+    if open_log:
+        open_log.ended_at = now
+        open_log.save(update_fields=["ended_at"])
+    elif operator.presence != presence:
+        started = operator.last_seen_at or now
+        if started < now:
+            OperatorPresenceLog.objects.create(
+                operator=operator,
+                presence=operator.presence,
+                started_at=started,
+                ended_at=now,
+            )
+    OperatorPresenceLog.objects.create(
+        operator=operator,
+        presence=presence,
+        started_at=now,
+    )
+
+
 def update_operator_presence(operator: OperatorProfile, presence: str) -> OperatorProfile:
     if presence not in OperatorProfile.Presence.values:
         raise ValueError("invalid presence")
+    now = timezone.now()
+    if operator.presence != presence:
+        _record_presence_interval(operator, presence, at=now)
     operator.presence = presence
-    operator.last_seen_at = timezone.now()
+    operator.last_seen_at = now
     operator.save(update_fields=["presence", "last_seen_at", "updated_at"])
     if (
         presence == OperatorProfile.Presence.ONLINE

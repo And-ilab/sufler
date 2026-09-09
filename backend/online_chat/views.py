@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Mapping
 from datetime import timedelta
 from functools import wraps
+from io import BytesIO
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -1797,7 +1798,9 @@ def operators_collection(request: HttpRequest) -> HttpResponse:
             max_active_dialogs=data.get("max_active_dialogs", data.get("capacity", 3)),
             auto_assign=_bool_field(data, "auto_assign", True),
             is_active=_bool_field(data, "is_active", True),
-            photo_url=_str_field(data, "photo_url"),
+            photo_url=_normalize_photo_url(_str_field(data, "photo_url"))
+            if _str_field(data, "photo_url")
+            else "",
             skill_tags=_json_field(data, "skill_tags", list, []) if "skill_tags" in data else [],
         )
         if "department_id" in data and "department_ids" not in data:
@@ -1808,27 +1811,135 @@ def operators_collection(request: HttpRequest) -> HttpResponse:
         return _error(OnlineChatApiError(str(exc)))
 
 
+_PHOTO_DATA_RE = re.compile(
+    r"^data:(image/(?:png|jpe?g|webp))?(?:;charset=[^;,]*)?(;base64)?,(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
+_PHOTO_MAX_BYTES = 500 * 1024
+_PHOTO_MAX_SIDE = 256
+
+
+def _decode_photo_data_url(raw: str) -> tuple[bytes, str] | None:
+    match = _PHOTO_DATA_RE.match((raw or "").strip())
+    if not match:
+        return None
+    content_type = (match.group(1) or "image/jpeg").lower()
+    if content_type == "image/jpg":
+        content_type = "image/jpeg"
+    payload = match.group(3) or ""
+    try:
+        body = base64.b64decode(payload, validate=False)
+    except (ValueError, binascii.Error):
+        return None
+    if not body:
+        return None
+    return body, content_type
+
+
+def _photo_response_headers(response: HttpResponse) -> HttpResponse:
+    response["Access-Control-Allow-Origin"] = "*"
+    response["Cross-Origin-Resource-Policy"] = "cross-origin"
+    response["Cache-Control"] = "private, max-age=300"
+    return response
+
+
+def _operator_for_request(request: HttpRequest, *, display_name: str = "") -> OperatorProfile | None:
+    username = ""
+    if getattr(request.user, "is_authenticated", False):
+        username = (request.user.get_username() or "").strip()
+    if username:
+        match = OperatorProfile.objects.filter(
+            external_id=username, is_active=True
+        ).first()
+        if match:
+            return match
+        match = OperatorProfile.objects.filter(
+            display_name=username, is_active=True
+        ).first()
+        if match:
+            return match
+    name = (display_name or "").strip()
+    if name:
+        return OperatorProfile.objects.filter(display_name=name, is_active=True).first()
+    return None
+
+
+def _normalize_photo_url(raw: str) -> str:
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    if value.startswith("http://") or value.startswith("https://"):
+        return value[:2000]
+    decoded = _decode_photo_data_url(value)
+    if not decoded:
+        raise OnlineChatApiError("photo_url must be a data:image or http(s) URL")
+    body, content_type = decoded
+    if len(body) > _PHOTO_MAX_BYTES:
+        try:
+            from PIL import Image
+        except ImportError as exc:  # pragma: no cover
+            raise OnlineChatApiError("photo is too large") from exc
+        image = Image.open(BytesIO(body))
+        image = image.convert("RGB")
+        image.thumbnail((_PHOTO_MAX_SIDE, _PHOTO_MAX_SIDE))
+        buffer = BytesIO()
+        image.save(buffer, format="JPEG", quality=85)
+        body = buffer.getvalue()
+        content_type = "image/jpeg"
+    encoded = base64.b64encode(body).decode("ascii")
+    return f"data:{content_type};base64,{encoded}"
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+@_chat_permissions(PERM_SUFLER_CHAT, PERM_CC_ADMIN)
+def operator_me(request: HttpRequest) -> HttpResponse:
+    display_name = (request.GET.get("display_name") or "").strip()
+    operator = _operator_for_request(request, display_name=display_name)
+    if operator is None:
+        return JsonResponse(
+            {"ok": False, "error": "not_found", "detail": "Профиль оператора не найден"},
+            status=404,
+        )
+    return JsonResponse({"ok": True, "operator": _operator_dict(operator)})
+
+
+@csrf_exempt
+@require_http_methods(["PATCH"])
+@_chat_permissions(PERM_SUFLER_CHAT, PERM_CC_ADMIN)
+def operator_me_photo(request: HttpRequest) -> HttpResponse:
+    try:
+        data = _json_body(request)
+        display_name = _str_field(data, "display_name")
+        operator = _operator_for_request(request, display_name=display_name)
+        if operator is None:
+            return JsonResponse(
+                {"ok": False, "error": "not_found", "detail": "Профиль оператора не найден"},
+                status=404,
+            )
+        operator.photo_url = _normalize_photo_url(_str_field(data, "photo_url"))
+        operator.save(update_fields=["photo_url", "updated_at"])
+        return JsonResponse({"ok": True, "operator": _operator_dict(operator)})
+    except OnlineChatApiError as exc:
+        return _error(exc)
+
+
+@csrf_exempt
 @require_http_methods(["GET"])
 def operator_photo(request: HttpRequest, item_id: str) -> HttpResponse:
     """Public operator photo for the client widget (avoids huge data URLs in WS payloads)."""
-    operator = get_object_or_404(OperatorProfile, pk=item_id, is_active=True)
+    operator = get_object_or_404(OperatorProfile, pk=item_id)
     raw = (operator.photo_url or "").strip()
     if not raw:
         return HttpResponse(status=404)
     if raw.startswith("data:"):
-        match = re.match(r"data:([^;,]+)?(?:;[^,]*)?;base64,(.+)", raw, re.DOTALL)
-        if not match:
+        decoded = _decode_photo_data_url(raw)
+        if not decoded:
             return HttpResponse(status=404)
-        content_type = match.group(1) or "application/octet-stream"
-        try:
-            body = base64.b64decode(match.group(2))
-        except (ValueError, binascii.Error):
-            return HttpResponse(status=404)
-        response = HttpResponse(body, content_type=content_type)
-        response["Cache-Control"] = "private, max-age=300"
-        return response
+        body, content_type = decoded
+        return _photo_response_headers(HttpResponse(body, content_type=content_type))
     if raw.startswith("http://") or raw.startswith("https://"):
-        return redirect(raw)
+        return _photo_response_headers(redirect(raw))
     return HttpResponse(status=404)
 
 
@@ -1861,7 +1972,8 @@ def operator_detail(request: HttpRequest, item_id: str) -> HttpResponse:
             if field in data:
                 setattr(item, field, _bool_field(data, field))
         if "photo_url" in data:
-            item.photo_url = _str_field(data, "photo_url")
+            raw_photo = _str_field(data, "photo_url")
+            item.photo_url = _normalize_photo_url(raw_photo) if raw_photo else ""
         if "skill_tags" in data:
             tags = _json_field(data, "skill_tags", list, [])
             if any(not isinstance(value, str) for value in tags):

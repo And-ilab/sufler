@@ -39,6 +39,8 @@ from online_chat.views import (
     internal_messages_collection,
     internal_messages_mark_read,
     operator_detail,
+    operator_me,
+    operator_me_photo,
     operator_photo,
     operator_presence,
     operators_collection,
@@ -61,6 +63,8 @@ urlpatterns = [
     path("departments/", departments_collection, name="online_chat_departments"),
     path("departments/<uuid:item_id>/", department_detail, name="online_chat_department"),
     path("operators/", operators_collection, name="online_chat_operators"),
+    path("operators/me/", operator_me, name="online_chat_operator_me"),
+    path("operators/me/photo/", operator_me_photo, name="online_chat_operator_me_photo"),
     path(
         "operators/<uuid:item_id>/photo/",
         operator_photo,

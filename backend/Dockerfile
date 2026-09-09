@@ -7,6 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Tesseract for OCR (FR-OCR); Russian + English language packs.
+# Liberation Serif ≈ Times New Roman for Cyrillic PDF reports.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tesseract-ocr \
@@ -14,6 +15,8 @@ RUN apt-get update \
         tesseract-ocr-eng \
         antiword \
         libgomp1 \
+        fonts-liberation \
+        fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

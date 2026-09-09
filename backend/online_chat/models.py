@@ -158,6 +158,30 @@ class OperatorProfile(models.Model):
         return self.display_name
 
 
+class OperatorPresenceLog(models.Model):
+    """Closed intervals of operator presence for «По времени» reports."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    operator = models.ForeignKey(
+        OperatorProfile,
+        on_delete=models.CASCADE,
+        related_name="presence_logs",
+    )
+    presence = models.CharField(max_length=16, db_index=True)
+    started_at = models.DateTimeField(db_index=True)
+    ended_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        ordering = ("started_at",)
+        indexes = (
+            models.Index(fields=["operator", "started_at"]),
+            models.Index(fields=["operator", "ended_at"]),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.operator_id} {self.presence} {self.started_at}"
+
+
 class WidgetPlacement(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     widget_id = models.CharField(max_length=128, unique=True)
@@ -519,6 +543,12 @@ class DialogMessage(models.Model):
     channel_delivery_error = models.TextField(blank=True, default="")
     response_origin = models.CharField(max_length=32, blank=True, default="")
     sufler_suggestion_text = models.TextField(blank=True, default="")
+    source_base_message_id = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="BaseMessage that produced this bot bubble, if any",
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

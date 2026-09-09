@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from auth.decorators import permission_denied_response
@@ -25,10 +26,13 @@ from reports.asr_qa import (
 from reports.cc_analytics import (
     CcAnalyticsError,
     build_analytics,
-    build_csv_export,
-    build_xlsx_export,
-    export_filename,
     parse_analytics_filters,
+)
+from reports.cc_report_export import (
+    export_report_csv,
+    export_report_pdf,
+    export_report_xlsx,
+    report_export_filename,
 )
 from reports.cc_catalog import (
     build_report_payload,
@@ -36,7 +40,6 @@ from reports.cc_catalog import (
     preview_builder,
 )
 from reports.cc_live import build_live_dashboard
-from reports.cc_pdf import build_pdf_export
 from reports.models import AsrDialogueSession, CcReportTemplate
 
 View = Callable[..., HttpResponse]
@@ -191,24 +194,27 @@ def cc_analytics(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET"])
 @require_cc_reports
 def cc_export(request: HttpRequest) -> HttpResponse:
-    """CSV / XLSX / PDF export for CC analytics."""
+    """CSV / XLSX / PDF export for the selected online-chat report template."""
     try:
-        filters = parse_analytics_filters(request.GET)
-        analytics = build_analytics(filters)
-        export_format = filters["format"]
+        report_payload = build_report_payload(request.GET)
+        export_format = (request.GET.get("format") or "csv").strip().lower()
         if export_format == "xlsx":
-            payload = build_xlsx_export(analytics)
+            payload = export_report_xlsx(report_payload)
             content_type = (
                 "application/vnd.openxmlformats-officedocument."
                 "spreadsheetml.sheet"
             )
         elif export_format == "pdf":
-            payload = build_pdf_export(analytics)
+            from reports.cc_pdf_categories import resolve_author_name
+
+            report_payload["generated_at"] = timezone.now()
+            report_payload["generated_by"] = resolve_author_name(request.user)
+            payload = export_report_pdf(report_payload)
             content_type = "application/pdf"
         else:
-            payload = build_csv_export(analytics)
+            payload = export_report_csv(report_payload)
             content_type = "text/csv; charset=utf-8"
-        filename = export_filename(filters, export_format)
+        filename = report_export_filename(report_payload, export_format)
     except CcAnalyticsError as exc:
         return _cc_validation_error(exc)
 

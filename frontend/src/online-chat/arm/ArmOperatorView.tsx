@@ -837,18 +837,18 @@ const COLLEAGUES_SECTION: QueueSectionDef = {
 };
 
 function queueSectionsForRole(role: ArmRole): QueueSectionDef[] {
-  // «Общая очередь» всегда последняя; «Диалоги коллег» — только супервизор.
+  // «Общая очередь» всегда первая; «Диалоги коллег» — только супервизор.
   const withoutShared = QUEUE_SECTIONS.filter((section) => section.id !== "shared");
   const shared = QUEUE_SECTIONS.find((section) => section.id === "shared")!;
   if (role === "supervisor") {
     return [
+      shared,
       withoutShared[0],
       COLLEAGUES_SECTION,
       ...withoutShared.slice(1),
-      shared,
     ];
   }
-  return [...withoutShared, shared];
+  return [shared, ...withoutShared];
 }
 
 function findSectionForQueueItem(queueId: string, sections: QueueSectionDef[]): QueueSectionDef | undefined {

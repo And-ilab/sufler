@@ -281,6 +281,19 @@ function resourceApi<T>(resource: string, singular: string, canDelete: boolean) 
 export const departmentsApi = resourceApi<Department>('departments', 'department', true)
 export const operatorsApi = {
   ...resourceApi<ChatOperator>('operators', 'operator', false),
+  async me(displayName?: string): Promise<ChatOperator> {
+    const query = displayName ? `?display_name=${encodeURIComponent(displayName)}` : ''
+    return itemFrom<ChatOperator>(await request<unknown>(`operators/me/${query}`), 'operator')
+  },
+  async updateMyPhoto(photoUrl: string, displayName?: string): Promise<ChatOperator> {
+    return itemFrom<ChatOperator>(
+      await request<unknown>('operators/me/photo/', {
+        method: 'PATCH',
+        ...json({ photo_url: photoUrl, display_name: displayName || '' }),
+      }),
+      'operator',
+    )
+  },
   async setPresence(id: EntityId, presence: OperatorPresence): Promise<ChatOperator> {
     return itemFrom<ChatOperator>(
       await request<unknown>(`operators/${id}/presence/`, {

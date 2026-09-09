@@ -18,8 +18,18 @@
     (SCRIPT && SCRIPT.getAttribute('data-widget-id')) || 'demo-widget';
   var PLACEMENT =
     (SCRIPT && SCRIPT.getAttribute('data-placement')) || 'website';
-  var API_BASE =
-    (SCRIPT && SCRIPT.getAttribute('data-api-base')) || '';
+    var API_BASE = (function () {
+      var attr = SCRIPT && SCRIPT.getAttribute('data-api-base');
+      if (attr) return attr.replace(/\/$/, '');
+      if (SCRIPT && SCRIPT.src) {
+        try {
+          return new URL(SCRIPT.src, global.location.href).origin;
+        } catch (err) {
+          return '';
+        }
+      }
+      return '';
+    })();
   var QUERY_PARAMS = new URLSearchParams(global.location.search || '');
   var SIM_CLIENT = QUERY_PARAMS.get('sim_client') || '';
   var RESUME_DIALOG_ID = QUERY_PARAMS.get('dialog_id') || '';
@@ -207,9 +217,11 @@
         ';display:flex;align-items:center;gap:8px;}',
       '.op-strip[hidden]{display:none!important;}',
       '.avatar{width:28px;height:28px;border-radius:14px;display:flex;align-items:center;justify-content:center;',
-      'font-size:10px;font-weight:600;color:#fff;flex-shrink:0;overflow:hidden;}',
-      '.avatar--photo{background:' + WP.avatarOperator + ';}',
-      '.avatar--photo img{width:100%;height:100%;object-fit:cover;display:block;}',
+      'font-size:10px;font-weight:600;color:#fff;flex-shrink:0;overflow:hidden;position:relative;}',
+      '.avatar--photo{background-color:' +
+        WP.avatarOperator +
+        ';background-size:cover;background-position:center;background-repeat:no-repeat;}',
+      '.avatar--photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}',
       '.op-meta{flex:1;min-width:0;}',
       '.op-name{font-size:12px;font-weight:600;color:' + WP.text + ';}',
       '.op-role{font-size:11px;color:' + WP.textSecondary + ';}',
@@ -553,10 +565,12 @@
       operatorShort: STR.operatorShort,
       operatorInitials: STR.operatorInitials,
       operatorAvatar: '',
+      operatorId: '',
       unreadCount: 0,
       typingDebounceTimer: null,
       typingActive: false,
       wsPingTimer: null,
+      catchUpTimer: null,
       pendingFile: null,
     };
 
@@ -695,51 +709,117 @@
     /** Stable HTTP URL for operator photo (works with data URLs stored server-side). */
     function operatorPhotoApiUrl(operatorId) {
       if (!operatorId) return '';
+      var id = String(operatorId);
       return apiUrl(
-        '/api/v1/online-chat/operators/' + encodeURIComponent(operatorId) + '/photo/',
+        '/api/v1/online-chat/operators/' +
+          encodeURIComponent(id) +
+          '/photo/?v=' +
+          encodeURIComponent(id),
       );
     }
 
-    function resolveOperatorAvatarUrl(message, dialog) {
-      var messageId = message && message.operator_id;
-      if (messageId) return operatorPhotoApiUrl(messageId);
-      var dialogId = dialog && dialog.operator_id;
-      if (dialogId) return operatorPhotoApiUrl(dialogId);
+    function operatorIdFromAvatarPath(path) {
+      var match = String(path || '').match(
+        /\/operators\/([0-9a-fA-F-]{36})\/photo\/?/,
+      );
+      return match ? match[1] : '';
+    }
+
+    function resolveMediaUrl(path) {
+      if (!path) return '';
+      var value = String(path);
+      if (
+        value.indexOf('data:') === 0 ||
+        value.indexOf('http://') === 0 ||
+        value.indexOf('https://') === 0
+      ) {
+        return value;
+      }
+      if (value.charAt(0) === '/') return apiUrl(value);
+      return value;
+    }
+
+    function resolveOperatorAvatarSources(message, dialog) {
       var inline =
         (message && message.operator_avatar) ||
         (dialog && dialog.operator_avatar) ||
         '';
-      return inline || '';
+      var operatorId =
+        (message && message.operator_id) ||
+        (dialog && dialog.operator_id) ||
+        state.operatorId ||
+        operatorIdFromAvatarPath(inline) ||
+        '';
+      var photoApi = operatorId ? operatorPhotoApiUrl(operatorId) : '';
+      if (photoApi) {
+        var fallback = inline && String(inline).indexOf('data:') !== 0
+          ? resolveMediaUrl(inline)
+          : '';
+        return { url: photoApi, fallback: fallback === photoApi ? '' : fallback };
+      }
+      if (inline && String(inline).indexOf('data:') === 0) {
+        return { url: inline, fallback: '' };
+      }
+      return { url: resolveMediaUrl(inline), fallback: '' };
+    }
+
+    function resolveOperatorAvatarUrl(message, dialog) {
+      return resolveOperatorAvatarSources(message, dialog).url;
     }
 
     /**
      * Avatar for a bank employee (operator/supervisor) bubble or the op-strip header.
      * Always renders something: employee initials by default and photo when available.
      */
-    function createOperatorAvatarNode(url, initials) {
+    function createOperatorAvatarNode(url, initials, fallbackUrl) {
       var wrap = document.createElement('div');
       wrap.className = 'avatar avatar--photo';
       var fallbackInitials = String(initials || STR.operatorInitials || 'О')
         .trim()
         .slice(0, 2)
         .toUpperCase();
-      wrap.textContent = fallbackInitials;
+      var label = document.createElement('span');
+      label.textContent = fallbackInitials;
+      wrap.appendChild(label);
       if (!url) {
         return wrap;
       }
-      var img = document.createElement('img');
-      img.alt = '';
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      img.onload = function () {
-        wrap.textContent = '';
+      function cssUrl(src) {
+        return 'url(' + JSON.stringify(String(src)) + ')';
+      }
+      function showPhoto(src) {
+        wrap.style.backgroundImage = cssUrl(src);
+        if (label.parentNode) label.remove();
+      }
+      function clearPhoto() {
+        wrap.style.backgroundImage = '';
+        var existing = wrap.querySelector('img');
+        if (existing) existing.remove();
+        if (!label.parentNode) wrap.appendChild(label);
+      }
+      function mountPhoto(src, nextFallback) {
+        showPhoto(src);
+        var img = document.createElement('img');
+        img.alt = '';
+        img.decoding = 'async';
+        img.onload = function () {
+          showPhoto(src);
+        };
+        img.onerror = function () {
+          if (img.parentNode) img.remove();
+          if (nextFallback && nextFallback !== src) {
+            mountPhoto(nextFallback, '');
+            return;
+          }
+          clearPhoto();
+        };
         wrap.appendChild(img);
-      };
-      img.onerror = function () {
-        // Keep initials fallback when photo URL fails (404 / invalid / blocked).
-        wrap.textContent = fallbackInitials;
-      };
-      img.src = url;
+        img.src = src;
+        if (img.complete && img.naturalWidth) {
+          showPhoto(src);
+        }
+      }
+      mountPhoto(url, fallbackUrl && fallbackUrl !== url ? fallbackUrl : '');
       return wrap;
     }
 
@@ -1105,6 +1185,7 @@
           var operatorAvatarNode = createOperatorAvatarNode(
             options.avatarUrl || '',
             options.operatorInitials || initialsFromName(options.operatorLabel || state.operatorName),
+            options.avatarFallbackUrl || '',
           );
           row.insertBefore(operatorAvatarNode, row.firstChild);
         }
@@ -1245,19 +1326,24 @@
       state.operatorName = full;
       state.operatorShort = shortNameFromFull(full);
       state.operatorInitials = initialsFromName(full);
-      var avatarUrl = resolveOperatorAvatarUrl(
+      var sources = resolveOperatorAvatarSources(
         {
           operator_id: operatorId || '',
           operator_avatar: typeof avatar === 'string' ? avatar : '',
         },
         null,
       );
-      state.operatorAvatar = avatarUrl;
+      state.operatorAvatar = sources.url;
+      state.operatorId = operatorId || state.operatorId || '';
       var nameNode = opStrip.querySelector('.op-name');
       if (nameNode) nameNode.textContent = full;
       var existingAvatar = opStrip.querySelector('.avatar');
       if (existingAvatar) existingAvatar.remove();
-      var avatarNode = createOperatorAvatarNode(avatarUrl, state.operatorInitials);
+      var avatarNode = createOperatorAvatarNode(
+        sources.url,
+        state.operatorInitials,
+        sources.fallback,
+      );
       if (avatarNode) {
         var meta = opStrip.querySelector('.op-meta');
         if (meta) opStrip.insertBefore(avatarNode, meta);
@@ -1275,6 +1361,7 @@
       );
       if (state.operatorConnected) return;
       state.operatorConnected = true;
+      stopCatchUpPolling();
       setWaitingHint(false);
       opStrip.removeAttribute('hidden');
       if (options.announce !== false) {
@@ -1310,10 +1397,17 @@
         addSystem(message.text);
         return;
       }
-      if (message.speaker === 'operator' || message.speaker === 'bot') {
-        setWaitingHint(false);
-        var avatarUrl =
-          message.speaker === 'bot' ? '' : resolveOperatorAvatarUrl(message, null);
+        if (message.speaker === 'operator' || message.speaker === 'bot') {
+        if (message.speaker === 'operator') {
+          setWaitingHint(false);
+        }
+        var avatarSources =
+          message.speaker === 'bot'
+            ? { url: '', fallback: '' }
+            : resolveOperatorAvatarSources(message, {
+                operator_id: state.operatorId,
+                operator_avatar: state.operatorAvatar || '',
+              });
         if (
           message.speaker === 'operator' &&
           !state.operatorConnected
@@ -1341,7 +1435,8 @@
               id: message.id,
               receiptStatus: message.receipt_status,
               quotedText: message.quoted_text,
-              avatarUrl: avatarUrl,
+              avatarUrl: avatarSources.url,
+              avatarFallbackUrl: avatarSources.fallback,
               isBot: message.speaker === 'bot',
               operatorLabel:
                 message.speaker === 'bot'
@@ -1378,6 +1473,7 @@
     function closeDialogSocket() {
       sendTypingStop();
       stopWsPing();
+      stopCatchUpPolling();
       if (state.ws) {
         try {
           state.ws.close();
@@ -1386,6 +1482,59 @@
         }
         state.ws = null;
       }
+    }
+
+    function catchUpDialogMessages() {
+      if (!state.dialogId) return;
+      fetch(apiUrl('/api/v1/online-chat/dialogs/' + state.dialogId + '/'))
+        .then(function (response) {
+          return response.json();
+        })
+        .then(function (body) {
+          if (!body || !body.ok || !body.dialog) return;
+          var messages = body.dialog.messages || [];
+          messages.forEach(function (message) {
+            if (message && message.is_history) return;
+            handleRemoteMessage(message);
+          });
+          if (
+            body.dialog.status === 'active' &&
+            body.dialog.operator_name &&
+            !state.operatorConnected
+          ) {
+            connectOperator(body.dialog.operator_name, {
+              announce: false,
+              avatar: body.dialog.operator_avatar || '',
+              operatorId: body.dialog.operator_id || '',
+            });
+          }
+        })
+        .catch(function () {});
+    }
+
+    function stopCatchUpPolling() {
+      if (state.catchUpTimer) {
+        clearInterval(state.catchUpTimer);
+        state.catchUpTimer = null;
+      }
+    }
+
+    function startCatchUpPolling() {
+      stopCatchUpPolling();
+      var attempts = 0;
+      state.catchUpTimer = setInterval(function () {
+        attempts += 1;
+        if (
+          state.operatorConnected ||
+          state.closed ||
+          !state.dialogId ||
+          attempts > 30
+        ) {
+          stopCatchUpPolling();
+          return;
+        }
+        catchUpDialogMessages();
+      }, 2000);
     }
 
     function connectDialogSocket(dialogId) {
@@ -1405,6 +1554,13 @@
         }
         var type = data && data.type;
         var payload = (data && data.payload) || {};
+        if (type === 'status') {
+          if (data.status === 'connected') {
+            catchUpDialogMessages();
+            startCatchUpPolling();
+          }
+          return;
+        }
         if (type === 'operator.joined') {
           connectOperator(payload.operator_name, {
             announce: !payload.system_message,
@@ -2004,6 +2160,10 @@
                   message.speaker === 'operator'
                     ? message.operator_name || dialog.operator_name || state.operatorName
                     : state.operatorName;
+                var historyAvatar =
+                  message.speaker === 'bot'
+                    ? { url: '', fallback: '' }
+                    : resolveOperatorAvatarSources(message, dialog);
                 addBubble(
                   'operator',
                   message.text,
@@ -2019,10 +2179,8 @@
                       id: message.id,
                       receiptStatus: message.receipt_status,
                       quotedText: message.quoted_text,
-                      avatarUrl:
-                        message.speaker === 'bot'
-                          ? ''
-                          : resolveOperatorAvatarUrl(message, dialog),
+                      avatarUrl: historyAvatar.url,
+                      avatarFallbackUrl: historyAvatar.fallback,
                       isBot: message.speaker === 'bot',
                       operatorLabel:
                         message.speaker === 'bot'

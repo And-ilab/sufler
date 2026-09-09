@@ -79,17 +79,17 @@ class CcReportsApiTest(TestCase):
 
         csv_response = client.get(
             "/api/reports/cc/export/",
-            {**params, "format": "csv"},
+            {**params, "format": "csv", "report": "chat-topics"},
         )
         self.assertEqual(csv_response.status_code, 200)
         self.assertIn("text/csv", csv_response["Content-Type"])
         self.assertIn("attachment", csv_response["Content-Disposition"])
-        self.assertIn(b"date,channel,operator", csv_response.content)
+        self.assertIn("Категория".encode("utf-8"), csv_response.content)
         self.assertGreater(len(csv_response.content), 40)
 
         xlsx_response = client.get(
             "/api/reports/cc/export/",
-            {**params, "format": "xlsx"},
+            {**params, "format": "xlsx", "report": "chat-topics"},
         )
         self.assertEqual(xlsx_response.status_code, 200)
         self.assertIn(
@@ -101,7 +101,97 @@ class CcReportsApiTest(TestCase):
             names = archive.namelist()
             self.assertIn("xl/worksheets/sheet1.xml", names)
             sheet = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
-            self.assertIn("recognized_pct", sheet)
+            self.assertIn("Категория", sheet)
+
+        pdf_response = client.get(
+            "/api/reports/cc/export/",
+            {**params, "format": "pdf", "report": "chat-topics"},
+        )
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertIn("pdf", pdf_response["Content-Type"])
+        self.assertTrue(pdf_response.content.startswith(b"%PDF"))
+
+    def _pdf_text(self, content: bytes) -> str:
+        from pypdf import PdfReader
+
+        reader = PdfReader(BytesIO(content))
+        return "\n".join((page.extract_text() or "") for page in reader.pages)
+
+    def test_categories_pdf_uses_analyst_full_name(self):
+        client = Client()
+        user = self.user_for_role("contact_center_analyst")
+        user.first_name = "Иван"
+        user.last_name = "Петров"
+        user.save(update_fields=["first_name", "last_name"])
+        client.force_login(user)
+
+        response = client.get(
+            "/api/reports/cc/export/",
+            {
+                "date_from": "2026-08-18",
+                "date_to": "2026-08-24",
+                "format": "pdf",
+                "report": "chat-topics",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.content[:500])
+        self.assertTrue(response.content.startswith(b"%PDF"))
+        text = self._pdf_text(response.content)
+        self.assertIn("ОТЧЁТ", text)
+        self.assertIn("Статистика по категориям", text)
+        self.assertIn("Дата формирования", text)
+        self.assertIn("Сформировал", text)
+        self.assertIn("Петров Иван", text)
+        self.assertIn("18.08.2026", text)
+        self.assertIn("24.08.2026", text)
+        self.assertIn("Категория", text)
+        self.assertIn("Онлайн-чат", text)
+        self.assertIn("Стр.", text)
+
+    def test_categories_pdf_fallback_author_without_name(self):
+        client = Client()
+        user = self.user_for_role("contact_center_analyst")
+        user.first_name = ""
+        user.last_name = ""
+        user.save(update_fields=["first_name", "last_name"])
+        client.force_login(user)
+
+        response = client.get(
+            "/api/reports/cc/export/",
+            {
+                "date_from": "2026-08-18",
+                "date_to": "2026-08-24",
+                "format": "pdf",
+                "report": "chat-topics",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.content[:500])
+        text = self._pdf_text(response.content)
+        self.assertIn("Антонов В.А.", text)
+        self.assertNotIn(user.username, text)
+
+    def test_categories_pdf_replaces_mock_ad_name(self):
+        client = Client()
+        user = self.user_for_role("contact_center_analyst")
+        user.first_name = "Dev"
+        user.last_name = "Role 01"
+        user.save(update_fields=["first_name", "last_name"])
+        client.force_login(user)
+
+        response = client.get(
+            "/api/reports/cc/export/",
+            {
+                "date_from": "2026-08-18",
+                "date_to": "2026-08-24",
+                "format": "pdf",
+                "report": "chat-topics",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.content[:500])
+        text = self._pdf_text(response.content)
+        self.assertIn("Антонов В.А.", text)
+        self.assertNotIn("Role 01", text)
+        self.assertNotIn("Dev", text)
 
     @override_settings(DEBUG=False)
     def test_forbidden_without_reports_permission(self):
@@ -122,13 +212,17 @@ class CcReportsApiTest(TestCase):
 
         catalog = client.get(
             "/api/reports/cc/catalog/",
-            {"report": "chat-period", "date_from": "2026-07-01", "date_to": "2026-07-07"},
+            {"report": "chat-topics", "date_from": "2026-07-01", "date_to": "2026-07-07"},
         )
         self.assertEqual(catalog.status_code, 200)
         catalog_body = catalog.json()
-        self.assertEqual(catalog_body["report"]["id"], "chat-period")
+        self.assertEqual(catalog_body["report"]["id"], "chat-topics")
         self.assertIn("catalog", catalog_body)
-        self.assertTrue(any(item["id"] == "chat-sla" for item in catalog_body["catalog"]))
+        catalog_ids = {item["id"] for item in catalog_body["catalog"]}
+        self.assertIn("chat-topics", catalog_ids)
+        self.assertIn("chat-time-usage", catalog_ids)
+        self.assertNotIn("chat-sla", catalog_ids)
+        self.assertNotIn("usefulness", catalog_ids)
 
         sufler = client.get(
             "/api/reports/cc/catalog/",
@@ -242,3 +336,26 @@ class CcReportsApiTest(TestCase):
         self.assertTrue(
             any("Средняя" in str(item.get("label") or "") for item in rel_body["chart"])
         )
+
+    def test_customer_report_templates_build(self):
+        from reports.cc_catalog import VISIBLE_REPORT_TYPES
+
+        client = Client()
+        client.force_login(self.user_for_role("contact_center_analyst"))
+        report_ids = [item["id"] for item in VISIBLE_REPORT_TYPES]
+        self.assertEqual(len(report_ids), 11)
+        for report_id in report_ids:
+            response = client.get(
+                "/api/reports/cc/catalog/",
+                {
+                    "report": report_id,
+                    "date_from": "2026-08-18",
+                    "date_to": "2026-08-24",
+                },
+            )
+            self.assertEqual(response.status_code, 200, response.content)
+            body = response.json()
+            self.assertEqual(body["report"]["id"], report_id)
+            self.assertIn("columns", body)
+            self.assertIn("rows", body)
+

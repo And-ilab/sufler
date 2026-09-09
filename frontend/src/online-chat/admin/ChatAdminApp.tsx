@@ -2587,7 +2587,7 @@ function BaseMessagesTab({
         await baseMessagesApi.create({
           title: title.trim() || SEND_PHASE_OPTIONS.find((item) => item.value === sendPhase)?.label || '',
           text,
-          channels: selected,
+          channels: allSelected ? [] : selected,
           send_phase: sendPhase,
           delay_seconds: delaySeconds,
           sort_order: Math.max(0, ...items.map((item) => item.sort_order ?? 0)) + 10,
