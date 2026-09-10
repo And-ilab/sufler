@@ -75,6 +75,7 @@ import {
   type SummaryHistoryData,
 } from './ClientSummaryCard'
 import { TopicSelect } from './TopicSelect'
+import { VoiceInputButton } from './components/VoiceInputButton'
 const CANVAS_MOCKUP_VERSION = 'v1.4.74'
 
 export type OperatorPresence =
@@ -3202,6 +3203,7 @@ export function ArmOperatorView({
   const [deleteMessageTarget, setDeleteMessageTarget] = useState<OnlineChatMessage | null>(null);
   const [clientBlocks, setClientBlocks] = useState<{ id: string; phone_normalized: string }[]>([]);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [voiceRecording, setVoiceRecording] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -5552,7 +5554,7 @@ export function ArmOperatorView({
                 </Button>
               </div>
             ) : null}
-            <div style={{ position: "relative", opacity: composerLocked ? 0.55 : 1 }}>
+            <div style={{ position: "relative", opacity: composerLocked ? 0.55 : 1 }} data-chat-composer="true">
               <Stack gap={8}>
                 <div style={{ position: "relative" }}>
                   <TextArea
@@ -5586,6 +5588,7 @@ export function ArmOperatorView({
                     onKeyDown={(event) => {
                       if (event.key === "Enter" && !event.shiftKey) {
                         event.preventDefault();
+                        if (voiceRecording) return;
                         if (!composerLocked) deliverReply("Сообщение отправлено.");
                       }
                     }}
@@ -5642,11 +5645,21 @@ export function ArmOperatorView({
                     </Button>
                     <Button
                       variant="primary"
-                      disabled={composerLocked || (reply.trim().length === 0 && !pendingAttachment)}
+                      disabled={composerLocked || voiceRecording || (reply.trim().length === 0 && !pendingAttachment)}
                       onClick={() => deliverReply("Сообщение отправлено.")}
                     >
                       Отправить
                     </Button>
+                    <VoiceInputButton
+                      disabled={composerLocked}
+                      currentText={reply}
+                      onTranscript={(next) => {
+                        onReplyChange(next);
+                        setComposerNotice(null);
+                      }}
+                      onError={(message) => pushComposerNotice(message, "danger")}
+                      onRecordingChange={setVoiceRecording}
+                    />
                   </Row>
                 </div>
               </Stack>
@@ -5967,7 +5980,7 @@ export function ArmOperatorView({
           flexShrink: 0,
         }}
       >
-        Enter — отправить · Shift+Enter — новая строка · Ctrl+K — шаблоны · F2 — следующий диалог
+        Enter — отправить · Shift+Enter — новая строка · Пробел — голосовой ввод · Ctrl+K — шаблоны · F2 — следующий диалог
       </div>
       ) : null}
 
