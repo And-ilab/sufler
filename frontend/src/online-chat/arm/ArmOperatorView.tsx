@@ -5980,7 +5980,7 @@ export function ArmOperatorView({
           flexShrink: 0,
         }}
       >
-        Enter — отправить · Shift+Enter — новая строка · Пробел — голосовой ввод · Ctrl+K — шаблоны · F2 — следующий диалог
+        Enter — отправить · Shift+Enter — новая строка · Пробел — голосовой ввод · Esc — отменить запись · Ctrl+K — шаблоны · F2 — следующий диалог
       </div>
       ) : null}
 

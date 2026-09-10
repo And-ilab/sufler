@@ -57,9 +57,9 @@ export function VoiceWaveform({
         const x = index * (barWidth + gap)
         const y = midY - barHeight / 2
         const gradient = context.createLinearGradient(x, y, x, y + barHeight)
-        gradient.addColorStop(0, '#ff8a80')
-        gradient.addColorStop(0.5, '#ef5350')
-        gradient.addColorStop(1, '#c62828')
+        gradient.addColorStop(0, '#8EE0B4')
+        gradient.addColorStop(0.5, '#2E9A63')
+        gradient.addColorStop(1, '#007A43')
         context.fillStyle = gradient
         const radius = Math.min(2, barWidth / 2)
         context.beginPath()

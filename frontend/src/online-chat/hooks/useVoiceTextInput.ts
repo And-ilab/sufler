@@ -126,6 +126,15 @@ export interface VoiceTextInputState {
   error: string
 }
 
+const IDLE_STATE: VoiceTextInputState = {
+  phase: 'idle',
+  recording: false,
+  processing: false,
+  elapsedMs: 0,
+  analyser: null,
+  error: '',
+}
+
 export interface UseVoiceTextInputOptions {
   onTranscript: (text: string) => void
   onError?: (message: string) => void
@@ -139,14 +148,7 @@ export function useVoiceTextInput({
   maxDurationMs = DEFAULT_MAX_DURATION_MS,
   enabled = true,
 }: UseVoiceTextInputOptions) {
-  const [state, setState] = useState<VoiceTextInputState>({
-    phase: 'idle',
-    recording: false,
-    processing: false,
-    elapsedMs: 0,
-    analyser: null,
-    error: '',
-  })
+  const [state, setState] = useState<VoiceTextInputState>(IDLE_STATE)
   const recordingRef = useRef(false)
   const processingRef = useRef(false)
   const enabledRef = useRef(enabled)
@@ -156,6 +158,7 @@ export function useVoiceTextInput({
   const onErrorRef = useRef(onError)
   onErrorRef.current = onError
   const startingRef = useRef(false)
+  const cancelledRef = useRef(false)
   const cleanupRef = useRef<(() => void) | null>(null)
   const chunksRef = useRef<Float32Array[]>([])
   const sampleRateRef = useRef(TARGET_RATE)
@@ -243,22 +246,26 @@ export function useVoiceTextInput({
     } finally {
       processingRef.current = false
       startedAtRef.current = 0
-      setState({
-        phase: 'idle',
-        recording: false,
-        processing: false,
-        elapsedMs: 0,
-        analyser: null,
-        error: '',
-      })
+      setState(IDLE_STATE)
     }
   }, [clearTimers, emitError])
 
   stopRef.current = stopRecording
 
+  const cancelRecording = useCallback(() => {
+    if (!recordingRef.current && !startingRef.current) return
+    cancelledRef.current = true
+    recordingRef.current = false
+    startingRef.current = false
+    processingRef.current = false
+    releaseCapture()
+    setState(IDLE_STATE)
+  }, [releaseCapture])
+
   const startRecording = useCallback(async () => {
     if (!enabledRef.current || recordingRef.current || processingRef.current || startingRef.current) return
     startingRef.current = true
+    cancelledRef.current = false
     setState({
       phase: 'processing',
       recording: false,
@@ -269,7 +276,7 @@ export function useVoiceTextInput({
     })
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       startingRef.current = false
-      setState((current) => ({ ...current, phase: 'idle', processing: false }))
+      setState(IDLE_STATE)
       emitError('Браузер не поддерживает запись с микрофона.')
       return
     }
@@ -288,55 +295,40 @@ export function useVoiceTextInput({
       return 'Не удалось включить микрофон. Проверьте устройство и повторите.'
     }
 
-    let micStream: MediaStream
-    try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-    } catch (error: unknown) {
-      startingRef.current = false
-      setState({
-        phase: 'idle',
-        recording: false,
-        processing: false,
-        elapsedMs: 0,
-        analyser: null,
-        error: '',
-      })
-      emitError(micErrorMessage(error))
-      return
-    }
-
-    if (!enabledRef.current) {
-      startingRef.current = false
-      micStream.getTracks().forEach((track) => track.stop())
-      setState({
-        phase: 'idle',
-        recording: false,
-        processing: false,
-        elapsedMs: 0,
-        analyser: null,
-        error: '',
-      })
-      return
-    }
-
     let context: AudioContext
     try {
       context = new AudioContext()
     } catch {
       startingRef.current = false
-      micStream.getTracks().forEach((track) => track.stop())
-      setState({
-        phase: 'idle',
-        recording: false,
-        processing: false,
-        elapsedMs: 0,
-        analyser: null,
-        error: '',
-      })
+      setState(IDLE_STATE)
       emitError('Браузер не поддерживает запись звука.')
       return
     }
-    void context.resume()
+
+    let micStream: MediaStream
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    } catch (error: unknown) {
+      startingRef.current = false
+      void context.close()
+      setState(IDLE_STATE)
+      emitError(micErrorMessage(error))
+      return
+    }
+
+    if (cancelledRef.current || !enabledRef.current) {
+      startingRef.current = false
+      micStream.getTracks().forEach((track) => track.stop())
+      void context.close()
+      setState(IDLE_STATE)
+      return
+    }
+
+    try {
+      await context.resume()
+    } catch {
+      /* capture can still run after a keyboard gesture */
+    }
 
     let source: MediaStreamAudioSourceNode
     let analyser: AnalyserNode
@@ -358,15 +350,20 @@ export function useVoiceTextInput({
       startingRef.current = false
       micStream.getTracks().forEach((track) => track.stop())
       void context.close()
-      setState({
-        phase: 'idle',
-        recording: false,
-        processing: false,
-        elapsedMs: 0,
-        analyser: null,
-        error: '',
-      })
+      setState(IDLE_STATE)
       emitError('Не удалось начать запись звука.')
+      return
+    }
+
+    if (cancelledRef.current) {
+      startingRef.current = false
+      processor.disconnect()
+      source.disconnect()
+      analyser.disconnect()
+      sink.disconnect()
+      micStream.getTracks().forEach((track) => track.stop())
+      void context.close()
+      setState(IDLE_STATE)
       return
     }
 
@@ -483,6 +480,7 @@ export function useVoiceTextInput({
       recordingRef.current = false
       processingRef.current = false
       startingRef.current = false
+      cancelledRef.current = true
       releaseCapture()
     }
   }, [releaseCapture])
@@ -491,6 +489,7 @@ export function useVoiceTextInput({
     ...state,
     startRecording,
     stopRecording,
+    cancelRecording,
     toggleRecording,
   }
 }

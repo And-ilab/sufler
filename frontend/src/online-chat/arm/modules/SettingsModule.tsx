@@ -150,7 +150,7 @@ export function SettingsModule({ t, scheme, onBack }: ArmModuleProps) {
             onChange={(v) => patch('autoExpandSummary', v)}
           />
           <Text style={{ fontSize: 12, color: t.text.secondary, lineHeight: 1.45 }}>
-            Enter отправляет ответ клиенту, Shift+Enter — новая строка. Пробел включает и выключает голосовой ввод. Это поведение зафиксировано для всех ролей.
+            Enter отправляет ответ клиенту, Shift+Enter — новая строка. Пробел включает и выключает голосовой ввод, Escape отменяет запись. Это поведение зафиксировано для всех ролей.
           </Text>
         </Section>
 

@@ -10,10 +10,10 @@
   align-items: center;
   gap: 8px;
   height: 36px;
-  padding: 0 8px 0 10px;
+  padding: 0 6px 0 10px;
   border-radius: 10px;
-  background: color-mix(in srgb, #c62828 12%, var(--arm-fill-secondary));
-  border: 1px solid color-mix(in srgb, #ef5350 45%, var(--arm-stroke-secondary));
+  background: color-mix(in srgb, var(--arm-accent-control, #007A43) 12%, var(--arm-fill-secondary));
+  border: 1px solid color-mix(in srgb, var(--arm-accent-control, #007A43) 40%, var(--arm-stroke-secondary));
   animation: voice-input-fade-in 160ms ease;
 }
 
@@ -34,7 +34,7 @@
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   font-weight: 650;
-  color: #c62828;
+  color: var(--arm-accent-control, #007A43);
   letter-spacing: 0.02em;
 }
 
@@ -74,6 +74,21 @@
 .voice-input__button--processing {
   color: var(--arm-accent-control);
   border-color: var(--arm-accent-control);
+}
+
+.voice-input__button--cancel {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--arm-t-secondary);
+}
+
+.voice-input__button--cancel:hover:not(:disabled) {
+  color: var(--arm-t-primary);
+  background: var(--arm-fill-tertiary);
+  border-color: var(--arm-stroke-secondary);
 }
 
 .voice-input__spinner {
