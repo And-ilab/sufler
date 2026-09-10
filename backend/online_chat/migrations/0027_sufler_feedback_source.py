@@ -10,29 +10,49 @@ def _existing_columns(schema_editor, table: str) -> set[str]:
     return {column.name for column in description}
 
 
+def _sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _add_varchar_column(schema_editor, table: str, column: str, *, max_length: int, default: str):
+    qn = schema_editor.quote_name
+    schema_editor.execute(
+        f"ALTER TABLE {qn(table)} "
+        f"ADD COLUMN {qn(column)} varchar({max_length}) NOT NULL "
+        f"DEFAULT {_sql_literal(default)}"
+    )
+
+
 def add_feedback_source_fields(apps, schema_editor):
     """Add source/call_id only if missing.
 
     Feature-branch stands already applied these columns as
     online_chat.0014_sufler_feedback_source, which was renamed to 0027
     so it no longer collides with 0014_base_messages_bot_offline.
+
+    Use ALTER TABLE instead of schema_editor.add_field so SQLite does not
+    rebuild the table from the pre-migration model (which would drop a
+    column added in the same RunPython step).
     """
     model = apps.get_model("online_chat", "SuflerHintFeedback")
     table = model._meta.db_table
     existing = _existing_columns(schema_editor, table)
     if "source" not in existing:
-        field = models.CharField(
-            blank=True,
-            db_index=True,
-            default="chat",
+        _add_varchar_column(
+            schema_editor,
+            table,
+            "source",
             max_length=32,
+            default="chat",
         )
-        field.set_attributes_from_name("source")
-        schema_editor.add_field(model, field)
     if "call_id" not in existing:
-        field = models.CharField(blank=True, default="", max_length=64)
-        field.set_attributes_from_name("call_id")
-        schema_editor.add_field(model, field)
+        _add_varchar_column(
+            schema_editor,
+            table,
+            "call_id",
+            max_length=64,
+            default="",
+        )
 
 
 class Migration(migrations.Migration):

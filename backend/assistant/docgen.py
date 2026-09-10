@@ -166,7 +166,7 @@ def _ttf_cmap(data: bytes) -> dict[int, int]:
             start_off = end_off + 2 * seg_count + 2
             delta_off = start_off + 2 * seg_count
             range_off = delta_off + 2 * seg_count
-            glyph_off = range_off + 2 * seg_count
+            range_off + 2 * seg_count
             for seg in range(seg_count):
                 end = struct.unpack_from(">H", cmap, end_off + 2 * seg)[0]
                 start = struct.unpack_from(">H", cmap, start_off + 2 * seg)[0]
@@ -790,7 +790,7 @@ def _bpmn_bytes(text: str) -> bytes:
         )
         flows.append(f'<sequenceFlow id="f{index}" sourceRef="{prev}" targetRef="{task_id}"/>')
         prev = task_id
-    flows.append(f'<endEvent id="end" name="Финиш"/>')
+    flows.append('<endEvent id="end" name="Финиш"/>')
     flows.append(f'<sequenceFlow id="fend" sourceRef="{prev}" targetRef="end"/>')
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>'

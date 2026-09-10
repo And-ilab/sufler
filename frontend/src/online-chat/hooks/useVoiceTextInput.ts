@@ -36,6 +36,15 @@ function speechCtor(): SpeechRecognitionCtor | null {
   return holder.SpeechRecognition || holder.webkitSpeechRecognition || null
 }
 
+function rms(samples: Float32Array): number {
+  let sum = 0
+  for (let index = 0; index < samples.length; index += 1) {
+    const value = samples[index]
+    sum += value * value
+  }
+  return Math.sqrt(sum / Math.max(1, samples.length))
+}
+
 function downsample(input: Float32Array, inRate: number, outRate: number): Float32Array {
   if (inRate === outRate) return input
   const ratio = inRate / outRate
@@ -136,7 +145,9 @@ const IDLE_STATE: VoiceTextInputState = {
 }
 
 export interface UseVoiceTextInputOptions {
-  onTranscript: (text: string) => void
+  onTranscript: (sessionText: string) => void
+  onDraft?: (sessionText: string) => void
+  onCancel?: () => void
   onError?: (message: string) => void
   maxDurationMs?: number
   enabled?: boolean
@@ -144,6 +155,8 @@ export interface UseVoiceTextInputOptions {
 
 export function useVoiceTextInput({
   onTranscript,
+  onDraft,
+  onCancel,
   onError,
   maxDurationMs = DEFAULT_MAX_DURATION_MS,
   enabled = true,
@@ -155,14 +168,21 @@ export function useVoiceTextInput({
   enabledRef.current = enabled
   const onTranscriptRef = useRef(onTranscript)
   onTranscriptRef.current = onTranscript
+  const onDraftRef = useRef(onDraft)
+  onDraftRef.current = onDraft
+  const onCancelRef = useRef(onCancel)
+  onCancelRef.current = onCancel
   const onErrorRef = useRef(onError)
   onErrorRef.current = onError
   const startingRef = useRef(false)
   const cancelledRef = useRef(false)
+  const sessionGenRef = useRef(0)
   const cleanupRef = useRef<(() => void) | null>(null)
   const chunksRef = useRef<Float32Array[]>([])
   const sampleRateRef = useRef(TARGET_RATE)
   const browserTextRef = useRef('')
+  const liveSessionRef = useRef('')
+  const voskLiveRef = useRef('')
   const startedAtRef = useRef(0)
   const maxTimerRef = useRef<number | null>(null)
   const tickTimerRef = useRef<number | null>(null)
@@ -189,6 +209,8 @@ export function useVoiceTextInput({
     cleanupRef.current = null
     chunksRef.current = []
     browserTextRef.current = ''
+    liveSessionRef.current = ''
+    voskLiveRef.current = ''
     startedAtRef.current = 0
     clearTimers()
   }, [clearTimers])
@@ -198,15 +220,18 @@ export function useVoiceTextInput({
     recordingRef.current = false
     startingRef.current = false
     processingRef.current = true
+    sessionGenRef.current += 1
     clearTimers()
 
     const chunks = chunksRef.current.slice()
     const sampleRate = sampleRateRef.current
-    const backup = browserTextRef.current.trim()
+    const backup = liveSessionRef.current.trim() || browserTextRef.current.trim()
     cleanupRef.current?.()
     cleanupRef.current = null
     chunksRef.current = []
     browserTextRef.current = ''
+    liveSessionRef.current = ''
+    voskLiveRef.current = ''
 
     setState({
       phase: 'processing',
@@ -255,9 +280,11 @@ export function useVoiceTextInput({
   const cancelRecording = useCallback(() => {
     if (!recordingRef.current && !startingRef.current) return
     cancelledRef.current = true
+    sessionGenRef.current += 1
     recordingRef.current = false
     startingRef.current = false
     processingRef.current = false
+    onCancelRef.current?.()
     releaseCapture()
     setState(IDLE_STATE)
   }, [releaseCapture])
@@ -266,6 +293,8 @@ export function useVoiceTextInput({
     if (!enabledRef.current || recordingRef.current || processingRef.current || startingRef.current) return
     startingRef.current = true
     cancelledRef.current = false
+    const session = sessionGenRef.current + 1
+    sessionGenRef.current = session
     setState({
       phase: 'processing',
       recording: false,
@@ -337,8 +366,8 @@ export function useVoiceTextInput({
     try {
       source = context.createMediaStreamSource(micStream)
       analyser = context.createAnalyser()
-      analyser.fftSize = 256
-      analyser.smoothingTimeConstant = 0.72
+      analyser.fftSize = 1024
+      analyser.smoothingTimeConstant = 0.35
       processor = context.createScriptProcessor(PROCESSOR_BUFFER, 2, 1)
       sink = context.createGain()
       sink.gain.value = 0
@@ -369,15 +398,17 @@ export function useVoiceTextInput({
 
     chunksRef.current = []
     browserTextRef.current = ''
+    liveSessionRef.current = ''
+    voskLiveRef.current = ''
     sampleRateRef.current = context.sampleRate
     recordingRef.current = true
     startedAtRef.current = Date.now()
 
-    processor.onaudioprocess = (event) => {
-      if (!recordingRef.current) return
-      const input = mixMono(event.inputBuffer)
-      sampleRateRef.current = event.inputBuffer.sampleRate
-      chunksRef.current.push(input)
+    const emitDraft = (sessionText: string) => {
+      if (cancelledRef.current || !recordingRef.current) return
+      if (sessionGenRef.current !== session) return
+      liveSessionRef.current = sessionText.trim()
+      onDraftRef.current?.(liveSessionRef.current)
     }
 
     const Recognition = speechCtor()
@@ -388,17 +419,23 @@ export function useVoiceTextInput({
       recognition.continuous = true
       recognition.interimResults = true
       recognition.onresult = (event) => {
+        if (cancelledRef.current || !recordingRef.current || sessionGenRef.current !== session) return
         let finals = ''
-        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        let interim = ''
+        for (let index = 0; index < event.results.length; index += 1) {
           const piece = String(event.results[index]?.[0]?.transcript || '').trim()
-          if (event.results[index].isFinal && piece) finals += `${piece} `
+          if (!piece) continue
+          if (event.results[index].isFinal) {
+            finals = finals ? `${finals} ${piece}` : piece
+          } else {
+            interim = interim ? `${interim} ${piece}` : piece
+          }
         }
-        if (finals.trim()) {
-          browserTextRef.current = `${browserTextRef.current} ${finals}`.trim()
-        }
+        browserTextRef.current = finals
+        emitDraft([finals, interim].filter(Boolean).join(' '))
       }
       recognition.onerror = () => {
-        /* Vosk remains the primary path */
+        /* Vosk remains the fallback path */
       }
       recognition.onend = () => {
         if (!recordingRef.current || !recognition) return
@@ -416,6 +453,49 @@ export function useVoiceTextInput({
       } catch {
         recognition = null
       }
+    }
+
+    const useLiveVosk = !recognition
+    const utteranceChunks: Float32Array[] = []
+    let speaking = false
+    let silenceMs = 0
+
+    processor.onaudioprocess = (event) => {
+      if (!recordingRef.current) return
+      const input = mixMono(event.inputBuffer)
+      sampleRateRef.current = event.inputBuffer.sampleRate
+      chunksRef.current.push(input)
+      if (!useLiveVosk) return
+
+      const level = rms(input)
+      const rate = event.inputBuffer.sampleRate
+      if (level >= 0.02) {
+        speaking = true
+        silenceMs = 0
+        utteranceChunks.push(input)
+        return
+      }
+      if (!speaking) return
+      silenceMs += (input.length / rate) * 1000
+      utteranceChunks.push(input)
+      if (silenceMs < 700) return
+      speaking = false
+      silenceMs = 0
+      const merged = mergeChunks(utteranceChunks)
+      utteranceChunks.length = 0
+      const pcm = downsample(merged, rate, TARGET_RATE)
+      if (pcm.length < TARGET_RATE * MIN_DURATION_SEC) return
+      void transcribeUtterance(encodeWav(pcm, TARGET_RATE), 'operator')
+        .then((text) => {
+          const cleaned = text.trim()
+          if (!cleaned || cancelledRef.current || sessionGenRef.current !== session) return
+          voskLiveRef.current = voskLiveRef.current ? `${voskLiveRef.current} ${cleaned}` : cleaned
+          browserTextRef.current = voskLiveRef.current
+          emitDraft(voskLiveRef.current)
+        })
+        .catch(() => {
+          /* keep waiting for the next phrase */
+        })
     }
 
     cleanupRef.current = () => {
@@ -481,6 +561,7 @@ export function useVoiceTextInput({
       processingRef.current = false
       startingRef.current = false
       cancelledRef.current = true
+      sessionGenRef.current += 1
       releaseCapture()
     }
   }, [releaseCapture])

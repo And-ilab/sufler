@@ -177,7 +177,6 @@ class AssistantChatApiTest(TestCase):
         )
 
     def test_default_token_budget_grows_eighteen_percent(self):
-        from unittest import mock
 
         with mock.patch.dict(os.environ, {"ASSISTANT_MAX_TOKENS": "256"}, clear=False):
             short = _generation_parameters()

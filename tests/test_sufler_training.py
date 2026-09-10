@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 import unittest
@@ -15,8 +14,7 @@ import django  # noqa: E402
 
 django.setup()
 
-from django.contrib.auth import get_user_model  # noqa: E402
-from django.test import Client, TestCase  # noqa: E402
+from django.test import TestCase  # noqa: E402
 
 from core.model_gateway import ModelGateway  # noqa: E402
 from ingest.models import AssistantProductionChunk, CCProductionChunk  # noqa: E402

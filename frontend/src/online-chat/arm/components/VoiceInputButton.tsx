@@ -39,12 +39,8 @@ function isOtherControl(target: EventTarget | null): boolean {
   return tag === 'BUTTON' || tag === 'A' || target.getAttribute('role') === 'button'
 }
 
-function hasOpenDialog(): boolean {
-  return Array.from(document.querySelectorAll('[role="dialog"]')).some((node) => {
-    if (!(node instanceof HTMLElement)) return false
-    const style = window.getComputedStyle(node)
-    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
-  })
+function isCancelKey(event: KeyboardEvent): boolean {
+  return event.code === 'KeyD' || event.key === 'd' || event.key === 'D'
 }
 
 function MicIcon() {
@@ -104,9 +100,29 @@ export function VoiceInputButton({
   currentTextRef.current = currentText
   const disabledRef = useRef(!!disabled)
   disabledRef.current = !!disabled
+  const baseTextRef = useRef(currentText)
+  const allowDraftRef = useRef(false)
+
+  const applySessionText = (sessionText: string) => {
+    if (!allowDraftRef.current) return
+    onTranscript(appendVoiceTranscript(baseTextRef.current, sessionText))
+  }
+
+  const restoreBaseText = () => {
+    allowDraftRef.current = false
+    onTranscript(baseTextRef.current)
+  }
+
+  const captureBaseText = () => {
+    baseTextRef.current = currentTextRef.current
+    allowDraftRef.current = true
+  }
+
   const voice = useVoiceTextInput({
     enabled: !disabled,
-    onTranscript: (text) => onTranscript(appendVoiceTranscript(currentTextRef.current, text)),
+    onDraft: applySessionText,
+    onTranscript: applySessionText,
+    onCancel: restoreBaseText,
     onError,
   })
 
@@ -123,15 +139,20 @@ export function VoiceInputButton({
   const spaceArmedRef = useRef(true)
   const ignoreSpaceUntilRef = useRef(0)
 
+  const beginRecording = () => {
+    captureBaseText()
+    void startRef.current()
+  }
+
   useEffect(() => {
     onRecordingChange?.(voice.recording)
   }, [onRecordingChange, voice.recording])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' || event.code === 'Escape') {
+      if (isCancelKey(event)) {
         if (!recordingRef.current) return
-        if (hasOpenDialog()) return
+        if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
         event.preventDefault()
         cancelRef.current()
         return
@@ -159,7 +180,7 @@ export function VoiceInputButton({
       event.preventDefault()
       spaceArmedRef.current = false
       ignoreSpaceUntilRef.current = Date.now() + SPACE_ARM_MS
-      void startRef.current()
+      beginRecording()
     }
 
     const onKeyUp = (event: KeyboardEvent) => {
@@ -167,10 +188,10 @@ export function VoiceInputButton({
       spaceArmedRef.current = true
     }
 
-    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keydown', onKeyDown, true)
     window.addEventListener('keyup', onKeyUp)
     return () => {
-      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('keyup', onKeyUp)
     }
   }, [])
@@ -190,7 +211,7 @@ export function VoiceInputButton({
           <button
             type="button"
             className="voice-input__button voice-input__button--cancel"
-            title="Отменить голосовой ввод"
+            title="Отменить голосовой ввод (D)"
             aria-label="Отменить голосовой ввод"
             data-testid="voice-input-cancel"
             onClick={() => voice.cancelRecording()}
@@ -212,7 +233,12 @@ export function VoiceInputButton({
         aria-label={title}
         aria-pressed={voice.recording}
         disabled={disabled || voice.processing}
-        onClick={() => voice.toggleRecording()}
+        onClick={() => {
+          if (!voice.recording && !voice.processing) {
+            captureBaseText()
+          }
+          voice.toggleRecording()
+        }}
         data-testid="voice-input-button"
       >
         {voice.processing ? <span className="voice-input__spinner" /> : voice.recording ? <StopIcon /> : <MicIcon />}

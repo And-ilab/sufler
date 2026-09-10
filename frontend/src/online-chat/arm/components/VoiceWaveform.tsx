@@ -23,7 +23,7 @@ export function VoiceWaveform({
     const context = canvas.getContext('2d')
     if (!context) return
 
-    const bins = new Uint8Array(analyser.frequencyBinCount)
+    const samples = new Uint8Array(analyser.fftSize)
     let frame = 0
 
     const draw = () => {
@@ -37,22 +37,23 @@ export function VoiceWaveform({
       context.setTransform(ratio, 0, 0, ratio, 0, 0)
       context.clearRect(0, 0, width, height)
 
-      analyser.getByteFrequencyData(bins)
-      const skip = 2
-      const usable = Math.max(1, bins.length - skip)
+      analyser.getByteTimeDomainData(samples)
       const peaks = peaksRef.current
       const gap = 2
       const barWidth = Math.max(2, (width - gap * (BAR_COUNT - 1)) / BAR_COUNT)
       const midY = height / 2
+      const slice = Math.max(1, Math.floor(samples.length / BAR_COUNT))
 
       for (let index = 0; index < BAR_COUNT; index += 1) {
-        const start = skip + Math.floor((index * usable) / BAR_COUNT)
-        const end = skip + Math.floor(((index + 1) * usable) / BAR_COUNT)
-        let sum = 0
-        for (let bin = start; bin < end; bin += 1) sum += bins[bin] || 0
-        const magnitude = sum / Math.max(1, end - start) / 255
-        const target = 0.08 + magnitude * 0.92
-        peaks[index] += (target - peaks[index]) * 0.35
+        const start = index * slice
+        const end = Math.min(samples.length, start + slice)
+        let peak = 0
+        for (let offset = start; offset < end; offset += 1) {
+          const amplitude = Math.abs(samples[offset] - 128) / 128
+          if (amplitude > peak) peak = amplitude
+        }
+        const target = 0.1 + peak * 0.9
+        peaks[index] += (target - peaks[index]) * 0.45
         const barHeight = Math.max(3, peaks[index] * (height - 4))
         const x = index * (barWidth + gap)
         const y = midY - barHeight / 2
@@ -61,8 +62,8 @@ export function VoiceWaveform({
         gradient.addColorStop(0.5, '#2E9A63')
         gradient.addColorStop(1, '#007A43')
         context.fillStyle = gradient
-        const radius = Math.min(2, barWidth / 2)
         context.beginPath()
+        const radius = Math.min(2, barWidth / 2)
         if (typeof context.roundRect === 'function') {
           context.roundRect(x, y, barWidth, barHeight, radius)
         } else {
