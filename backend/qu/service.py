@@ -27,6 +27,15 @@ _NUMBER_QUERY_RE = re.compile(
     r"скольк|лет\b|дн(ей|я|ь)|месяц|час|срок|возраст|процент",
     re.IGNORECASE,
 )
+_PUBLIC_CONTACT_QUERY_RE = re.compile(
+    r"контакт(?!-центр)|телефон|горяч\w*\s+лин|справочн|головн\w*\s+офис|"
+    r"адрес\w*\s+(?:офис|банк)|юридическ\w*\s+адрес",
+    re.IGNORECASE,
+)
+_PHONE_FACT_RE = re.compile(
+    r"\+375|\b147\b|\b\d{3}\s\d{2}\s\d{2}\s\d{2}\b",
+    re.IGNORECASE,
+)
 # «30 календарных дней», «5 рабочих дней», «дети до 23 лет»
 _AGE_FACT_RE = re.compile(
     r"\b\d{1,3}(?:\s+[а-яё-]{2,}){0,3}\s+"
@@ -101,9 +110,36 @@ def _core(token: str) -> str:
     return token
 
 
+def _fold_ru(text: str) -> str:
+    """Case-fold and treat ё as е so «приём» matches «прием»."""
+    return (text or "").casefold().replace("ё", "е")
+
+
+_QUERY_EXPAND = (
+    (re.compile(r"матпомощ\w*", re.IGNORECASE), " материальная помощь "),
+    (re.compile(r"мат\.?\s*помощ\w*", re.IGNORECASE), " материальная помощь "),
+    (
+        re.compile(r"горяч\w*\s+лин\w*", re.IGNORECASE),
+        " справочный номер 147 обратная связь ",
+    ),
+    (
+        re.compile(r"головн\w*\s+офис\w*", re.IGNORECASE),
+        " юридический адрес минск ",
+    ),
+)
+
+
+def expand_user_query(text: str) -> str:
+    """«матпомощь» → «материальная помощь» so lexical search hits the regulation."""
+    out = text or ""
+    for pattern, repl in _QUERY_EXPAND:
+        out = pattern.sub(repl, out)
+    return out
+
+
 def _tokens(text: str) -> set[str]:
     tokens: set[str] = set()
-    for token in _TOKEN_RE.findall((text or "").casefold()):
+    for token in _TOKEN_RE.findall(_fold_ru(expand_user_query(text))):
         if token in _STOPWORDS:
             continue
         tokens.add(_stem(token))
@@ -131,6 +167,10 @@ def focused_snippet(content: str, query: str, size: int = 800) -> str:
             score += 4.0
         elif wants_number and re.search(r"\d{2,}", window):
             score += 1.0
+        if _PUBLIC_CONTACT_QUERY_RE.search(query or "") and (
+            _PHONE_FACT_RE.search(window) or "147" in window
+        ):
+            score += 5.0
         underscores = window.count("_")
         if underscores >= 8:
             score -= min(5.0, underscores / 6.0)
@@ -347,6 +387,122 @@ def _lexical_score(query: str, title: str, content: str) -> float:
     title_hits = query_tokens & title_tokens
     title_bonus = 0.2 * (len(title_hits) / len(query_tokens))
     return min(1.0, recall + title_bonus)
+
+
+_DISTINCTIVE_MIN = 5
+_TOPICAL_WINDOW = 1000
+_QUERY_FILLERS = frozenset(
+    {
+        "какие",
+        "какой",
+        "какая",
+        "какое",
+        "какому",
+        "каким",
+        "каких",
+        "сколько",
+        "скольки",
+        "почему",
+        "зачем",
+        "куда",
+        "откуда",
+        "можно",
+        "нужно",
+        "необходимо",
+        "скажите",
+        "подскажите",
+    }
+)
+
+
+def _distinctive_terms(query: str) -> list[str]:
+    """Longer query words (prefixes) — «командировке», not «при/для»."""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for token in _TOKEN_RE.findall(_fold_ru(expand_user_query(query))):
+        if (
+            token in _STOPWORDS
+            or token in _QUERY_FILLERS
+            or len(token) < _DISTINCTIVE_MIN
+        ):
+            continue
+        key = token[:6]
+        if key in seen:
+            continue
+        seen.add(key)
+        terms.append(key)
+    return terms
+
+
+def _term_coverage(terms: Sequence[str], text: str) -> float:
+    if not terms:
+        return 0.0
+    blob = _fold_ru(text)
+    return sum(1 for term in terms if term in blob) / len(terms)
+
+
+def _best_window_coverage(
+    terms: Sequence[str],
+    content: str,
+    *,
+    window: int = _TOPICAL_WINDOW,
+) -> float:
+    """Score a local window so a 80k dump cannot harvest every query word."""
+    text = content or ""
+    if not text or not terms:
+        return 0.0
+    if len(text) <= window:
+        return _term_coverage(terms, text)
+    best = 0.0
+    step = max(160, window // 2)
+    last = max(1, len(text) - window + 1)
+    for start in range(0, last, step):
+        best = max(best, _term_coverage(terms, text[start : start + window]))
+        if best >= 0.999:
+            return 1.0
+    return best
+
+
+def _phrase_bonus(query: str, text: str) -> float:
+    words = [
+        token
+        for token in _TOKEN_RE.findall(_fold_ru(query))
+        if token not in _STOPWORDS
+    ]
+    blob = _fold_ru(text)
+    hits = 0
+    for index in range(len(words) - 1):
+        phrase = f"{words[index]} {words[index + 1]}"
+        if phrase in blob:
+            hits += 1
+    return min(0.16, 0.08 * hits)
+
+
+def topical_relevance_score(
+    query: str,
+    title: str,
+    content: str,
+    extra: str = "",
+) -> float:
+    """Prefer a focused passage + file/KB title over a long unrelated dump."""
+    terms = _distinctive_terms(query)
+    heading = f"{title} {extra}"
+    if not terms:
+        return _lexical_score(query, title, content)
+    window_cover = _best_window_coverage(terms, content)
+    rare = [term for term in terms if len(term) >= 6]
+    rare_cover = _best_window_coverage(rare, content) if rare else window_cover
+    heading_cover = _term_coverage(terms, heading)
+    lexical = _lexical_score(query, title, content)
+    phrase = _phrase_bonus(query, f"{heading}\n{content}")
+    return min(
+        1.0,
+        0.40 * window_cover
+        + 0.28 * rare_cover
+        + 0.18 * heading_cover
+        + 0.10 * lexical
+        + phrase,
+    )
 
 
 def _score_lexical(

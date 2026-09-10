@@ -20,6 +20,7 @@ import { QuPreviewScreen } from './QuPreviewScreen'
 import { KbAdminScreen } from './KbAdminScreen'
 import { PromptsAssistantScreen } from './PromptsAssistantScreen'
 import { CapabilitiesScreen } from './CapabilitiesScreen'
+import { AssistantToolsScreen } from './AssistantToolsScreen'
 import { DocTypesScreen } from './DocTypesScreen'
 import { OcrDocumentsPanel } from '../ocr/OcrDocumentsPanel'
 import { CcReportsScreen } from '../reports/CcReportsScreen'
@@ -80,7 +81,7 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
   },
   model_params: {
     title: 'Параметры модели LLM',
-    subtitle: 'Генерация · RAG / индексация · preset краткий/стандарт/развёрнутый',
+    subtitle: 'Генерация · RAG / индексация · preset по умолчанию / подробнее',
     status: 'Черновик',
     cards: [['Температура', '0.35', 'Генерация'], ['Preset', 'Стандарт', '§3.3.2'], ['Контекст', '≥8200', 'read-only']],
   },
@@ -116,9 +117,9 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
   },
   assistant_tools: {
     title: 'Инструменты ассистента',
-    subtitle: 'RPA, шаблоны документов и безопасные SQL-инструменты.',
-    status: 'На проверке ИБ',
-    cards: [['RPA', '7', 'Зарегистрировано'], ['Шаблоны', '14', 'Активные формы'], ['SQL', '3', 'Запросы только на чтение']],
+    subtitle: 'Библиотека бланков банка (Word/PDF/Excel/PPT/BPMN), RPA и SQL.',
+    status: 'Шаблоны UC-ASS-05',
+    cards: [['RPA', '—', 'Следующий этап'], ['Шаблоны', 'CRUD', 'Активные бланки'], ['SQL', '—', 'Только чтение']],
   },
   monitoring: {
     title: 'Мониторинг ассистента',
@@ -180,7 +181,7 @@ const SCREEN_COPY: Record<AdminScreen, ScreenCopy> = {
   },
   doc_types: {
     title: 'Типы документов',
-    subtitle: 'Шаблоны полей, правила OCR и валидация документов.',
+    subtitle: 'Какие поля обязательны после распознавания.',
     status: '8 типов',
     cards: [['Кредитная заявка', '24 поля', 'Активна'], ['Паспорт', '12 полей', 'Активен'], ['Справка о доходах', '16 полей', 'Черновик']],
   },
@@ -512,6 +513,15 @@ export function AiHubAdminApp({
               >
                 <span className="admin-topbar__chat-fab-mark" aria-hidden="true">AI</span>
               </a>
+              <a
+                href="/assistant?ocr=1"
+                className="admin-topbar__chat-fab"
+                data-testid="admin-open-ocr"
+                title="Открыть OCR"
+                aria-label="Открыть OCR на весь экран"
+              >
+                <span className="admin-topbar__chat-fab-mark" aria-hidden="true">OCR</span>
+              </a>
             </div>
           </div>
         </header>
@@ -570,6 +580,8 @@ export function AiHubAdminApp({
             <PromptsAssistantScreen canEdit={canEdit} />
           ) : screen === 'capabilities' ? (
             <CapabilitiesScreen canEdit={canEdit} />
+          ) : screen === 'assistant_tools' ? (
+            <AssistantToolsScreen canEdit={canEdit} />
           ) : screen === 'ocr' ? (
             <div className="admin-ocr-screen" data-testid="admin-ocr-screen">
               <OcrDocumentsPanel />
@@ -673,7 +685,7 @@ export function AiHubAdminApp({
           )}
         </main>
 
-        {screen !== 'qu_admin' && screen !== 'sufler_training' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && screen !== 'doc_types' && screen !== 'ocr' && screen !== 'sufler_stats' && screen !== 'cc_reports' && screen !== 'asr_qa' && screen !== 'scenario_editor' && screen !== 'scenario_test' && screen !== 'scenario_bindings' && (
+        {screen !== 'qu_admin' && screen !== 'sufler_training' && screen !== 'kb_admin' && screen !== 'prompts_assistant' && screen !== 'capabilities' && screen !== 'assistant_tools' && screen !== 'doc_types' && screen !== 'ocr' && screen !== 'sufler_stats' && screen !== 'cc_reports' && screen !== 'asr_qa' && screen !== 'scenario_editor' && screen !== 'scenario_test' && screen !== 'scenario_bindings' && (
         <footer className="admin-save-footer" data-testid="admin-save-footer">
           <span>
             {screen === 'model_params'

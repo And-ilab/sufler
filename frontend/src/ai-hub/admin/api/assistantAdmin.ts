@@ -14,9 +14,31 @@ export interface AssistantKbDocument {
   status: AssistantDocumentStatus
   status_message: string
   chunk_count: number
-  uploaded_at: string
-  indexed_at: string | null
-  uploaded_by: string
+  index_percent?: number
+  uploaded_at?: string
+  indexed_at?: string | null
+  uploaded_by?: string
+  url?: string
+  permalink?: string
+  source_label?: string
+  readonly?: boolean
+}
+
+export type AssistantKbSource = 'manual' | 'website'
+
+export interface AssistantCrawlJob {
+  id: number
+  status: 'queued' | 'crawling' | 'indexing' | 'ready' | 'failed' | string
+  status_message: string
+  pages_ok: number
+  pages_4xx: number
+  pages_5xx: number
+  pages_skipped: number
+  started_at: string | null
+  finished_at: string | null
+  elapsed_seconds: number | null
+  created_by: string
+  created_at: string
 }
 
 export interface AssistantKb {
@@ -30,11 +52,20 @@ export interface AssistantKb {
   status: AssistantKbStatus | string
   status_message?: string
   document_count: number
+  index_percent?: number
   chunk_count?: number
   last_reindexed_at?: string | null
   created_at?: string
   updated_at?: string
   created_by?: string
+  source?: AssistantKbSource | string
+  source_label?: string
+  start_url?: string
+  crawl_depth?: number
+  max_pages?: number
+  ignore_robots?: boolean
+  allowed_hosts?: string[]
+  latest_job?: AssistantCrawlJob | null
   documents?: AssistantKbDocument[]
 }
 
@@ -73,6 +104,24 @@ export interface AssistantCapability {
   deep_link: string
   category: string
   sort_order: number
+}
+
+export type AssistantSkillScope = 'org' | 'user'
+
+export interface AssistantSkill {
+  id: number
+  code: string
+  scope: AssistantSkillScope
+  owner_id: number | null
+  name: string
+  alias: string
+  instruction: string
+  needs_attachment: boolean
+  enabled: boolean
+  department_scope: string
+  updated_by: string
+  created_at: string
+  updated_at: string
 }
 
 interface ApiErrorPayload {
@@ -133,20 +182,30 @@ async function authedFetch(
   init: RequestInit & { csrf?: boolean } = {},
 ): Promise<Response> {
   const { csrf = false, headers: initHeaders, ...rest } = init
-  await ensureDevSession()
-  const headers = new Headers(initHeaders)
-  if (csrf) {
-    const token = await ensureCsrfToken()
-    if (!token) {
-      throw new AssistantAdminApiError('csrf_failed')
+  const send = async () => {
+    await ensureDevSession()
+    const headers = new Headers(initHeaders)
+    if (csrf) {
+      const token = await ensureCsrfToken()
+      if (!token) {
+        throw new AssistantAdminApiError('csrf_failed')
+      }
+      headers.set('X-CSRFToken', token)
     }
-    headers.set('X-CSRFToken', token)
+    return fetch(input, {
+      ...rest,
+      credentials: 'include',
+      headers,
+    })
   }
-  return fetch(input, {
-    ...rest,
-    credentials: 'include',
-    headers,
-  })
+  let response = await send()
+  if (response.status === 401 || response.status === 403) {
+    const { resetDevSessionCache } = await import('../../../auth/ensureDevSession')
+    resetDevSessionCache()
+    await ensureDevSession(true)
+    response = await send()
+  }
+  return response
 }
 
 export async function listAssistantKbs(): Promise<AssistantKb[]> {
@@ -162,6 +221,12 @@ export async function createAssistantKb(payload: {
   slug?: string
   scope?: string
   description?: string
+  source?: AssistantKbSource
+  start_url?: string
+  depth?: number
+  max_pages?: number
+  ignore_robots?: boolean
+  allowed_hosts?: string[]
 }): Promise<AssistantKb> {
   const response = await authedFetch('/api/admin/assistant/kb/', {
     method: 'POST',
@@ -215,6 +280,34 @@ export async function deleteAssistantKbDocument(
       csrf: true,
     },
   )
+  return parseJson(response)
+}
+
+export async function startAssistantKbCrawl(
+  kbId: number,
+  payload: {
+    start_url?: string
+    depth?: number
+    max_pages?: number
+    ignore_robots?: boolean
+    allowed_hosts?: string[]
+  } = {},
+): Promise<{ knowledge_base: AssistantKb; job: AssistantCrawlJob }> {
+  const response = await authedFetch(`/api/admin/assistant/kb/${kbId}/crawl/`, {
+    method: 'POST',
+    csrf: true,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return parseJson(response)
+}
+
+export async function getAssistantKbCrawl(
+  kbId: number,
+): Promise<{ knowledge_base: AssistantKb; job: AssistantCrawlJob | null }> {
+  const response = await authedFetch(`/api/admin/assistant/kb/${kbId}/crawl/`, {
+    method: 'GET',
+  })
   return parseJson(response)
 }
 
@@ -286,6 +379,135 @@ export async function listAssistantCapabilities(): Promise<AssistantCapability[]
   })
   const body = await parseJson<{ items: AssistantCapability[] }>(response)
   return body.items
+}
+
+export type DocTemplateFormat = 'docx' | 'pdf' | 'xlsx' | 'pptx' | 'bpmn' | 'txt' | 'mmd'
+
+export interface DocTemplateField {
+  id: string
+  label: string
+  required?: boolean
+}
+
+export interface AssistantDocTemplate {
+  id: number
+  name: string
+  category: string
+  output_format: DocTemplateFormat
+  format_label: string
+  body: string
+  fields: DocTemplateField[]
+  active: boolean
+  updated_by: string
+  created_at: string
+  updated_at: string
+}
+
+export async function listAssistantDocTemplates(): Promise<AssistantDocTemplate[]> {
+  const response = await authedFetch('/api/admin/assistant/doc-templates/', {
+    method: 'GET',
+  })
+  const body = await parseJson<{ items: AssistantDocTemplate[] }>(response)
+  return body.items
+}
+
+export async function createAssistantDocTemplate(payload: {
+  name: string
+  category?: string
+  output_format?: DocTemplateFormat
+  body: string
+  fields?: DocTemplateField[]
+  active?: boolean
+}): Promise<AssistantDocTemplate> {
+  const response = await authedFetch('/api/admin/assistant/doc-templates/', {
+    method: 'POST',
+    csrf: true,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return parseJson(response)
+}
+
+export async function updateAssistantDocTemplate(
+  id: number,
+  payload: Partial<{
+    name: string
+    category: string
+    output_format: DocTemplateFormat
+    body: string
+    fields: DocTemplateField[]
+    active: boolean
+  }>,
+): Promise<AssistantDocTemplate> {
+  const response = await authedFetch(`/api/admin/assistant/doc-templates/${id}/`, {
+    method: 'PUT',
+    csrf: true,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return parseJson(response)
+}
+
+export async function deleteAssistantDocTemplate(id: number): Promise<void> {
+  const response = await authedFetch(`/api/admin/assistant/doc-templates/${id}/`, {
+    method: 'DELETE',
+    csrf: true,
+  })
+  await parseJson<{ ok: boolean }>(response)
+}
+
+export async function listAssistantSkills(): Promise<AssistantSkill[]> {
+  const response = await authedFetch('/api/admin/assistant/skills/', {
+    method: 'GET',
+  })
+  const body = await parseJson<{ items: AssistantSkill[] }>(response)
+  return body.items
+}
+
+export async function createAssistantSkill(payload: {
+  name: string
+  alias: string
+  instruction: string
+  needs_attachment?: boolean
+  enabled?: boolean
+  department_scope?: string
+  code?: string
+}): Promise<AssistantSkill> {
+  const response = await authedFetch('/api/admin/assistant/skills/', {
+    method: 'POST',
+    csrf: true,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return parseJson(response)
+}
+
+export async function updateAssistantSkill(
+  id: number,
+  payload: Partial<{
+    name: string
+    alias: string
+    instruction: string
+    needs_attachment: boolean
+    enabled: boolean
+    department_scope: string
+  }>,
+): Promise<AssistantSkill> {
+  const response = await authedFetch(`/api/admin/assistant/skills/${id}/`, {
+    method: 'PATCH',
+    csrf: true,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return parseJson(response)
+}
+
+export async function deleteAssistantSkill(id: number): Promise<void> {
+  const response = await authedFetch(`/api/admin/assistant/skills/${id}/`, {
+    method: 'DELETE',
+    csrf: true,
+  })
+  await parseJson<{ ok: boolean }>(response)
 }
 
 export async function setCapabilityEnabled(

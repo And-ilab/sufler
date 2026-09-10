@@ -52,7 +52,9 @@ def _headers_from_operation(operation: dict[str, Any]) -> list[dict[str, str]]:
         {"key": "Accept", "value": "application/json"},
     ]
     if "requestBody" in operation:
-        headers.append({"key": "Content-Type", "value": "application/json"})
+        content = (operation.get("requestBody") or {}).get("content") or {}
+        if "multipart/form-data" not in content:
+            headers.append({"key": "Content-Type", "value": "application/json"})
     for param in operation.get("parameters") or []:
         if param.get("in") == "header":
             headers.append(
@@ -86,10 +88,28 @@ def _body_from_operation(operation: dict[str, Any]) -> dict[str, Any] | None:
     body = operation.get("requestBody")
     if not body:
         return None
-    content = (body.get("content") or {}).get("application/json") or {}
-    example = content.get("example")
+    content = body.get("content") or {}
+    multipart = content.get("multipart/form-data")
+    if multipart:
+        schema = multipart.get("schema") or {}
+        formdata: list[dict[str, Any]] = []
+        for key, spec in (schema.get("properties") or {}).items():
+            is_file = spec.get("format") == "binary"
+            item: dict[str, Any] = {
+                "key": key,
+                "type": "file" if is_file else "text",
+                "description": spec.get("description") or "",
+            }
+            if is_file:
+                item["src"] = ""
+            else:
+                item["value"] = str(spec.get("example") or "")
+            formdata.append(item)
+        return {"mode": "formdata", "formdata": formdata}
+    json_content = content.get("application/json") or {}
+    example = json_content.get("example")
     if example is None:
-        examples = content.get("examples") or {}
+        examples = json_content.get("examples") or {}
         if examples:
             first = next(iter(examples.values()))
             example = first.get("value")

@@ -148,8 +148,8 @@ slots:
     status: approved_dev
 
   ocr:
-    # IV.5 async foundation: Tesseract stub until P1-51 picks prod candidate.
-    dev_model: "stub:tesseract"
+    # Paddle when installed, else Tesseract; every PDF/TIFF page is read.
+    dev_model: "auto:paddle+tesseract"
     prod_candidate: null
     kpi:
       # FR-OCR-18: точность на стандартных сканах не менее 95%.
@@ -161,8 +161,8 @@ slots:
       input_formats: [pdf, jpg, jpeg, png, tiff]
       # FR-OCR-13, FR-OCR-14: обязательные поля извлечены и валидированы.
       required_fields_validation_required: true
-      engine: tesseract
-      gateway_mode: stub
+      engine: paddle+tesseract
+      gateway_mode: auto
     status: evaluating
 
   reranker:

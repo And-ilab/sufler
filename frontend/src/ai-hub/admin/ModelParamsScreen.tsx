@@ -44,9 +44,11 @@ type FieldErrors = Record<string, string>
 
 const PRESET_LABELS: Record<ModelParamsPreset, string> = {
   short: 'Краткий',
-  standard: 'Стандарт',
-  long: 'Развёрнутый',
+  standard: 'По умолчанию',
+  long: 'Подробнее',
 }
+
+const ASSISTANT_PRESETS: ModelParamsPreset[] = ['standard', 'long']
 
 function apiProfile(profile: AdminProfile): ModelParamsProfile {
   return profile === 'cc' ? 'sufler_cc' : 'assistant_bank'
@@ -83,7 +85,9 @@ function editablePayload(data: ModelParamsData): ModelParamsPayload {
       top_p: data.generation.top_p,
       max_tokens: data.generation.max_tokens,
       response_chars_max: data.generation.response_chars_max,
-      preset: data.generation.preset || 'standard',
+      preset: data.generation.preset === 'short' && data.profile === 'assistant_bank'
+        ? 'standard'
+        : (data.generation.preset || 'standard'),
     },
     rag: { ...data.rag },
   }
@@ -110,14 +114,15 @@ function validate(
   ) {
     errors.max_tokens = `Допустимо: 1–${data.constraints.max_tokens.max}`
   }
+  const minChars = data.constraints.response_chars_max.min
   if (
-    form.generation.response_chars_max < 1
+    form.generation.response_chars_max < minChars
     || form.generation.response_chars_max > data.constraints.response_chars_max.max
   ) {
-    errors.response_chars_max = `Максимум ${data.constraints.response_chars_max.max} символов`
+    errors.response_chars_max = `Допустимо: ${minChars}–${data.constraints.response_chars_max.max} символов`
   }
   if (!['short', 'standard', 'long'].includes(form.generation.preset)) {
-    errors.preset = 'Выберите preset'
+    errors.preset = 'Выберите режим'
   }
   if (form.rag.chunk_size_tokens <= 0) {
     errors.chunk_size_tokens = 'Размер фрагмента должен быть положительным'
@@ -397,38 +402,80 @@ export const ModelParamsScreen = forwardRef<
             />
             {errors.temperature && <small role="alert">{errors.temperature}</small>}
           </label>
-          <label className={errors.response_chars_max ? 'model-params__row model-params__row--error' : 'model-params__row'}>
+          <label className={errors.response_chars_max ? 'model-params__row model-params__row--max model-params__row--error' : 'model-params__row model-params__row--max'}>
             <span>Max ответа</span>
-            <input
-              type="number"
-              aria-label="Max ответа"
-              min={data.constraints.response_chars_max.min}
-              max={data.constraints.response_chars_max.max}
-              step={1}
-              value={form.generation.response_chars_max}
-              disabled={!canEdit}
-              data-testid="model-params-max-response"
-              onChange={(event) => setGeneration('response_chars_max', Number(event.target.value))}
-            />
+            <div className="model-params__max-field">
+              <input
+                type="number"
+                aria-label="Max ответа"
+                min={data.constraints.response_chars_max.min}
+                max={data.constraints.response_chars_max.max}
+                step={1}
+                value={form.generation.response_chars_max}
+                disabled={!canEdit}
+                data-testid="model-params-max-response"
+                onChange={(event) => setGeneration('response_chars_max', Number(event.target.value))}
+              />
+              <button
+                type="button"
+                className="model-params__default-btn"
+                disabled={!canEdit}
+                data-testid="model-params-max-default"
+                onClick={() => {
+                  const fallback = (
+                    data.presets?.standard?.values?.response_chars_max
+                    ?? data.platform_defaults?.response_chars_max
+                    ?? 1200
+                  )
+                  setGeneration('response_chars_max', fallback)
+                }}
+              >
+                По умолчанию
+              </button>
+            </div>
             {errors.response_chars_max && <small role="alert">{errors.response_chars_max}</small>}
           </label>
-          <label className={errors.preset ? 'model-params__row model-params__row--error' : 'model-params__row'}>
+          <div className={errors.preset ? 'model-params__row model-params__row--preset model-params__row--error' : 'model-params__row model-params__row--preset'}>
             <span>Preset</span>
-            <select
-              aria-label="Preset параметров"
-              value={form.generation.preset}
-              disabled={!canEdit}
-              data-testid="model-params-preset"
-              onChange={(event) => applyPreset(event.target.value as ModelParamsPreset)}
-            >
-              {(Object.keys(PRESET_LABELS) as ModelParamsPreset[]).map((key) => (
-                <option key={key} value={key}>
-                  {data.presets?.[key]?.label ?? PRESET_LABELS[key]}
-                </option>
-              ))}
-            </select>
+            {isCc ? (
+              <select
+                aria-label="Preset параметров"
+                value={form.generation.preset}
+                disabled={!canEdit}
+                data-testid="model-params-preset"
+                onChange={(event) => applyPreset(event.target.value as ModelParamsPreset)}
+              >
+                {(Object.keys(PRESET_LABELS) as ModelParamsPreset[]).map((key) => (
+                  <option key={key} value={key}>
+                    {data.presets?.[key]?.label ?? PRESET_LABELS[key]}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="model-params__preset" role="group" aria-label="Preset параметров">
+                {ASSISTANT_PRESETS.map((key) => {
+                  const active = (
+                    key === 'standard'
+                      ? form.generation.preset !== 'long'
+                      : form.generation.preset === 'long'
+                  )
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className={active ? 'is-active' : undefined}
+                      disabled={!canEdit}
+                      data-testid={`model-params-preset-${key}`}
+                      onClick={() => setGeneration('preset', key)}
+                    >
+                      {data.presets?.[key]?.label ?? PRESET_LABELS[key]}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
             {errors.preset && <small role="alert">{errors.preset}</small>}
-          </label>
+          </div>
         </section>
 
         <section className="model-params__column" aria-label="RAG / индексация">

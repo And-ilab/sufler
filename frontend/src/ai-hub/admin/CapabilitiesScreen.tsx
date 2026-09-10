@@ -9,13 +9,18 @@ import {
   AssistantAdminApiError,
   TASK_EVENT_TRIGGERS,
   createAssistantPrompt,
+  createAssistantSkill,
   deleteAssistantPrompt,
+  deleteAssistantSkill,
   listAssistantCapabilities,
   listAssistantPrompts,
+  listAssistantSkills,
   setCapabilityEnabled,
   updateAssistantPrompt,
+  updateAssistantSkill,
   type AssistantCapability,
   type AssistantPrompt,
+  type AssistantSkill,
   type PromptStatus,
 } from './api/assistantAdmin'
 import './AssistantAdminScreens.css'
@@ -375,6 +380,305 @@ function SkillTaskPromptsPanel({ canEdit }: { canEdit: boolean }) {
   )
 }
 
+function OrgSkillsPanel({ canEdit }: { canEdit: boolean }) {
+  const [items, setItems] = useState<AssistantSkill[]>([])
+  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [name, setName] = useState('')
+  const [alias, setAlias] = useState('')
+  const [instruction, setInstruction] = useState('')
+  const [departmentScope, setDepartmentScope] = useState('')
+  const [needsAttachment, setNeedsAttachment] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  const selected = items.find((item) => item.id === selectedId) ?? null
+
+  const applySelected = (item: AssistantSkill | null) => {
+    if (!item) {
+      setSelectedId(null)
+      setName('')
+      setAlias('')
+      setInstruction('')
+      setDepartmentScope('')
+      setNeedsAttachment(false)
+      return
+    }
+    setSelectedId(item.id)
+    setName(item.name)
+    setAlias(item.alias)
+    setInstruction(item.instruction)
+    setDepartmentScope(item.department_scope)
+    setNeedsAttachment(item.needs_attachment)
+  }
+
+  const load = useCallback(async (preferId?: number | null) => {
+    setLoading(true)
+    setError('')
+    try {
+      await ensureDevSession()
+      const rows = await listAssistantSkills()
+      setItems(rows)
+      const target =
+        preferId != null
+          ? rows.find((item) => item.id === preferId)
+          : rows.find((item) => item.id === selectedId) ?? rows[0] ?? null
+      applySelected(target ?? null)
+    } catch (err) {
+      setItems([])
+      applySelected(null)
+      setError(formatAdminError(err, 'Ошибка загрузки навыков'))
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedId])
+
+  useEffect(() => {
+    void load()
+    // initial catalog load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const run = async (action: () => Promise<void>, ok: string) => {
+    if (!canEdit || busy) return
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      await action()
+      setNotice(ok)
+    } catch (err) {
+      setError(formatAdminError(err, 'Ошибка сохранения'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const save = () => {
+    if (!selected) return
+    void run(async () => {
+      const updated = await updateAssistantSkill(selected.id, {
+        name,
+        alias,
+        instruction,
+        needs_attachment: needsAttachment,
+        department_scope: departmentScope,
+      })
+      setItems((current) =>
+        current.map((row) => (row.id === updated.id ? updated : row)),
+      )
+      applySelected(updated)
+    }, 'Навык сохранён')
+  }
+
+  const toggleEnabled = () => {
+    if (!selected) return
+    void run(async () => {
+      const updated = await updateAssistantSkill(selected.id, {
+        enabled: !selected.enabled,
+      })
+      setItems((current) =>
+        current.map((row) => (row.id === updated.id ? updated : row)),
+      )
+      applySelected(updated)
+    }, selected.enabled ? 'Навык выключен' : 'Навык включён')
+  }
+
+  const createSkill = () => {
+    void run(async () => {
+      const created = await createAssistantSkill({
+        name: 'Новый навык',
+        alias: `navyk-${Date.now().toString(36)}`,
+        instruction: 'Опишите, как модель должна отвечать.',
+      })
+      setItems((current) => [...current, created])
+      applySelected(created)
+    }, 'Навык создан')
+  }
+
+  const remove = () => {
+    if (!selected) return
+    void run(async () => {
+      await deleteAssistantSkill(selected.id)
+      const next = items.filter((item) => item.id !== selected.id)
+      setItems(next)
+      applySelected(next[0] ?? null)
+    }, 'Навык удалён')
+  }
+
+  if (loading) {
+    return <Card className="kb-admin-loading">Загрузка навыков…</Card>
+  }
+
+  return (
+    <div className="asst-admin-task-skills" data-testid="org-skills-panel">
+      <h2>Навыки</h2>
+      <p className="asst-admin-note">
+        Слой «Банк»: слэш-алиас и промпт. Выключенный навык не виден в /.
+      </p>
+      {error && (
+        <Card className="kb-admin__error" role="alert">
+          <div className="kb-admin__error-main">
+            <strong>Уведомление</strong>
+            <span>{error}</span>
+          </div>
+          <Button type="button" variant="ghost" onClick={() => void load()}>
+            Обновить
+          </Button>
+        </Card>
+      )}
+      {notice && !error && (
+        <p className="asst-admin-ok" role="status">{notice}</p>
+      )}
+
+      <div className="asst-admin-task-skills__layout">
+        <aside className="asst-admin-library" data-testid="org-skill-list">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!canEdit || busy}
+            onClick={() => void createSkill()}
+            data-testid="org-skill-add"
+          >
+            + Добавить
+          </Button>
+          <ul>
+            {items.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className={item.id === selectedId ? 'is-active' : ''}
+                  onClick={() => applySelected(item)}
+                  data-testid={`org-skill-${item.code || item.id}`}
+                >
+                  <span className="asst-admin-task-skills__row">
+                    <span>{item.name}</span>
+                    <StatusBadge status={item.enabled ? 'success' : 'neutral'}>
+                      {item.enabled ? 'Вкл' : 'Выкл'}
+                    </StatusBadge>
+                  </span>
+                  <small>/{item.alias}{item.code ? ` · ${item.code}` : ''}</small>
+                </button>
+              </li>
+            ))}
+            {!items.length && (
+              <li className="asst-admin-note">Нет навыков банка.</li>
+            )}
+          </ul>
+        </aside>
+
+        <div className="asst-admin-editor" data-testid="org-skill-editor">
+          {!selected ? (
+            <p className="app-muted">Выберите навык слева или создайте новый.</p>
+          ) : (
+            <>
+              <header>
+                <StatusBadge status={selected.enabled ? 'success' : 'neutral'}>
+                  {selected.enabled ? 'Включён' : 'Выключен'}
+                </StatusBadge>
+                <div className="asst-admin-actions">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!canEdit || busy}
+                    onClick={() => void toggleEnabled()}
+                    data-testid="org-skill-toggle"
+                  >
+                    {selected.enabled ? 'Выключить' : 'Включить'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={!canEdit || busy}
+                    onClick={() => void save()}
+                    data-testid="org-skill-save"
+                  >
+                    Сохранить
+                  </Button>
+                  {!selected.code ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={!canEdit || busy}
+                      onClick={() => void remove()}
+                      data-testid="org-skill-delete"
+                    >
+                      Удалить
+                    </Button>
+                  ) : null}
+                </div>
+              </header>
+
+              <div className="asst-admin-form">
+                <label>
+                  Название
+                  <input
+                    value={name}
+                    disabled={!canEdit || busy}
+                    onChange={(event) => setName(event.target.value)}
+                    data-testid="org-skill-name"
+                  />
+                </label>
+                <div className="asst-admin-form__row">
+                  <label>
+                    Алиас
+                    <input
+                      value={alias}
+                      disabled={!canEdit || busy}
+                      onChange={(event) => setAlias(event.target.value)}
+                      data-testid="org-skill-alias"
+                    />
+                  </label>
+                  <label>
+                    Подразделение (AD)
+                    <input
+                      value={departmentScope}
+                      disabled={!canEdit || busy}
+                      onChange={(event) => setDepartmentScope(event.target.value)}
+                      placeholder="необязательно"
+                      data-testid="org-skill-dept"
+                    />
+                  </label>
+                </div>
+                <label className="asst-admin-form__check">
+                  <input
+                    type="checkbox"
+                    checked={needsAttachment}
+                    disabled={!canEdit || busy}
+                    onChange={(event) => setNeedsAttachment(event.target.checked)}
+                    data-testid="org-skill-attach"
+                  />
+                  Желательно вложение
+                </label>
+                <label>
+                  Текст промпта
+                  <textarea
+                    rows={8}
+                    value={instruction}
+                    disabled={!canEdit || busy}
+                    onChange={(event) => setInstruction(event.target.value)}
+                    data-testid="org-skill-instruction"
+                  />
+                </label>
+              </div>
+
+              <div className="asst-admin-preview asst-admin-task-skills__preview">
+                <header>
+                  <strong>Превью промпта</strong>
+                </header>
+                <Card data-testid="org-skill-preview">
+                  <p>{instruction || '—'}</p>
+                </Card>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) {
   const [items, setItems] = useState<AssistantCapability[]>([])
   const [busyCode, setBusyCode] = useState('')
@@ -447,6 +751,8 @@ export function CapabilitiesScreen({ canEdit = true }: CapabilitiesScreenProps) 
         Навыки и инструменты ассистента · отдельно от skill-групп чата.
         Выключенный capability не показывается в панели ассистента.
       </p>
+
+      <OrgSkillsPanel canEdit={canEdit} />
 
       {error && (
         <Card className="kb-admin__error" role="alert">

@@ -6,7 +6,7 @@ from typing import Any
 
 
 def build_openapi_v1() -> dict[str, Any]:
-    """Curated OpenAPI covering assistant, sufler, and ingest (knowledge) APIs."""
+    """Curated OpenAPI covering assistant, sufler, ingest, and OCR APIs."""
     return {
         "openapi": "3.0.3",
         "info": {
@@ -14,8 +14,9 @@ def build_openapi_v1() -> dict[str, Any]:
             "description": (
                 "Integrator-facing OpenAPI for приёмка and Postman. "
                 "Covers `/api/v1/assistant` (III.7 / III.10.2), "
-                "`/api/v1/sufler` (FR-CC-03 / II.3.5.5), and "
-                "`/api/v1/knowledge` (SUZ ingest INT-01…09)."
+                "`/api/v1/sufler` (FR-CC-03 / II.3.5.5), "
+                "`/api/v1/knowledge` (SUZ ingest INT-01…09), and "
+                "`/api/v1/ocr` (P6-01a, §6.1.4 / §6.1.17)."
             ),
             "version": "1.0.0",
             "contact": {"name": "ООО «ГС Ритейл» · договор № 14-03/2026"},
@@ -28,11 +29,13 @@ def build_openapi_v1() -> dict[str, Any]:
             {"name": "assistant", "description": "ИИ-ассистент chat + FR-RPT-ASS"},
             {"name": "sufler", "description": "Суфлёр suggest + internal KC test-dialog"},
             {"name": "ingest", "description": "СУЗ Model B webhook + INT-09 reconcile"},
+            {"name": "ocr", "description": "OCR jobs: upload → poll → fields JSON"},
         ],
         "paths": {
             **_assistant_paths(),
             **_sufler_paths(),
             **_ingest_paths(),
+            **_ocr_paths(),
         },
         "components": {
             "securitySchemes": {
@@ -64,6 +67,9 @@ def _error_responses(*codes: int) -> dict[str, Any]:
         400: "Validation error",
         401: "Authentication required / HMAC failed",
         403: "Missing RBAC permission",
+        404: "Not found",
+        409: "OCR result not ready",
+        422: "OCR processing error",
         503: "Temporary / misconfigured",
     }
     return {
@@ -399,6 +405,155 @@ def _sufler_paths() -> dict[str, Any]:
     }
 
 
+def _ocr_paths() -> dict[str, Any]:
+    session_security = [{"SessionCookie": []}, {"BearerAuth": []}]
+    job_id_param = {
+        "name": "id",
+        "in": "path",
+        "required": True,
+        "schema": {"type": "string"},
+        "description": "OCR job_id",
+    }
+    return {
+        "/api/v1/ocr/jobs/": {
+            "post": {
+                "tags": ["ocr"],
+                "operationId": "ocrCreateJob",
+                "summary": "Enqueue OCR job (multipart)",
+                "description": (
+                    "Upload a scan (pdf/jpg/png/tiff). Pass `doc_type` with "
+                    "`mode=template`, or `mode=ml` for auto-detect. "
+                    "Requires `ocr.use`. Async only — poll GET /jobs/{id}/."
+                ),
+                "security": session_security,
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["file"],
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary",
+                                    },
+                                    "doc_type": {
+                                        "type": "string",
+                                        "description": "Document type / template id",
+                                        "example": "passport",
+                                    },
+                                    "document_type": {
+                                        "type": "string",
+                                        "description": "Alias for doc_type",
+                                    },
+                                    "mode": {
+                                        "type": "string",
+                                        "enum": ["template", "ml"],
+                                        "description": (
+                                            "template requires doc_type; "
+                                            "ml auto-detects type"
+                                        ),
+                                    },
+                                },
+                            }
+                        }
+                    },
+                },
+                "responses": {
+                    "202": {
+                        "description": "Job queued",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/OcrJobAccepted"
+                                }
+                            }
+                        },
+                    },
+                    **_error_responses(400, 401, 403),
+                },
+            }
+        },
+        "/api/v1/ocr/jobs/{id}/": {
+            "get": {
+                "tags": ["ocr"],
+                "operationId": "ocrGetJob",
+                "summary": "OCR job status",
+                "description": "status, progress (0–100), error. Requires `ocr.use`.",
+                "security": session_security,
+                "parameters": [job_id_param],
+                "responses": {
+                    "200": {
+                        "description": "Job metadata",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/OcrJobStatus"
+                                }
+                            }
+                        },
+                    },
+                    **_error_responses(401, 403, 404),
+                },
+            }
+        },
+        "/api/v1/ocr/jobs/{id}/result/": {
+            "get": {
+                "tags": ["ocr"],
+                "operationId": "ocrGetJobResult",
+                "summary": "OCR fields JSON",
+                "description": (
+                    "Structured fields with confidence. "
+                    "409 if the job is not completed."
+                ),
+                "security": session_security,
+                "parameters": [job_id_param],
+                "responses": {
+                    "200": {
+                        "description": "Fields + confidence",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/OcrJobResult"
+                                }
+                            }
+                        },
+                    },
+                    **_error_responses(401, 403, 404, 409, 422),
+                },
+            }
+        },
+        "/api/v1/ocr/jobs/{id}/approve/": {
+            "post": {
+                "tags": ["ocr"],
+                "operationId": "ocrApproveJob",
+                "summary": "Approve / edit OCR fields (optional stub)",
+                "description": (
+                    "Optional HITL confirm. Full HITL UI is P6-02. "
+                    "Requires `ocr.use`."
+                ),
+                "security": session_security,
+                "parameters": [job_id_param],
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/OcrApproveRequest"
+                            }
+                        }
+                    },
+                },
+                "responses": {
+                    "200": {"description": "Approved"},
+                    **_error_responses(400, 401, 403, 404, 422),
+                },
+            }
+        },
+    }
+
+
 def _ingest_paths() -> dict[str, Any]:
     return {
         "/api/v1/knowledge/events": {
@@ -620,6 +775,63 @@ def _schemas() -> dict[str, Any]:
                 "ingest_mode": {"type": "string"},
             },
         },
+        "OcrJobAccepted": {
+            "type": "object",
+            "required": ["job_id", "status"],
+            "properties": {
+                "job_id": {"type": "string"},
+                "status": {
+                    "type": "string",
+                    "example": "queued",
+                },
+                "progress": {"type": "integer", "minimum": 0, "maximum": 100},
+                "document_type": {"type": "string", "nullable": True},
+                "mode": {"type": "string", "enum": ["template", "ml"]},
+                "message": {"type": "string"},
+            },
+        },
+        "OcrJobStatus": {
+            "type": "object",
+            "required": ["job_id", "status", "progress"],
+            "properties": {
+                "job_id": {"type": "string"},
+                "status": {"type": "string"},
+                "progress": {"type": "integer", "minimum": 0, "maximum": 100},
+                "error": {"type": "string", "nullable": True},
+                "error_message": {"type": "string", "nullable": True},
+                "document_type": {"type": "string", "nullable": True},
+                "filename": {"type": "string"},
+            },
+        },
+        "OcrFieldValue": {
+            "type": "object",
+            "properties": {
+                "value": {"type": "string"},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            },
+        },
+        "OcrJobResult": {
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string"},
+                "document_type": {"type": "string"},
+                "fields": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/components/schemas/OcrFieldValue"
+                    },
+                },
+                "validation_status": {"type": "string"},
+            },
+        },
+        "OcrApproveRequest": {
+            "type": "object",
+            "required": ["fields"],
+            "properties": {
+                "document_type": {"type": "string"},
+                "fields": {"type": "object"},
+            },
+        },
     }
 
 
@@ -627,27 +839,35 @@ def merge_into_spectacular_schema(
     result: dict[str, Any],
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """drf-spectacular POSTPROCESSING_HOOK: inject curated v1 paths."""
+    """Swagger shows OCR only; other modules stay in the curated export."""
     curated = build_openapi_v1()
-    paths = result.setdefault("paths", {})
-    paths.update(curated["paths"])
+    ocr_paths = {
+        path: item
+        for path, item in curated["paths"].items()
+        if path.startswith("/api/v1/ocr")
+    }
+    result["paths"] = ocr_paths
+    result["tags"] = [tag for tag in curated["tags"] if tag.get("name") == "ocr"]
 
-    components = result.setdefault("components", {})
-    schemas = components.setdefault("schemas", {})
-    schemas.update(curated["components"]["schemas"])
-    security = components.setdefault("securitySchemes", {})
-    security.update(curated["components"]["securitySchemes"])
-
-    existing_tags = {tag.get("name") for tag in result.get("tags") or []}
-    tags = list(result.get("tags") or [])
-    for tag in curated["tags"]:
-        if tag["name"] not in existing_tags:
-            tags.append(tag)
-    result["tags"] = tags
+    curated_schemas = curated["components"]["schemas"]
+    result["components"] = {
+        "securitySchemes": {
+            key: value
+            for key, value in curated["components"]["securitySchemes"].items()
+            if key in {"SessionCookie", "BearerAuth"}
+        },
+        "schemas": {
+            key: value
+            for key, value in curated_schemas.items()
+            if key == "Error" or key.startswith("Ocr")
+        },
+    }
 
     info = result.setdefault("info", {})
-    info.setdefault("title", curated["info"]["title"])
-    if not info.get("description"):
-        info["description"] = curated["info"]["description"]
+    info["title"] = "Sufler OCR API"
+    info["description"] = (
+        "OCR для интеграторов: загрузка → статус → поля JSON → утверждение. "
+        "Остальные модули временно скрыты."
+    )
     info.setdefault("version", curated["info"]["version"])
     return result

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Sequence
+from urllib.parse import unquote, urlparse
 
 from django.db import connection
 from django.db.models import QuerySet
@@ -17,11 +19,16 @@ from ingest.models import AssistantProductionChunk, CCProductionChunk
 from qu.models import QuReferenceExample
 from qu.service import (
     EXAMPLE_MATCH_FLOOR,
+    _PHONE_FACT_RE,
+    _PUBLIC_CONTACT_QUERY_RE,
+    _distinctive_terms,
     _lexical_score,
     boost_chunks_with_examples,
+    expand_user_query,
     extractive_answer,
     focused_snippet,
     matching_training_examples,
+    topical_relevance_score,
     training_example_score,
 )
 
@@ -32,6 +39,24 @@ MAX_LIMIT = 8
 SNIPPET_PREVIEW_CHARS = 1200
 # Header-only first chunk often drops the answering clause («до 23 лет»).
 MAX_CHUNKS_PER_ARTICLE = 3
+_PATH_TOKEN_RE = re.compile(r"[a-zа-яё0-9]{3,}", re.IGNORECASE)
+_HOME_PATHS = frozenset({"", "ru", "en", "by", "index", "index.html", "home"})
+_URL_ALIASES = (
+    ("контакт", ("contact", "kontact", "kontakty", "hotline")),
+    ("телефон", ("phone", "tel", "hotline", "call")),
+    ("адрес", ("address", "office", "ofis")),
+    ("офис", ("office", "ofis", "head")),
+)
+_HR_CONTACT_CENTER_RE = re.compile(
+    r"премирован|работник\w*\s+контакт|контакт-центр\w*\s+работ|"
+    r"оплат\w+\s+труд\w*\s+контакт|дистанционн\w+\s+взаимодейств",
+    re.IGNORECASE,
+)
+_CONTACT_LABEL_RE = re.compile(
+    r"справочн\w*\s+номер|единый справочн|обратная связь|"
+    r"юридическ\w+\s+адрес|головн\w+\s+офис",
+    re.IGNORECASE,
+)
 
 
 def _joined_article_content(article_id: int) -> str:
@@ -133,6 +158,166 @@ def _split_slugs(slugs: Sequence[str]) -> tuple[list[str], bool, list[int]]:
     return assistant_slugs, include_suz, cc_article_ids
 
 
+def _kb_display_names(slugs: Sequence[str]) -> dict[str, str]:
+    """Human KB titles for topical ranking (file name alone is often Latin)."""
+    from hub.models import AssistantKnowledgeBase
+
+    names: dict[str, str] = {}
+    wanted = [slug for slug in slugs if slug]
+    if not wanted:
+        return names
+    for slug, name in AssistantKnowledgeBase.objects.filter(slug__in=wanted).values_list(
+        "slug", "name"
+    ):
+        names[str(slug)] = str(name or "")
+    for slug, name in ContactCenterKnowledgeBase.objects.filter(slug__in=wanted).values_list(
+        "slug", "name"
+    ):
+        names.setdefault(str(slug), str(name or ""))
+    return names
+
+
+def _rerank_scored_chunks(
+    query: str,
+    scored_chunks: list[tuple[float, Any, str]],
+) -> list[tuple[float, Any, str]]:
+    """Down-rank long off-topic dumps; boost the file that actually answers."""
+    if not scored_chunks:
+        return scored_chunks
+    if len(_distinctive_terms(query)) < 2:
+        return scored_chunks
+    labels = _kb_display_names({slug for _score, _chunk, slug in scored_chunks})
+    rescored: list[tuple[float, Any, str]] = []
+    for score, chunk, slug in scored_chunks:
+        topical = topical_relevance_score(
+            query,
+            chunk.title or "",
+            chunk.content or "",
+            extra=labels.get(slug, ""),
+        )
+        original = float(score)
+        mixed = min(1.0, 0.74 * topical + 0.26 * original)
+        # Keep ANN/lexical only when the passage is clearly on-topic.
+        # Otherwise a long credit dump with 80% stem-recall stays on top.
+        if topical >= 0.55:
+            blended = max(original, mixed)
+        elif topical >= 0.42:
+            blended = mixed
+        else:
+            blended = min(original, mixed)
+        blended = max(
+            0.0,
+            min(
+                1.0,
+                blended
+                + contact_fact_signal(
+                    query, chunk.title or "", chunk.content or ""
+                ),
+            ),
+        )
+        rescored.append((blended, chunk, slug))
+    rescored.sort(
+        key=lambda item: (
+            -item[0],
+            item[2],
+            item[1].article_id,
+            item[1].chunk_index,
+        )
+    )
+    return rescored
+
+
+_CASE_MARKERS = (
+    "оздоровлен",
+    "брак",
+    "рожден",
+    "усыновл",
+    "смерт",
+    "пенси",
+    "увечь",
+    "найм",
+    "отпуск",
+    "пособ",
+    "заявлен",
+    "документ",
+)
+
+
+def _content_only_score(query: str, content: str) -> float:
+    """Ignore the file name so the cover page does not beat the answering chapter."""
+    base = topical_relevance_score(query, "", content or "")
+    blob = (content or "").casefold()
+    diversity = sum(1 for marker in _CASE_MARKERS if marker in blob)
+    return base + min(0.18, 0.03 * diversity)
+
+
+def _article_chunks_by_content(
+    query: str,
+    slug: str,
+    article_id: int,
+    quota: int,
+    fallback: list[tuple[float, Any, str]],
+) -> list[tuple[float, Any, str]]:
+    """After the right file is chosen, pick passages that answer the question."""
+    assistant = list(
+        AssistantProductionChunk.objects.filter(
+            is_active=True,
+            article_id=article_id,
+            kb_slug=slug,
+        ).order_by("chunk_index")
+    )
+    if not assistant:
+        assistant = list(
+            CCProductionChunk.objects.filter(
+                is_active=True,
+                article_id=article_id,
+            ).order_by("chunk_index")
+        )
+    if not assistant:
+        return fallback[:quota]
+    scored = [
+        (_content_only_score(query, chunk.content or ""), chunk, slug)
+        for chunk in assistant
+    ]
+    scored.sort(key=lambda row: (-row[0], row[1].chunk_index))
+    if scored[0][0] < 0.12:
+        return fallback[:quota]
+    return scored[:quota]
+
+
+def _select_ranked_chunks(
+    scored_chunks: list[tuple[float, Any, str]],
+    *,
+    limit: int,
+    query: str = "",
+) -> list[tuple[float, Any, str]]:
+    """Best article first (answering chunks), then one chunk from each next file."""
+    by_article: dict[tuple[str, int], list[tuple[float, Any, str]]] = {}
+    for item in scored_chunks:
+        _score, chunk, slug = item
+        key = (slug, int(chunk.article_id))
+        by_article.setdefault(key, []).append(item)
+    for items in by_article.values():
+        items.sort(key=lambda row: (-row[0], row[1].chunk_index))
+    article_order = sorted(
+        by_article,
+        key=lambda key: (-by_article[key][0][0], key[0], key[1]),
+    )
+    picked: list[tuple[float, Any, str]] = []
+    for index, key in enumerate(article_order):
+        quota = MAX_CHUNKS_PER_ARTICLE if index == 0 else 1
+        chosen = by_article[key]
+        if index == 0 and query.strip() and quota > 1:
+            chosen = _article_chunks_by_content(
+                query, key[0], key[1], quota, by_article[key]
+            )
+        for item in chosen[:quota]:
+            picked.append(item)
+            if len(picked) >= limit:
+                return picked
+    return picked
+
+
 def _score_queryset(
     chunk_query: QuerySet,
     query_embedding: list[float],
@@ -159,6 +344,93 @@ def _score_queryset(
     ]
 
 
+def _permalink_text(permalink: str) -> str:
+    raw = (permalink or "").strip()
+    if not raw.startswith(("http://", "https://")):
+        return ""
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        return ""
+    path = unquote(parsed.path or "").casefold()
+    return f"{parsed.netloc} {path.replace('/', ' ').replace('-', ' ').replace('_', ' ')}"
+
+
+def contact_fact_signal(query: str, title: str, content: str) -> float:
+    """Lift a page that actually lists phones; drop HR texts about the call centre."""
+    if not _PUBLIC_CONTACT_QUERY_RE.search(query or ""):
+        return 0.0
+    blob = f"{title or ''}\n{content or ''}"
+    if _HR_CONTACT_CENTER_RE.search(blob) and not _PHONE_FACT_RE.search(blob):
+        return -0.32
+    boost = 0.0
+    if _PHONE_FACT_RE.search(blob):
+        boost += 0.34
+    if "147" in blob:
+        boost += 0.10
+    if _CONTACT_LABEL_RE.search(blob):
+        boost += 0.10
+    return min(0.45, boost)
+
+
+def permalink_signal(query: str, permalink: str) -> float:
+    """Prefer the answering page URL over a site homepage with the same footer."""
+    raw = (permalink or "").strip()
+    if not raw.startswith(("http://", "https://")):
+        return 0.0
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        return 0.0
+    parts = [part for part in unquote(parsed.path or "").casefold().split("/") if part]
+    path_text = " ".join(parts).replace("-", " ").replace("_", " ")
+    query_tokens = {
+        token.casefold()
+        for token in _PATH_TOKEN_RE.findall(query)
+        if len(token) >= 4
+    }
+    hits = 0
+    for token in query_tokens:
+        if token in path_text:
+            hits += 1
+        for russian, aliases in _URL_ALIASES:
+            if token.startswith(russian) and any(alias in path_text for alias in aliases):
+                hits += 1
+                break
+    boost = min(0.12, 0.05 * hits)
+    if not parts or (len(parts) == 1 and parts[0] in _HOME_PATHS):
+        if query_tokens:
+            boost -= 0.05
+    return boost
+
+
+def _chunk_lexical(query: str, chunk: Any) -> float:
+    extra = _permalink_text(str(getattr(chunk, "permalink", "") or ""))
+    return _lexical_score(query, chunk.title, f"{chunk.content}\n{extra}")
+
+
+def _with_permalink_signal(
+    scored: list[tuple[float, Any]],
+    query: str,
+) -> list[tuple[float, Any]]:
+    adjusted = [
+        (
+            max(
+                0.0,
+                min(
+                    1.0,
+                    float(score)
+                    + permalink_signal(query, str(getattr(chunk, "permalink", "") or "")),
+                ),
+            ),
+            chunk,
+        )
+        for score, chunk in scored
+    ]
+    adjusted.sort(key=lambda item: (-item[0], item[1].article_id, item[1].chunk_index))
+    return adjusted
+
+
 def _rank_chunks_hybrid(
     chunk_query: QuerySet,
     query_text: str,
@@ -171,37 +443,37 @@ def _rank_chunks_hybrid(
     if backend in {"http-fallback", "lexical"}:
         scored = []
         for chunk in chunk_query:
-            score = _lexical_score(query_text, chunk.title, chunk.content)
+            score = _chunk_lexical(query_text, chunk)
             if score > 0:
                 scored.append((score, chunk))
         scored.sort(key=lambda item: (-item[0], item[1].article_id))
-        return scored[: limit * 20]
+        return _with_permalink_signal(scored, query_text)[: limit * 20]
 
     vector_scored = _score_queryset(
         chunk_query, query_embedding, limit=limit
     )
     combined: dict[tuple[int, int], tuple[float, Any]] = {}
     for vector_score, chunk in vector_scored:
-        lexical = _lexical_score(query_text, chunk.title, chunk.content)
+        lexical = _chunk_lexical(query_text, chunk)
         combined[(int(chunk.article_id), int(chunk.chunk_index))] = (
             max(float(vector_score), lexical),
             chunk,
         )
-    best = max((score for score, _ in combined.values()), default=0.0)
-    if best < 0.25:
-        for chunk in list(chunk_query[:1500]):
-            key = (int(chunk.article_id), int(chunk.chunk_index))
-            lexical = _lexical_score(query_text, chunk.title, chunk.content)
-            if lexical <= 0:
-                continue
-            previous = combined.get(key)
-            if previous is None or lexical > previous[0]:
-                combined[key] = (lexical, chunk)
-    ranked = sorted(
-        combined.values(),
-        key=lambda item: (-item[0], item[1].article_id, item[1].chunk_index),
+    # Always keep lexical hits: a later-indexed file can lose the ANN window
+    # when stub/e5 cosine is high on a long unrelated dump.
+    for chunk in list(chunk_query[:2500]):
+        key = (int(chunk.article_id), int(chunk.chunk_index))
+        lexical = _chunk_lexical(query_text, chunk)
+        if lexical <= 0.2:
+            continue
+        previous = combined.get(key)
+        if previous is None or lexical > previous[0]:
+            combined[key] = (lexical, chunk)
+    ranked = _with_permalink_signal(
+        list(combined.values()),
+        query_text,
     )
-    return ranked[: limit * 20]
+    return ranked[: max(limit * 40, 200)]
 
 
 def _document_from_chunk(
@@ -239,7 +511,7 @@ def preview_assistant_query(
     group_articles: bool = False,
 ) -> dict[str, Any]:
     """Rank active chunks; assistant_* plus optional SUZ/CC when selected."""
-    normalized_query = query.strip()
+    normalized_query = expand_user_query(query.strip())
     if not normalized_query:
         raise ValueError("query must be a non-empty string")
     if not 1 <= limit <= MAX_LIMIT:
@@ -324,6 +596,15 @@ def preview_assistant_query(
             )
             scored_chunks.append((score, chunk, kb_slug))
 
+    single_scope = (
+        bool(slugs)
+        and not search_all
+        and len(assistant_slugs) <= 1
+        and not include_suz
+        and not cc_article_ids
+    )
+    if not single_scope:
+        scored_chunks = _rerank_scored_chunks(normalized_query, scored_chunks)
     matches = matching_training_examples(normalized_query)
     pin_ids = [int(matches[0][1].article_id)] if matches else []
     extra_pairs: list[tuple[Any, str]] = []
@@ -391,14 +672,6 @@ def preview_assistant_query(
             for score, chunk in boosted
         ]
 
-    scored_chunks.sort(
-        key=lambda item: (
-            -item[0],
-            item[2],
-            item[1].article_id,
-            item[1].chunk_index,
-        )
-    )
     threshold = get_model_settings(
         "assistant_bank"
     ).context_inclusion_threshold
@@ -443,17 +716,9 @@ def preview_assistant_query(
             )
         ]
     else:
-        per_article: dict[tuple[str, int], int] = {}
-        ranked: list[tuple[float, Any, str]] = []
-        for score, chunk, kb_slug in scored_chunks:
-            key = (kb_slug, chunk.article_id)
-            taken = per_article.get(key, 0)
-            if taken >= MAX_CHUNKS_PER_ARTICLE:
-                continue
-            per_article[key] = taken + 1
-            ranked.append((score, chunk, kb_slug))
-            if len(ranked) >= limit:
-                break
+        ranked = _select_ranked_chunks(
+            scored_chunks, limit=limit, query=normalized_query
+        )
         documents = [
             _document_from_chunk(
                 rank=rank,

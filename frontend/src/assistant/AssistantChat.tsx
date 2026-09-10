@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Button, Card, StatusBadge, type StatusBadgeStatus } from '../components'
 import {
   FEEDBACK_LABELS,
+  type AssistantGeneratedDraft,
   type AssistantMessage,
   type AssistantSource,
   type AssistantToolState,
@@ -15,12 +16,15 @@ import {
   type AssistantKbOption,
 } from './api/knowledgeBases'
 import {
+  downloadTranscript,
   extractChatAttachment,
   fieldConfidencePercent,
   fieldDisplayValue,
+  isMediaFileName,
   type ChatAttachmentPayload,
 } from './api/attachments'
 import {
+  displayModelLabel,
   fetchLocalLlmModels,
   selectLocalLlmModel,
   type LocalLlmModel,
@@ -29,10 +33,34 @@ import {
   formatDialogDate,
   type ChatDialogSummary,
 } from './chatPersistence'
+import { compactChatText } from './compactChatText'
+import { finishLastSentence } from './finishLastSentence'
+import {
+  downloadGeneratedDocument,
+  fetchChatDocTemplates,
+  generateDocDraft,
+  type ChatDocTemplate,
+  type DocTemplateFormat,
+} from './api/docTemplates'
+import {
+  approveOcrJob,
+  downloadOcrFieldsDocx,
+  exportOcrJob,
+  ocrExportRows,
+} from '../ai-hub/admin/api/ocrAdmin'
+import { OcrDocumentsPanel } from '../ai-hub/ocr/OcrDocumentsPanel'
+import {
+  DEMO_BANK_SKILLS,
+  fetchAssistantSkills,
+  filterSkills,
+  type AssistantSkill,
+} from './api/skills'
+import { MySkillsPanel } from './MySkillsPanel'
+import { filterOcrFields } from '../ai-hub/ocr/fieldQuality'
 import { useAssistantChat } from './useAssistantChat'
 import './AssistantChat.css'
 
-const ATTACH_ACCEPT = '.pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png,.tiff,.tif'
+const ATTACH_ACCEPT = '.pdf,.doc,.docx,.txt,.rtf,.xlsx,.jpg,.jpeg,.png,.tiff,.tif,.wav,.mp3,.m4a,.ogg,.flac,.webm,.mp4,.mov,.mkv,.avi'
 const OCR_ACCEPT = '.pdf,.jpg,.jpeg,.png,.tiff,.tif'
 const ATTACH_MAX_FILES = 5
 
@@ -41,18 +69,26 @@ const OCR_FIELD_LABELS: Record<string, string> = {
   surname: 'Фамилия',
   given_name: 'Имя',
   patronymic: 'Отчество',
+  document_number: 'Номер документа',
   series: 'Серия',
   number: 'Номер',
-  issue_date: 'Дата выдачи',
   birth_date: 'Дата рождения',
-  document_number: 'Номер документа',
+  expiry_date: 'Срок действия',
+  issue_date: 'Дата выдачи',
+  personal_number: 'Личный номер',
+  nationality: 'Гражданство',
+  sex: 'Пол',
   date: 'Дата',
   payer: 'Плательщик',
   beneficiary: 'Получатель',
   amount: 'Сумма',
   purpose: 'Назначение',
   currency: 'Валюта',
+  address: 'Адрес',
+  issued_by: 'Кем выдан',
+  birth_place: 'Место рождения',
 }
+const OCR_FIELD_ORDER = Object.keys(OCR_FIELD_LABELS)
 
 const OCR_CONFIDENCE_TONE = (pct: number | null): 'success' | 'warning' | 'danger' | 'neutral' => {
   if (pct == null) return 'neutral'
@@ -79,6 +115,8 @@ interface OcrPanelState {
   jobId: string
   fields: OcrPanelField[]
   rawText: string
+  approved: boolean
+  exportBusy: boolean
 }
 
 const EMPTY_OCR_PANEL: OcrPanelState = {
@@ -92,6 +130,8 @@ const EMPTY_OCR_PANEL: OcrPanelState = {
   jobId: '',
   fields: [],
   rawText: '',
+  approved: false,
+  exportBusy: false,
 }
 
 function toolBadgeStatus(state: ToolRunState): StatusBadgeStatus {
@@ -170,6 +210,8 @@ function FeedbackBar({
 }
 
 function sourceHref(source: AssistantSource): string | null {
+  const link = (source.permalink || '').trim()
+  if (/^https?:\/\//i.test(link)) return link
   const articleId =
     source.article_id != null && String(source.article_id).trim()
       ? String(source.article_id)
@@ -181,15 +223,30 @@ function sourceHref(source: AssistantSource): string | null {
       + `&article_id=${encodeURIComponent(articleId)}`
     )
   }
-  const link = (source.permalink || '').trim()
   if (!link || link === '#') return null
   return link
+}
+
+function isWebPermalink(href: string | null): boolean {
+  return Boolean(href && /^https?:\/\//i.test(href))
+}
+
+function displayWebUrl(href: string): string {
+  try {
+    const url = new URL(href)
+    const path = `${url.pathname || ''}${url.search || ''}`
+    const compact = path === '/' ? url.host : `${url.host}${path}`
+    return compact.replace(/\/$/, '') || url.host
+  } catch {
+    return href
+  }
 }
 
 function SourceItem({ source }: { source: AssistantSource }) {
   const [open, setOpen] = useState(false)
   const [fileError, setFileError] = useState('')
   const href = sourceHref(source)
+  const webLink = isWebPermalink(href)
   const hasQuote = Boolean(source.snippet?.trim())
   const isDownloadApi = Boolean(href?.includes('/api/v1/assistant/sources/download'))
 
@@ -203,17 +260,20 @@ function SourceItem({ source }: { source: AssistantSource }) {
     try {
       const response = await fetch(href, { credentials: 'include' })
       if (!response.ok) {
-        let detail = `HTTP ${response.status}`
+        let detail = 'Не удалось открыть файл источника'
         try {
           const payload = (await response.json()) as {
             details?: { file?: string[]; request?: string[] }
             error?: string
           }
-          detail =
+          const raw =
             payload.details?.file?.[0]
             || payload.details?.request?.[0]
             || payload.error
-            || detail
+            || ''
+          if (raw && raw !== 'not_found') {
+            detail = raw
+          }
         } catch {
           /* ignore */
         }
@@ -221,11 +281,15 @@ function SourceItem({ source }: { source: AssistantSource }) {
       }
       const blob = await response.blob()
       const header = response.headers.get('Content-Disposition') || ''
-      const matched = /filename="?([^"]+)"?/i.exec(header)
-      const filename =
-        matched?.[1]
+      const starred = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(header)
+      const quoted = /filename="?([^"]+)"?/i.exec(header)
+      const rawName =
+        (starred?.[1] && decodeURIComponent(starred[1].replace(/['"]/g, '')))
+        || quoted?.[1]
+        || decodeURIComponent(response.headers.get('X-Source-Filename') || '')
         || source.title
         || 'document'
+      const filename = rawName.includes('.') ? rawName : `${rawName}.txt`
       const objectUrl = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = objectUrl
@@ -234,23 +298,61 @@ function SourceItem({ source }: { source: AssistantSource }) {
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
-      // Also try open in new tab (PDF/txt); browsers may still download office files.
-      window.setTimeout(() => {
-        window.open(objectUrl, '_blank', 'noopener,noreferrer')
-        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
-      }, 50)
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 4_000)
     } catch (err) {
       setFileError(err instanceof Error ? err.message : 'Не удалось открыть файл')
     }
   }
 
+  const toggle = () => {
+    if (hasQuote) setOpen((value) => !value)
+  }
+
   return (
-    <li className="asst-source-item" data-testid={`source-item-${source.id}`}>
-      <div className="asst-source-item__row">
+    <li
+      className={`asst-source-item${open ? ' is-open' : ''}${hasQuote ? ' asst-source-item--expandable' : ''}`}
+      data-testid={`source-item-${source.id}`}
+    >
+      <div
+        className="asst-source-item__row"
+        role={hasQuote ? 'button' : undefined}
+        tabIndex={hasQuote ? 0 : undefined}
+        onClick={hasQuote ? toggle : undefined}
+        onKeyDown={
+          hasQuote
+            ? (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  toggle()
+                }
+              }
+            : undefined
+        }
+        aria-expanded={hasQuote ? open : undefined}
+        data-testid={`source-quote-${source.id}`}
+        title={hasQuote ? (open ? 'Скрыть цитату' : 'Показать цитату') : undefined}
+      >
         <StatusBadge status="success">
           {source.relevance_percent}%
         </StatusBadge>
-        {href ? (
+        {href && webLink ? (
+          <span className="asst-source-item__meta">
+            <span className="asst-source-item__title">{source.title}</span>
+            <a
+              className="asst-source-item__link asst-source-item__url"
+              href={href}
+              title="Открыть страницу на сайте"
+              data-testid={`source-link-${source.id}`}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                void openSourceFile()
+              }}
+            >
+              {displayWebUrl(href)}
+            </a>
+          </span>
+        ) : href ? (
           <a
             className="asst-source-item__link"
             href={href}
@@ -258,6 +360,7 @@ function SourceItem({ source }: { source: AssistantSource }) {
             data-testid={`source-link-${source.id}`}
             onClick={(event) => {
               event.preventDefault()
+              event.stopPropagation()
               void openSourceFile()
             }}
           >
@@ -267,14 +370,9 @@ function SourceItem({ source }: { source: AssistantSource }) {
           <span className="asst-source-item__title">{source.title}</span>
         )}
         {hasQuote ? (
-          <Button
-            type="button"
-            variant={open ? 'secondary' : 'ghost'}
-            onClick={() => setOpen((value) => !value)}
-            data-testid={`source-quote-${source.id}`}
-          >
-            {open ? 'Скрыть цитату' : 'Цитата'}
-          </Button>
+          <span className="asst-source-item__more" aria-hidden>
+            {open ? '▴' : '⋯'}
+          </span>
         ) : null}
       </div>
       {fileError ? (
@@ -289,24 +387,159 @@ function SourceItem({ source }: { source: AssistantSource }) {
   )
 }
 
+function sourcesMoreLabel(count: number) {
+  const mod10 = count % 10
+  const mod100 = count % 100
+  if (mod10 === 1 && mod100 !== 11) return `Ещё ${count} источник`
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return `Ещё ${count} источника`
+  }
+  return `Ещё ${count} источников`
+}
+
+function SourcesList({
+  messageId,
+  sources,
+}: {
+  messageId: string
+  sources: AssistantSource[]
+}) {
+  const [showAll, setShowAll] = useState(false)
+  const visible = showAll ? sources : sources.slice(0, 1)
+  const hiddenCount = sources.length - visible.length
+
+  if (!sources.length) {
+    return (
+      <div className="asst-sources" data-testid={`sources-${messageId}`}>
+        <strong>Источники (0)</strong>
+        <ul>
+          <li className="asst-source-item" data-testid={`source-empty-${messageId}`}>
+            <div className="asst-source-item__row">
+              <StatusBadge status="warning">0%</StatusBadge>
+              <span className="asst-source-item__title">
+                В выбранных базах нет подходящих статей
+              </span>
+            </div>
+          </li>
+        </ul>
+      </div>
+    )
+  }
+
+  return (
+    <div className="asst-sources" data-testid={`sources-${messageId}`}>
+      <strong>Источники ({sources.length})</strong>
+      <ul>
+        {visible.map((source) => (
+          <SourceItem key={source.id} source={source} />
+        ))}
+      </ul>
+      {sources.length > 1 ? (
+        <button
+          type="button"
+          className="asst-sources__more"
+          onClick={() => setShowAll((value) => !value)}
+          data-testid={`sources-more-${messageId}`}
+        >
+          {showAll ? 'Скрыть источники' : sourcesMoreLabel(hiddenCount)}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function previousMediaTranscripts(
+  messages: AssistantMessage[],
+  index: number,
+) {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const item = messages[cursor]
+    if (item?.role !== 'user') continue
+    return (item.attachments || []).filter((file) => file.mediaKind && file.text)
+  }
+  return []
+}
+
+function DraftCard({
+  message,
+  readOnly,
+  onChange,
+}: {
+  message: AssistantMessage
+  readOnly: boolean
+  onChange: (text: string) => void
+}) {
+  const draft = message.draft
+  if (!draft) return null
+  const isText = draft.kind === 'text'
+  return (
+    <div className="asst-draft" data-testid={`asst-draft-${message.id}`}>
+      <textarea
+        value={draft.text}
+        readOnly={readOnly}
+        data-testid="asst-draft-text"
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <div className="asst-draft__actions">
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={() => {
+            void navigator.clipboard?.writeText(draft.text)
+          }}
+        >
+          Копировать
+        </Button>
+        <Button
+          type="button"
+          variant={isText ? 'secondary' : 'primary'}
+          data-testid="asst-draft-download"
+          onClick={() => {
+            if (isText) {
+              const blob = new Blob([draft.text], { type: 'text/plain;charset=utf-8' })
+              const url = URL.createObjectURL(blob)
+              const link = document.createElement('a')
+              link.href = url
+              link.download = draft.filename || 'draft.txt'
+              document.body.appendChild(link)
+              link.click()
+              link.remove()
+              URL.revokeObjectURL(url)
+              return
+            }
+            void downloadGeneratedDocument(draft.templateId, draft.fields)
+          }}
+        >
+          Скачать {draft.formatLabel || draft.outputFormat}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function MessageLenta({
   messages,
   streaming,
   readOnly = false,
   onFeedback,
+  onExpand,
   onStop,
+  onDraftChange,
 }: {
   messages: AssistantMessage[]
   streaming: boolean
   readOnly?: boolean
   onFeedback: (id: string, kind: FeedbackKind) => void
+  onExpand: (id: string) => void
   onStop: () => void
+  onDraftChange: (id: string, text: string) => void
 }) {
-  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const lastTurnRef = useRef<HTMLDivElement | null>(null)
+  const lastMessageId = messages[messages.length - 1]?.id
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
-  }, [messages, streaming])
+    lastTurnRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }, [lastMessageId])
 
   if (!messages.length) {
     return (
@@ -322,9 +555,20 @@ function MessageLenta({
 
   return (
     <div className="asst-lenta" data-testid="asst-lenta" aria-live="polite">
-      {messages.map((message) => (
+      {messages.map((message, index) => {
+        if (
+          message.role === 'assistant'
+          && !message.pending
+          && !compactChatText(message.content)
+          && !message.ocr
+          && !message.draft
+        ) {
+          return null
+        }
+        return (
         <div
           key={message.id}
+          ref={index === messages.length - 1 ? lastTurnRef : undefined}
           className={`asst-turn asst-turn--${message.role}`}
           data-testid={`msg-${message.id}`}
         >
@@ -333,17 +577,33 @@ function MessageLenta({
           </div>
           {message.role === 'user' ? (
             <div className="asst-turn__user-block">
+              {message.skill?.alias ? (
+                <span className="asst-turn__skill" data-testid="asst-msg-skill">
+                  /{message.skill.alias}
+                </span>
+              ) : null}
               {message.attachments?.length ? (
                 <ul className="asst-turn__files" aria-label="Вложения">
                   {message.attachments.map((file) => (
-                    <li key={file.name}>{file.name}</li>
+                    <li key={file.name}>
+                      <span>{file.name}</span>
+                      {file.mediaKind && file.text ? (
+                        <button
+                          type="button"
+                          className="asst-turn__transcript"
+                          onClick={() => downloadTranscript(file.name, file.text || '')}
+                        >
+                          транскрипт.txt
+                        </button>
+                      ) : null}
+                    </li>
                   ))}
                 </ul>
               ) : null}
-              <p className="asst-turn__user">{message.content}</p>
+              <p className="asst-turn__user">{compactChatText(message.content)}</p>
             </div>
           ) : (
-            <Card className="asst-turn__card">
+            <Card padded={false} className="asst-turn__card">
               {message.pending && !message.content ? (
                 <div className="asst-streaming" data-testid="asst-streaming">
                   <span>Ассистент печатает…</span>
@@ -353,33 +613,62 @@ function MessageLenta({
                 </div>
               ) : (
                 <p className="asst-turn__text">
-                  {message.content}
+                  {compactChatText(
+                    message.draft || message.pending || message.expanded
+                      ? message.content
+                      : finishLastSentence(message.content),
+                  )}
                   {message.pending ? <span className="asst-cursor" aria-hidden>|</span> : null}
                 </p>
               )}
-              {message.sources && message.sources.length > 0 ? (
-                <div className="asst-sources" data-testid={`sources-${message.id}`}>
-                  <strong>Источники ({message.sources.length})</strong>
-                  <ul>
-                    {message.sources.map((source) => (
-                      <SourceItem key={source.id} source={source} />
-                    ))}
-                  </ul>
-                </div>
+              {message.draft && !message.pending ? (
+                <DraftCard
+                  message={message}
+                  readOnly={readOnly}
+                  onChange={(text) => onDraftChange(message.id, text)}
+                />
               ) : null}
-              {!readOnly ? (
+              {!message.pending && message.content ? (
+                <SourcesList messageId={message.id} sources={message.sources ?? []} />
+              ) : null}
+              {!readOnly && !message.pending && message.content ? (
+                <div className="asst-answer-actions">
+                  {(message.sources?.length ?? 0) > 0 ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={streaming}
+                      onClick={() => onExpand(message.id)}
+                      data-testid={`asst-expand-${message.id}`}
+                    >
+                      {message.expanded ? 'Скрыть' : 'Подробнее'}
+                    </Button>
+                  ) : null}
+                  {previousMediaTranscripts(messages, index).map((file) => (
+                    <Button
+                      key={`${file.name}-txt`}
+                      type="button"
+                      variant="ghost"
+                      onClick={() => downloadTranscript(file.name, file.text || '')}
+                    >
+                      Скачать транскрипт
+                    </Button>
+                  ))}
+                  <FeedbackBar message={message} onFeedback={onFeedback} />
+                </div>
+              ) : !readOnly ? (
                 <FeedbackBar message={message} onFeedback={onFeedback} />
               ) : null}
             </Card>
           )}
         </div>
-      ))}
+        )
+      })}
       {streaming ? (
         <div className="asst-streaming asst-streaming--footer" data-testid="asst-streaming-flag">
           Стриминг токенов…
         </div>
       ) : null}
-      <div ref={bottomRef} aria-hidden />
     </div>
   )
 }
@@ -388,7 +677,9 @@ const TOOL_DESCRIPTIONS: Record<ToolId, string> = {
   code: 'Черновик фрагмента кода по запросу из чата.',
   sql: 'Read-only запросы к разрешённым витринам. Изменения запрещены.',
   rpa: 'Запуск роботов только после явного подтверждения оператора.',
-  document: 'Сформировать или разобрать документ (в т.ч. OCR-поля).',
+  document: 'Сформировать бланк банка: Word, PDF, Excel, PPT или BPMN.',
+  text: 'Черновик записки, справки или отчёта — можно править в чате.',
+  diagram: 'Презентация PPT или схема BPMN / ER по шаблону.',
   translate: 'Перевод фрагмента ответа или вложения RU ↔ EN.',
 }
 
@@ -490,12 +781,213 @@ function ToolsPanel({
   )
 }
 
+function GenerateDocumentModal({
+  open,
+  onClose,
+  onDraft,
+  onDownloaded,
+  formatFilter,
+}: {
+  open: boolean
+  onClose: () => void
+  onDraft: (text: string, draft?: AssistantGeneratedDraft) => void
+  onDownloaded: () => void
+  formatFilter?: DocTemplateFormat[]
+}) {
+  const [templates, setTemplates] = useState<ChatDocTemplate[]>([])
+  const [templateId, setTemplateId] = useState<number | null>(null)
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const selected = templates.find((item) => item.id === templateId) ?? null
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setError('')
+    void (async () => {
+      try {
+        await ensureDevSession()
+        const items = (await fetchChatDocTemplates()).filter((item) =>
+          formatFilter?.length
+            ? formatFilter.includes(item.output_format)
+            : true,
+        )
+        if (cancelled) return
+        setTemplates(items)
+        const first = items[0]
+        setTemplateId(first?.id ?? null)
+        setValues(
+          Object.fromEntries((first?.fields || []).map((field) => [field.id, ''])),
+        )
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Не удалось загрузить шаблоны')
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [formatFilter, open])
+
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [busy, onClose, open])
+
+  if (!open) return null
+
+  const run = async (mode: 'draft' | 'download') => {
+    if (!selected || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      if (mode === 'draft') {
+        const draft = await generateDocDraft(selected.id, values)
+        const kind =
+          selected.output_format === 'txt'
+            ? 'text'
+            : selected.output_format === 'pptx'
+              ? 'slides'
+              : selected.output_format === 'bpmn' || selected.output_format === 'mmd'
+                ? 'diagram'
+                : 'text'
+        onDraft(
+          `Черновик «${draft.template_name}» (${draft.format_label || draft.output_format}).`,
+          {
+            kind,
+            templateId: selected.id,
+            templateName: draft.template_name,
+            filename: draft.filename,
+            outputFormat: draft.output_format,
+            formatLabel: draft.format_label,
+            text: draft.text,
+            fields: values,
+          },
+        )
+      } else {
+        await downloadGeneratedDocument(selected.id, values)
+        onDownloaded()
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сформировать документ')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="asst-docgen" data-testid="asst-docgen-modal" role="presentation">
+      <button
+        type="button"
+        className="asst-docgen__backdrop"
+        aria-label="Закрыть"
+        disabled={busy}
+        onClick={onClose}
+      />
+      <div
+        className="asst-docgen__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Сгенерировать документ"
+      >
+        <strong>Сгенерировать документ</strong>
+        <label>
+          Шаблон
+          <select
+            value={templateId ?? ''}
+            data-testid="asst-docgen-template"
+            disabled={busy || !templates.length}
+            onChange={(event) => {
+              const nextId = Number(event.target.value)
+              const next = templates.find((item) => item.id === nextId) ?? null
+              setTemplateId(next?.id ?? null)
+              setValues(
+                Object.fromEntries((next?.fields || []).map((field) => [field.id, ''])),
+              )
+            }}
+          >
+            {!templates.length ? <option value="">Нет активных шаблонов</option> : null}
+            {templates.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.format_label} — {item.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {(selected?.fields || []).map((field) => (
+          <label key={field.id}>
+            {field.label}{field.required ? '' : ' (необяз.)'}
+            <input
+              value={values[field.id] || ''}
+              disabled={busy}
+              data-testid={`asst-docgen-field-${field.id}`}
+              onChange={(event) =>
+                setValues((current) => ({ ...current, [field.id]: event.target.value }))
+              }
+            />
+          </label>
+        ))}
+        {error ? <p className="asst-docgen__error" role="alert">{error}</p> : null}
+        <div className="asst-docgen__actions">
+          <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
+            Отмена
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy || !selected}
+            data-testid="asst-docgen-draft"
+            onClick={() => void run('draft')}
+          >
+            Создать черновик
+          </Button>
+          <Button
+            type="button"
+            disabled={busy || !selected}
+            data-testid="asst-docgen-download"
+            onClick={() => void run('download')}
+          >
+            Скачать
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ocrFieldsToApi(fields: readonly OcrPanelField[]): Record<string, unknown> {
+  return Object.fromEntries(
+    fields.map((field) => [
+      field.id,
+      {
+        value: field.value,
+        confidence: field.confidence == null ? undefined : field.confidence / 100,
+      },
+    ]),
+  )
+}
+
 function OcrResultDrawer({
   panel,
+  readOnly,
   onClose,
+  onUpload,
+  onApproveExport,
+  onFieldChange,
 }: {
   panel: OcrPanelState
+  readOnly?: boolean
   onClose: () => void
+  onUpload: () => void
+  onApproveExport: () => void
+  onFieldChange: (id: string, value: string) => void
 }) {
   useEffect(() => {
     if (!panel.open) return
@@ -506,6 +998,16 @@ function OcrResultDrawer({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose, panel.open])
 
+  const visibleOcrFields = filterOcrFields(panel.fields)
+  const hasResult = Boolean(
+    panel.fileName || visibleOcrFields.length || panel.rawText || panel.error,
+  )
+  const canExport =
+    !readOnly
+    && !panel.busy
+    && !panel.exportBusy
+    && (visibleOcrFields.length > 0 || Boolean(panel.jobId))
+
   return (
     <div
       className={`asst-ocr-panel${panel.open ? ' is-open' : ''}`}
@@ -515,7 +1017,7 @@ function OcrResultDrawer({
       <button
         type="button"
         className="asst-ocr-panel__backdrop"
-        aria-label="Закрыть результат OCR"
+        aria-label="Закрыть окно OCR"
         tabIndex={panel.open ? 0 : -1}
         onClick={onClose}
       />
@@ -524,23 +1026,33 @@ function OcrResultDrawer({
         className="asst-ocr-panel__drawer"
         role="dialog"
         aria-modal="true"
-        aria-label="Результат распознавания документа"
+        aria-label="Распознавание документа"
         data-testid="asst-ocr-drawer"
       >
         <header className="asst-ocr-panel__header">
           <div>
             <strong>Распознавание OCR</strong>
-            <span>{panel.fileName || 'Документ'}</span>
+            <span>{panel.fileName || 'Загрузите документ для проверки полей'}</span>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={onClose}
-            aria-label="Закрыть OCR"
-            data-testid="asst-ocr-close"
-          >
-            ×
-          </Button>
+          <div className="asst-ocr-panel__header-actions">
+            <Button
+              type="button"
+              disabled={readOnly || panel.busy}
+              onClick={onUpload}
+              data-testid="asst-ocr-upload"
+            >
+              Загрузить документ
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={onClose}
+              aria-label="Закрыть OCR"
+              data-testid="asst-ocr-close"
+            >
+              ×
+            </Button>
+          </div>
         </header>
         <div className="asst-ocr-panel__body">
           {panel.busy ? (
@@ -553,6 +1065,19 @@ function OcrResultDrawer({
               {panel.error}
             </p>
           ) : null}
+          {!panel.busy && !hasResult ? (
+            <div className="asst-ocr-panel__empty-state" data-testid="asst-ocr-empty">
+              <p>Нажмите «Загрузить документ», чтобы выбрать скан или PDF.</p>
+              <Button
+                type="button"
+                disabled={readOnly}
+                onClick={onUpload}
+                data-testid="asst-ocr-upload-empty"
+              >
+                Загрузить документ
+              </Button>
+            </div>
+          ) : null}
           {panel.previewUrl ? (
             <div className="asst-ocr-panel__preview">
               <img
@@ -562,24 +1087,38 @@ function OcrResultDrawer({
               />
             </div>
           ) : null}
-          {!panel.busy && !panel.error ? (
+          {!panel.busy && hasResult && !panel.error ? (
             <>
               <div className="asst-ocr-panel__meta">
                 <strong>OCR · {panel.documentType || 'unknown'}</strong>
                 <StatusBadge
                   status={
-                    panel.validationStatus === 'valid' ? 'success' : 'warning'
+                    panel.approved
+                      ? 'success'
+                      : panel.validationStatus === 'valid'
+                        ? 'success'
+                        : 'warning'
                   }
                 >
-                  {panel.validationStatus || 'pending_review'}
+                  {panel.approved
+                    ? 'подтверждено'
+                    : panel.validationStatus || 'pending_review'}
                 </StatusBadge>
               </div>
-              {panel.fields.length ? (
+              {visibleOcrFields.length ? (
                 <ul className="asst-ocr-panel__fields" data-testid="asst-ocr-fields">
-                  {panel.fields.map((field) => (
+                  {visibleOcrFields.map((field) => (
                     <li key={field.id} data-testid={`ocr-field-${field.id}`}>
-                      <span>{field.label}</span>
-                      <strong>{field.value || '—'}</strong>
+                      <label htmlFor={`asst-ocr-field-${field.id}`}>{field.label}</label>
+                      <input
+                        id={`asst-ocr-field-${field.id}`}
+                        value={field.value}
+                        disabled={readOnly}
+                        data-testid={`asst-ocr-field-input-${field.id}`}
+                        onChange={(event) =>
+                          onFieldChange(field.id, event.target.value)
+                        }
+                      />
                       <StatusBadge status={OCR_CONFIDENCE_TONE(field.confidence)}>
                         {field.confidence == null ? '—' : `${field.confidence}%`}
                       </StatusBadge>
@@ -597,127 +1136,109 @@ function OcrResultDrawer({
                   <pre data-testid="asst-ocr-raw">{panel.rawText}</pre>
                 </details>
               ) : null}
-              {panel.jobId ? (
-                <small className="asst-ocr-panel__job">job {panel.jobId}</small>
-              ) : null}
             </>
           ) : null}
         </div>
+        {hasResult && !panel.busy ? (
+          <footer className="asst-ocr-panel__footer">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={readOnly || panel.busy}
+              onClick={onUpload}
+            >
+              Загрузить другой
+            </Button>
+            <Button
+              type="button"
+              disabled={!canExport}
+              onClick={onApproveExport}
+              data-testid="asst-ocr-approve-export"
+            >
+              {panel.exportBusy ? 'Экспорт…' : 'Подтвердить и экспорт'}
+            </Button>
+            {panel.approved ? (
+              <StatusBadge status="success" data-testid="asst-ocr-approved-badge">
+                Подтверждено · файл скачан
+              </StatusBadge>
+            ) : null}
+          </footer>
+        ) : null}
       </aside>
     </div>
   )
 }
 
-function HistoryDrawer({
-  open,
+function ChatSidebar({
   dialogs,
   activeId,
-  onClose,
+  readOnly,
   onOpen,
   onNew,
   onDelete,
 }: {
-  open: boolean
   dialogs: readonly ChatDialogSummary[]
   activeId: string
-  onClose: () => void
+  readOnly?: boolean
   onOpen: (id: string) => void
   onNew: () => void
   onDelete: (id: string) => void
 }) {
-  useEffect(() => {
-    if (!open) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, open])
-
   return (
-    <div
-      className={`asst-history${open ? ' is-open' : ''}`}
-      data-testid="asst-history-shell"
-      aria-hidden={!open}
+    <aside
+      id="asst-history-drawer"
+      className="asst-rail"
+      aria-label="История диалогов"
+      data-testid="asst-history-drawer"
     >
       <button
         type="button"
-        className="asst-history__backdrop"
-        aria-label="Закрыть историю диалогов"
-        tabIndex={open ? 0 : -1}
-        onClick={onClose}
-      />
-      <aside
-        id="asst-history-drawer"
-        className="asst-history__drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-label="История диалогов"
-        data-testid="asst-history-drawer"
+        className="asst-rail__new"
+        onClick={onNew}
+        disabled={readOnly}
+        aria-label="Новый диалог"
+        title="Новый диалог"
+        data-testid="asst-new"
       >
-        <header className="asst-history__header">
-          <div>
-            <strong>История диалогов</strong>
-            <span>Название — по первым словам вопроса</span>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={onClose}
-            aria-label="Закрыть историю"
-            data-testid="asst-history-close"
-          >
-            ×
-          </Button>
-        </header>
-        <div className="asst-history__toolbar">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={onNew}
-            data-testid="asst-history-new"
-          >
-            + Новый диалог
-          </Button>
-        </div>
-        <ul className="asst-history__list" data-testid="asst-history-list">
-          {dialogs.length === 0 ? (
-            <li className="asst-history__empty">Пока нет сохранённых диалогов</li>
-          ) : (
-            dialogs.map((dialog) => {
-              const active = dialog.id === activeId
-              return (
-                <li key={dialog.id}>
-                  <button
-                    type="button"
-                    className={`asst-history__item${active ? ' is-active' : ''}`}
-                    onClick={() => onOpen(dialog.id)}
-                    data-testid={`asst-history-item-${dialog.id}`}
-                  >
-                    <strong>{dialog.title}</strong>
-                    <span>{formatDialogDate(dialog.updatedAt)}</span>
-                    <small>{dialog.preview}</small>
-                  </button>
-                  <button
-                    type="button"
-                    className="asst-history__delete"
-                    aria-label={`Удалить диалог «${dialog.title}»`}
-                    title="Удалить"
-                    data-testid={`asst-history-delete-${dialog.id}`}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onDelete(dialog.id)
-                    }}
-                  >
-                    ×
-                  </button>
-                </li>
-              )
-            })
-          )}
-        </ul>
-      </aside>
-    </div>
+        +
+      </button>
+      <ul className="asst-rail__list" data-testid="asst-history-list">
+        {dialogs.length === 0 ? (
+          <li className="asst-rail__empty">Нет диалогов</li>
+        ) : (
+          dialogs.map((dialog) => {
+            const active = dialog.id === activeId
+            return (
+              <li key={dialog.id}>
+                <button
+                  type="button"
+                  className={`asst-rail__item${active ? ' is-active' : ''}`}
+                  onClick={() => onOpen(dialog.id)}
+                  title={dialog.title}
+                  data-testid={`asst-history-item-${dialog.id}`}
+                >
+                  <strong>{dialog.title}</strong>
+                  <span>{formatDialogDate(dialog.updatedAt)}</span>
+                </button>
+                <button
+                  type="button"
+                  className="asst-rail__delete"
+                  aria-label={`Удалить диалог «${dialog.title}»`}
+                  title="Удалить"
+                  data-testid={`asst-history-delete-${dialog.id}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onDelete(dialog.id)
+                  }}
+                >
+                  ×
+                </button>
+              </li>
+            )
+          })
+        )}
+      </ul>
+    </aside>
   )
 }
 
@@ -730,6 +1251,8 @@ export interface AssistantChatProps {
   initialDraft?: string
   /** Optional override (Storybook); otherwise loaded from `/api/v1/assistant/kbs/`. */
   knowledgeBases?: readonly AssistantKbOption[]
+  /** Host window owns fullscreen OCR (Documents tab). */
+  onOpenOcr?: () => void
 }
 
 export function AssistantChat({
@@ -738,14 +1261,16 @@ export function AssistantChat({
   readOnly = false,
   initialDraft = '',
   knowledgeBases: knowledgeBasesProp,
+  onOpenOcr,
 }: AssistantChatProps) {
   const [draft, setDraft] = useState(initialDraft)
   const [kbOpen, setKbOpen] = useState(false)
-  const [historyOpen, setHistoryOpen] = useState(false)
   const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([])
   const [attachBusy, setAttachBusy] = useState(false)
+  const [attachHint, setAttachHint] = useState('')
   const [attachError, setAttachError] = useState('')
   const [ocrPanel, setOcrPanel] = useState<OcrPanelState>(EMPTY_OCR_PANEL)
+  const [ocrWorkspaceOpen, setOcrWorkspaceOpen] = useState(false)
   const kbRootRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const ocrFileInputRef = useRef<HTMLInputElement>(null)
@@ -765,10 +1290,20 @@ export function AssistantChat({
     'loading' | 'ready' | 'switching' | 'error'
   >('loading')
   const [modelError, setModelError] = useState('')
+  const [docgenOpen, setDocgenOpen] = useState(false)
+  const [docgenFilter, setDocgenFilter] = useState<DocTemplateFormat[] | undefined>()
+  const [skills, setSkills] = useState<AssistantSkill[]>(() =>
+    demoMode ? DEMO_BANK_SKILLS : [],
+  )
+  const [selectedSkill, setSelectedSkill] = useState<AssistantSkill | null>(null)
+  const [pickerIndex, setPickerIndex] = useState(0)
+  const [mySkillsOpen, setMySkillsOpen] = useState(false)
   const kbSlugsRef = useRef<string[]>([])
   kbSlugsRef.current = kbCatalog
     .filter((kb) => kbSelected[kb.id])
     .map((kb) => kb.slug)
+  const skillIdRef = useRef<number | null>(null)
+  skillIdRef.current = selectedSkill?.id ?? null
 
   const {
     messages,
@@ -779,9 +1314,13 @@ export function AssistantChat({
     toolsOpen,
     setToolsOpen,
     sendMessage,
+    expandAnswer,
     stopStreaming,
     setFeedback,
     runTool,
+    setToolState,
+    pushLocalAssistantMessage,
+    updateDraftText,
     newDialog,
     openDialog,
     deleteDialog,
@@ -789,6 +1328,8 @@ export function AssistantChat({
   } = useAssistantChat({
     demoMode,
     getKbSlugs: () => kbSlugsRef.current,
+    getSkillId: () => skillIdRef.current,
+    getSkillAlias: () => selectedSkill?.alias ?? null,
   })
   const maxChars = 500
   const charCount = draft.length
@@ -808,7 +1349,7 @@ export function AssistantChat({
         setActiveModelId(status.active_model_id ?? status.models[0]?.id ?? '')
         setModelError(
           status.manager_reachable === false
-            ? status.last_error || 'Ollama недоступна'
+            ? status.last_error || 'Модель недоступна'
             : status.last_error || '',
         )
         setModelStatus(
@@ -823,7 +1364,7 @@ export function AssistantChat({
         setModelError(
           loadError instanceof Error
             ? loadError.message
-            : 'Не удалось загрузить список моделей Ollama',
+            : 'Не удалось загрузить список моделей',
         )
         setModelStatus('error')
       }
@@ -832,6 +1373,29 @@ export function AssistantChat({
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (demoMode) {
+      setSkills((current) => {
+        const mine = current.filter((item) => item.scope === 'user')
+        return [...DEMO_BANK_SKILLS, ...mine]
+      })
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        await ensureDevSession()
+        const items = await fetchAssistantSkills()
+        if (!cancelled) setSkills(items)
+      } catch {
+        if (!cancelled) setSkills([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [demoMode])
 
   const onModelChange = async (modelId: string) => {
     if (!modelId || modelId === activeModelId || modelStatus === 'switching') {
@@ -945,7 +1509,19 @@ export function AssistantChat({
       return
     }
     const files = Array.from(fileList).slice(0, remaining)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    const recognizingSpeech = files.some((file) => isMediaFileName(file.name))
+    const compressingVideo = files.some((file) =>
+      /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(file.name),
+    )
     setAttachBusy(true)
+    setAttachHint(
+      compressingVideo
+        ? 'Распознаю речь, видео не сохраняется…'
+        : recognizingSpeech
+          ? 'Распознаю речь, аудио не сохраняется…'
+          : 'Читаю файл…',
+    )
     setAttachError('')
     try {
       await ensureDevSession()
@@ -953,6 +1529,7 @@ export function AssistantChat({
       for (const file of files) {
         extracted.push(await extractChatAttachment(file))
       }
+      files.splice(0)
       setAttachments((current) => [...current, ...extracted].slice(0, ATTACH_MAX_FILES))
     } catch (error) {
       setAttachError(
@@ -960,6 +1537,7 @@ export function AssistantChat({
       )
     } finally {
       setAttachBusy(false)
+      setAttachHint('')
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
@@ -972,7 +1550,6 @@ export function AssistantChat({
       ? URL.createObjectURL(file)
       : null
     ocrPreviewUrlRef.current = previewUrl
-    setHistoryOpen(false)
     setToolsOpen(false)
     setKbOpen(false)
     setOcrPanel({
@@ -986,14 +1563,26 @@ export function AssistantChat({
       await ensureDevSession()
       const payload = await extractChatAttachment(file, {
         forceOcr: true,
-        documentType: 'passport',
       })
       const ocr = payload.ocr
-      const fields = Object.entries(ocr?.fields || {}).map(([id, raw]) => ({
-        id,
-        label: OCR_FIELD_LABELS[id] || id,
-        value: fieldDisplayValue(raw),
-        confidence: fieldConfidencePercent(raw),
+      const rawFields = ocr?.fields || {}
+      const orderedIds = [
+        ...OCR_FIELD_ORDER.filter((id) => id in rawFields),
+        ...Object.keys(rawFields).filter((id) => !OCR_FIELD_ORDER.includes(id)),
+      ]
+      const fields = filterOcrFields(orderedIds.map((id) => {
+        const raw = rawFields[id]
+        const explicit = (
+          raw && typeof raw === 'object' && raw !== null && 'label' in raw
+            ? String((raw as { label?: unknown }).label || '').trim()
+            : ''
+        )
+        return {
+          id,
+          label: OCR_FIELD_LABELS[id] || explicit || id,
+          value: fieldDisplayValue(raw),
+          confidence: fieldConfidencePercent(raw),
+        }
       }))
       setOcrPanel({
         open: true,
@@ -1006,6 +1595,8 @@ export function AssistantChat({
         jobId: ocr?.job_id || '',
         fields,
         rawText: payload.text || '',
+        approved: false,
+        exportBusy: false,
       })
     } catch (error) {
       setOcrPanel((current) => ({
@@ -1022,6 +1613,81 @@ export function AssistantChat({
 
   useEffect(() => () => revokeOcrPreview(), [])
 
+  const openOcrWindow = () => {
+    setToolsOpen(false)
+    setKbOpen(false)
+    if (onOpenOcr) {
+      onOpenOcr()
+      return
+    }
+    if (compact) {
+      setOcrWorkspaceOpen(true)
+      return
+    }
+    setOcrPanel((current) => (
+      current.open ? current : { ...EMPTY_OCR_PANEL, open: true }
+    ))
+  }
+
+  const approveOcrExport = async () => {
+    if (readOnly || ocrPanel.busy || ocrPanel.exportBusy) return
+    if (!ocrPanel.fields.length && !ocrPanel.jobId) return
+    const payload = ocrFieldsToApi(ocrPanel.fields)
+    const documentType = ocrPanel.documentType || 'passport'
+    const stem = ocrPanel.fileName.replace(/\.[^.]+$/u, '') || 'ocr-export'
+    setOcrPanel((current) => ({ ...current, exportBusy: true, error: '' }))
+    try {
+      if (ocrPanel.jobId && !ocrPanel.jobId.startsWith('demo-')) {
+        await approveOcrJob(ocrPanel.jobId, documentType, payload)
+        try {
+          await exportOcrJob(ocrPanel.jobId, 'docx', {
+            documentType,
+            fields: payload,
+          })
+        } catch {
+          downloadOcrFieldsDocx(ocrExportRows(ocrPanel.fields), stem)
+        }
+      } else {
+        downloadOcrFieldsDocx(ocrExportRows(ocrPanel.fields), stem)
+      }
+      setOcrPanel((current) => ({
+        ...current,
+        approved: true,
+        exportBusy: false,
+      }))
+    } catch (error) {
+      setOcrPanel((current) => ({
+        ...current,
+        exportBusy: false,
+        error: error instanceof Error ? error.message : 'Не удалось экспортировать',
+      }))
+    }
+  }
+
+  const slashMatch = draft.match(/(?:^|\s)\/([^\s]*)$/)
+  const pickerOpen = Boolean(slashMatch) && !readOnly && !mySkillsOpen
+  const pickerQuery = slashMatch?.[1] ?? ''
+  const bankSkills = filterSkills(
+    skills.filter((item) => item.scope === 'org' && item.enabled),
+    pickerQuery,
+  )
+  const mySkills = filterSkills(
+    skills.filter((item) => item.scope === 'user'),
+    pickerQuery,
+  )
+  const pickerItems = [...bankSkills, ...mySkills]
+  const highlightedSkill = pickerItems[Math.min(pickerIndex, Math.max(pickerItems.length - 1, 0))] ?? null
+  const skillAttachHint =
+    selectedSkill?.needs_attachment && attachments.length === 0
+      ? 'К этому навыку желательно приложить файл'
+      : ''
+
+  const applySkill = (skill: AssistantSkill) => {
+    setSelectedSkill(skill)
+    setPickerIndex(0)
+    setDraft((current) => current.replace(/(?:^|\s)\/[^\s]*$/, '').replace(/\s+$/, ''))
+  }
+
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
     if (readOnly || streaming || attachBusy) return
@@ -1036,12 +1702,25 @@ export function AssistantChat({
 
   return (
     <div
-      className={`asst-chat${compact ? ' asst-chat--compact' : ''}${
+      className={`asst-chat${compact ? ' asst-chat--compact' : ' asst-chat--wide'} is-history-open${
         readOnly ? ' asst-chat--readonly' : ''
       }`}
       data-testid="assistant-chat"
       data-readonly={readOnly ? 'true' : undefined}
     >
+      <ChatSidebar
+        dialogs={dialogs}
+        activeId={sessionId}
+        readOnly={readOnly}
+        onOpen={openDialog}
+        onNew={() => {
+          newDialog()
+          setAttachments([])
+          setAttachError('')
+        }}
+        onDelete={deleteDialog}
+      />
+      <div className="asst-chat__main">
       {readOnly ? (
         <div className="asst-readonly-banner" role="status" data-testid="asst-readonly-banner">
           <StatusBadge status="neutral">Только просмотр</StatusBadge>
@@ -1062,18 +1741,20 @@ export function AssistantChat({
             }
             onChange={(event) => void onModelChange(event.target.value)}
             data-testid="asst-model-select"
-            title={modelError || 'Модели из Ollama (ollama list)'}
+            title={modelError || 'Модель для ответов'}
           >
             {modelStatus === 'loading' ? (
               <option value="">Загрузка…</option>
             ) : modelCatalog.length === 0 ? (
-              <option value="">Нет моделей в Ollama</option>
+              <option value="">Нет доступных моделей</option>
             ) : (
               <>
                 {/* Keep controlled <select> valid if active id is briefly missing */}
                 {activeModelId &&
                 !modelCatalog.some((model) => model.id === activeModelId) ? (
-                  <option value={activeModelId}>{activeModelId}</option>
+                  <option value={activeModelId}>
+                    {displayModelLabel(activeModelId, activeModelId)}
+                  </option>
                 ) : null}
                 {modelCatalog.map((model) => (
                   <option
@@ -1081,8 +1762,7 @@ export function AssistantChat({
                     value={model.id}
                     disabled={model.available === false}
                   >
-                    {model.label}
-                    {model.description ? ` · ${model.description}` : ''}
+                    {displayModelLabel(model.id, model.label)}
                   </option>
                 ))}
               </>
@@ -1158,63 +1838,128 @@ export function AssistantChat({
             </div>
           ) : null}
         </div>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => {
-            newDialog()
-            setHistoryOpen(false)
-            setAttachments([])
-            setAttachError('')
-          }}
-          disabled={readOnly}
-          data-testid="asst-new"
-        >
-          + Новый
-        </Button>
-        <Button
-          type="button"
-          variant={historyOpen ? 'secondary' : 'ghost'}
-          disabled={readOnly}
-          aria-expanded={historyOpen}
-          aria-controls="asst-history-drawer"
-          onClick={() => {
-            setHistoryOpen((value) => !value)
-            setKbOpen(false)
-            setToolsOpen(false)
-          }}
-          data-testid="asst-history"
-        >
-          История диалогов
-        </Button>
+        <div className="asst-toolbar__extras">
+          <Button
+            type="button"
+            variant={mySkillsOpen ? 'secondary' : 'ghost'}
+            disabled={readOnly}
+            onClick={() => {
+              setMySkillsOpen((value) => !value)
+              setToolsOpen(false)
+              setKbOpen(false)
+            }}
+            data-testid="asst-my-skills"
+          >
+            Мои навыки
+          </Button>
+          <Button
+            type="button"
+            variant={toolsOpen ? 'secondary' : 'ghost'}
+            aria-expanded={toolsOpen}
+            aria-controls="asst-tools-panel"
+            disabled={readOnly}
+            onClick={() => {
+              setToolsOpen((value) => !value)
+              setKbOpen(false)
+              setMySkillsOpen(false)
+            }}
+            data-testid="asst-composer-tools"
+          >
+            Инструменты
+          </Button>
+          <Button
+            type="button"
+            variant={ocrPanel.open || ocrWorkspaceOpen ? 'secondary' : 'ghost'}
+            disabled={readOnly || ocrPanel.busy}
+            onClick={openOcrWindow}
+            data-testid="asst-composer-ocr"
+            title="Открыть окно распознавания документа"
+          >
+            {ocrPanel.busy ? 'OCR…' : 'OCR'}
+          </Button>
+        </div>
       </div>
 
-      <HistoryDrawer
-        open={historyOpen}
-        dialogs={dialogs}
-        activeId={sessionId}
-        onClose={() => setHistoryOpen(false)}
-        onOpen={(id) => {
-          openDialog(id)
-          setHistoryOpen(false)
-        }}
-        onNew={() => {
-          newDialog()
-          setHistoryOpen(false)
-          setAttachments([])
-          setAttachError('')
-        }}
-        onDelete={deleteDialog}
-      />
+      {compact && ocrWorkspaceOpen ? (
+        <div className="asst-ocr-fullscreen" data-testid="asst-ocr-fullscreen">
+          <OcrDocumentsPanel
+            initialSubTab="upload"
+            onClose={() => setOcrWorkspaceOpen(false)}
+          />
+        </div>
+      ) : null}
+      {!onOpenOcr && !compact ? (
+        <OcrResultDrawer
+          panel={ocrPanel}
+          readOnly={readOnly}
+          onClose={closeOcrPanel}
+          onUpload={() => ocrFileInputRef.current?.click()}
+          onApproveExport={() => void approveOcrExport()}
+          onFieldChange={(id, value) =>
+            setOcrPanel((current) => ({
+              ...current,
+              approved: false,
+              fields: current.fields.map((field) => (
+                field.id === id ? { ...field, value } : field
+              )),
+            }))
+          }
+        />
+      ) : null}
 
-      <OcrResultDrawer panel={ocrPanel} onClose={closeOcrPanel} />
+      {mySkillsOpen && !readOnly ? (
+        <MySkillsPanel
+          skills={skills}
+          demoMode={demoMode}
+          onClose={() => setMySkillsOpen(false)}
+          onChange={setSkills}
+        />
+      ) : null}
 
       {!readOnly ? (
         <ToolsPanel
           tools={tools}
           open={toolsOpen}
           onClose={() => setToolsOpen(false)}
-          onRun={runTool}
+          onRun={(id) => {
+            if (id === 'document' || id === 'text' || id === 'diagram') {
+              setToolsOpen(false)
+              setDocgenFilter(
+                id === 'text'
+                  ? ['txt']
+                  : id === 'diagram'
+                    ? ['pptx', 'bpmn', 'mmd']
+                    : undefined,
+              )
+              setDocgenOpen(true)
+              setToolState(id, { state: 'running', detail: 'форма бланка' })
+              return
+            }
+            runTool(id)
+          }}
+        />
+      ) : null}
+
+      {!readOnly ? (
+        <GenerateDocumentModal
+          open={docgenOpen}
+          formatFilter={docgenFilter}
+          onClose={() => {
+            setDocgenOpen(false)
+            setToolState('document', { state: 'idle', detail: undefined })
+            setToolState('text', { state: 'idle', detail: undefined })
+            setToolState('diagram', { state: 'idle', detail: undefined })
+          }}
+          onDraft={(text, draft) => {
+            pushLocalAssistantMessage(text, draft)
+            setToolState('document', { state: 'done', detail: 'черновик' })
+            setToolState('text', { state: 'done', detail: 'черновик' })
+            setToolState('diagram', { state: 'done', detail: 'черновик' })
+          }}
+          onDownloaded={() => {
+            setToolState('document', { state: 'done', detail: 'скачан' })
+            setToolState('diagram', { state: 'done', detail: 'скачан' })
+          }}
         />
       ) : null}
 
@@ -1223,7 +1968,9 @@ export function AssistantChat({
         streaming={streaming}
         readOnly={readOnly}
         onFeedback={setFeedback}
+        onExpand={expandAnswer}
         onStop={stopStreaming}
+        onDraftChange={updateDraftText}
       />
 
       {error && !readOnly ? (
@@ -1243,38 +1990,28 @@ export function AssistantChat({
       ) : null}
 
       <form className="asst-composer" onSubmit={onSubmit} data-testid="asst-composer">
-        <div className="asst-composer__extras">
-          <Button
-            type="button"
-            variant={toolsOpen ? 'secondary' : 'ghost'}
-            aria-expanded={toolsOpen}
-            aria-controls="asst-tools-panel"
-            disabled={readOnly}
-            onClick={() => {
-              setToolsOpen((value) => !value)
-              setKbOpen(false)
-              setHistoryOpen(false)
-            }}
-            data-testid="asst-composer-tools"
-          >
-            Инструменты
-          </Button>
-          <Button
-            type="button"
-            variant={ocrPanel.open ? 'secondary' : 'ghost'}
-            disabled={readOnly || ocrPanel.busy}
-            onClick={() => ocrFileInputRef.current?.click()}
-            data-testid="asst-composer-ocr"
-            title="Распознать документ — результат откроется слева, без отправки в чат"
-          >
-            {ocrPanel.busy ? 'OCR…' : 'OCR'}
-          </Button>
-        </div>
+        {skillAttachHint ? (
+          <p className="asst-composer__skill-hint" data-testid="asst-skill-attach-hint">
+            {skillAttachHint}
+          </p>
+        ) : null}
         {attachments.length > 0 ? (
           <ul className="asst-composer__attachments" data-testid="asst-attach-list">
             {attachments.map((file) => (
               <li key={`${file.name}-${file.size_bytes ?? 0}`}>
-                <span>{file.name}</span>
+                <span>
+                  {file.name}
+                  {file.media?.compressed ? ' · аудио' : ''}
+                </span>
+                {file.media && file.text ? (
+                  <button
+                    type="button"
+                    className="asst-composer__transcript"
+                    onClick={() => downloadTranscript(file.name, file.text)}
+                  >
+                    TXT
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   aria-label={`Убрать ${file.name}`}
@@ -1319,66 +2056,153 @@ export function AssistantChat({
           onChange={(event) => void onPickOcr(event.target.files)}
           data-testid="asst-ocr-input"
         />
-        <div className="asst-composer__field">
-          <textarea
-            id="asst-draft"
-            value={draft}
-            maxLength={maxChars}
-            placeholder={
-              readOnly
-                ? 'Отправка сообщений недоступна для аналитика'
-                : attachments.length
-                  ? 'Добавьте вопрос к файлу или отправьте для саммари…'
-                  : 'Задайте вопрос…'
-            }
-            data-testid="asst-draft"
-            disabled={readOnly}
-            readOnly={readOnly}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-          <button
-            type="button"
-            className="asst-composer__attach"
-            disabled={readOnly || attachBusy || streaming || attachments.length >= ATTACH_MAX_FILES}
-            onClick={() => fileInputRef.current?.click()}
-            data-testid="asst-attach"
-            title={
-              attachBusy
-                ? 'Читаю файл…'
-                : 'Прикрепить файл · PDF, DOC, DOCX, TXT, RTF, JPG, PNG · до 10 МБ'
-            }
-            aria-label={attachBusy ? 'Читаю файл' : 'Прикрепить файл'}
-          >
-            {attachBusy ? (
-              <span className="asst-composer__attach-busy" aria-hidden>
-                …
-              </span>
-            ) : (
-              <svg
-                className="asst-composer__attach-icon"
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                aria-hidden
+        {pickerOpen ? (
+          <div className="asst-skill-picker" role="listbox" data-testid="asst-skill-picker">
+            <p className="asst-skill-picker__group">Банк</p>
+            {bankSkills.map((item) => (
+              <button
+                key={`org-${item.id}`}
+                type="button"
+                role="option"
+                aria-selected={highlightedSkill?.id === item.id}
+                className={`asst-skill-picker__item${
+                  highlightedSkill?.id === item.id ? ' is-active' : ''
+                }`}
+                onClick={() => applySkill(item)}
+                data-testid={`asst-skill-${(item.code || item.alias).toLowerCase()}`}
               >
-                <path
-                  d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.42-7.42l8.49-8.49a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l7.78-7.78"
-                  stroke="currentColor"
-                  strokeWidth="1.85"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            )}
-          </button>
-        </div>
-        <div className="asst-composer__footer">
-          <span data-testid="asst-char-count">
-            {charCount} / {maxChars} символов
-          </span>
+                /{item.alias}
+              </button>
+            ))}
+            {!bankSkills.length ? (
+              <p className="asst-skill-picker__empty">Нет навыков банка</p>
+            ) : null}
+            <p className="asst-skill-picker__group">Мои</p>
+            {mySkills.map((item) => (
+              <button
+                key={`user-${item.id}`}
+                type="button"
+                role="option"
+                aria-selected={highlightedSkill?.id === item.id}
+                className={`asst-skill-picker__item${
+                  highlightedSkill?.id === item.id ? ' is-active' : ''
+                }`}
+                onClick={() => applySkill(item)}
+                data-testid={`asst-skill-mine-${item.alias}`}
+              >
+                /{item.alias}
+              </button>
+            ))}
+            {!mySkills.length ? (
+              <p className="asst-skill-picker__empty">Нет личных навыков</p>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="asst-composer__row">
+          <div className={`asst-composer__field${selectedSkill ? ' asst-composer__field--skill' : ''}`}>
+            {selectedSkill ? (
+              <span className="asst-composer__skill-inline" data-testid="asst-skill-chip">
+                /{selectedSkill.alias}
+                <button
+                  type="button"
+                  aria-label={`Убрать навык ${selectedSkill.name}`}
+                  onClick={() => setSelectedSkill(null)}
+                  data-testid="asst-skill-chip-clear"
+                >
+                  ×
+                </button>
+              </span>
+            ) : null}
+            <textarea
+              id="asst-draft"
+              value={draft}
+              maxLength={maxChars}
+              placeholder={
+                readOnly
+                  ? 'Отправка сообщений недоступна для аналитика'
+                  : attachments.length
+                    ? 'Добавьте вопрос к файлу или отправьте для саммари…'
+                    : 'Задайте вопрос…'
+              }
+              data-testid="asst-draft"
+              disabled={readOnly}
+              readOnly={readOnly}
+              onChange={(event) => {
+                setDraft(event.target.value)
+                setPickerIndex(0)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' && pickerOpen) {
+                  event.preventDefault()
+                  setDraft((current) =>
+                    current.replace(/(?:^|\s)\/[^\s]*$/, '').replace(/\s+$/, ''),
+                  )
+                  return
+                }
+                if (pickerOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+                  event.preventDefault()
+                  if (!pickerItems.length) return
+                  const delta = event.key === 'ArrowDown' ? 1 : -1
+                  setPickerIndex((current) => {
+                    const next = current + delta
+                    if (next < 0) return pickerItems.length - 1
+                    if (next >= pickerItems.length) return 0
+                    return next
+                  })
+                  return
+                }
+                if (event.key === 'Enter' && !event.shiftKey && pickerOpen) {
+                  event.preventDefault()
+                  if (highlightedSkill) applySkill(highlightedSkill)
+                  return
+                }
+                if (event.key !== 'Enter' || event.shiftKey) return
+                event.preventDefault()
+                if (readOnly || streaming || attachBusy) return
+                if (!draft.trim() && !attachments.length) return
+                event.currentTarget.form?.requestSubmit()
+              }}
+            />
+            <button
+              type="button"
+              className="asst-composer__attach"
+              disabled={readOnly || attachBusy || streaming || attachments.length >= ATTACH_MAX_FILES}
+              onClick={() => fileInputRef.current?.click()}
+              data-testid="asst-attach"
+              title={
+                attachBusy
+                  ? attachHint || 'Читаю файл…'
+                  : 'Прикрепить файл · видео сожмётся в аудио, затем распознаем речь'
+              }
+              aria-label={attachBusy ? attachHint || 'Читаю файл' : 'Прикрепить файл'}
+            >
+              {attachBusy ? (
+                <span className="asst-composer__attach-busy" aria-hidden>
+                  …
+                </span>
+              ) : (
+                <svg
+                  className="asst-composer__attach-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden
+                >
+                  <path
+                    d="M21.44 11.05l-8.49 8.49a5.25 5.25 0 01-7.42-7.42l8.49-8.49a3.5 3.5 0 014.95 4.95l-8.49 8.49a1.75 1.75 0 01-2.47-2.47l7.78-7.78"
+                    stroke="currentColor"
+                    strokeWidth="1.85"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+            </button>
+          </div>
           <Button
             type="submit"
+            className="asst-composer__send"
             disabled={
               readOnly
               || streaming
@@ -1389,22 +2213,28 @@ export function AssistantChat({
           >
             {streaming ? 'Стриминг…' : 'Отправить'}
           </Button>
-        </div>
-        <div
-          className={`asst-composer__meter asst-composer__meter--${charMeterTone}`}
-          role="meter"
-          aria-valuemin={0}
-          aria-valuemax={maxChars}
-          aria-valuenow={charCount}
-          aria-label="Индикатор количества введённых символов"
-          data-testid="asst-char-meter"
-        >
-          <div
-            className="asst-composer__meter-fill"
-            style={{ width: `${charProgress}%` }}
-          />
+          <div className="asst-composer__usage">
+            <span className="asst-composer__usage-count" data-testid="asst-char-count">
+              {charCount} / {maxChars} символов
+            </span>
+            <div
+              className={`asst-composer__meter asst-composer__meter--${charMeterTone}`}
+              role="meter"
+              aria-valuemin={0}
+              aria-valuemax={maxChars}
+              aria-valuenow={charCount}
+              aria-label="Индикатор количества введённых символов"
+              data-testid="asst-char-meter"
+            >
+              <div
+                className="asst-composer__meter-fill"
+                style={{ width: `${charProgress}%` }}
+              />
+            </div>
+          </div>
         </div>
       </form>
+      </div>
     </div>
   )
 }

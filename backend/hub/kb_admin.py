@@ -52,6 +52,7 @@ ALLOWED_EXTENSIONS = frozenset(
 )
 TEXT_EXTENSIONS = frozenset({".txt", ".rtf"})
 WHITESPACE = re.compile(r"\s+")
+_PROGRESS_RE = re.compile(r"(\d+)\s*%")
 WORD_NS = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 }
@@ -75,12 +76,35 @@ def _source_label(source: str) -> str:
     return SOURCE_LABELS.get(source, source)
 
 
-def _document_index_percent(status: str) -> int:
-    if status == KnowledgeBaseDocument.STATUS_INDEXED:
+def document_index_percent(status: str, status_message: str = "") -> int:
+    """100 when indexed; live 0–99 from «Индексация 42%» while running."""
+    if status == "indexed":
         return 100
-    if status == KnowledgeBaseDocument.STATUS_UPLOADED:
+    if status == "error":
         return 0
+    match = _PROGRESS_RE.search(status_message or "")
+    if match:
+        return max(0, min(99, int(match.group(1))))
     return 0
+
+
+def _document_index_percent(status: str, status_message: str = "") -> int:
+    return document_index_percent(status, status_message)
+
+
+def _index_percent_from_docs(documents: list[dict[str, Any]]) -> int:
+    if not documents:
+        return 0
+    total = sum(
+        int(doc.get("index_percent") or 0)
+        if "index_percent" in doc
+        else _document_index_percent(
+            str(doc.get("status") or ""),
+            str(doc.get("status_message") or ""),
+        )
+        for doc in documents
+    )
+    return round(total / len(documents))
 
 
 def _index_percent_from_statuses(statuses: list[str]) -> int:
@@ -88,6 +112,13 @@ def _index_percent_from_statuses(statuses: list[str]) -> int:
         return 0
     total = sum(_document_index_percent(status) for status in statuses)
     return round(total / len(statuses))
+
+
+def write_index_progress(document: Any, percent: int) -> None:
+    """Persist a live percent on the document without flipping it to indexed."""
+    value = max(0, min(99, int(percent)))
+    document.status_message = f"Индексация {value}%"
+    document.save(update_fields=("status_message",))
 
 
 def webhook_suz_status() -> dict[str, str]:
@@ -215,7 +246,9 @@ def serialize_document(
         "status": document.status,
         "status_message": document.status_message,
         "chunk_count": document.chunk_count,
-        "index_percent": _document_index_percent(document.status),
+        "index_percent": _document_index_percent(
+            document.status, document.status_message
+        ),
         "source": source,
         "source_label": _source_label(source),
         "readonly": source == ContactCenterKnowledgeBase.SOURCE_SUZ_BITRIX,
@@ -251,9 +284,7 @@ def serialize_knowledge_base(
         if kb.status == ContactCenterKnowledgeBase.STATUS_ERROR:
             index_percent = 0
     elif include_documents:
-        index_percent = _index_percent_from_statuses(
-            [doc["status"] for doc in documents]
-        )
+        index_percent = _index_percent_from_docs(documents)
     else:
         indexed = kb.documents.filter(
             status=KnowledgeBaseDocument.STATUS_INDEXED
@@ -430,6 +461,53 @@ def _extract_doc_text(filename: str, data: bytes) -> str:
     return _validate_extracted_text(text)
 
 
+def _extract_xlsx_text(data: bytes) -> str:
+    """Read cell values from an XLSX workbook (shared strings + inline)."""
+    try:
+        with zipfile.ZipFile(BytesIO(data)) as archive:
+            names = set(archive.namelist())
+            shared: list[str] = []
+            if "xl/sharedStrings.xml" in names:
+                root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+                ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+                for item in root.findall("m:si", ns):
+                    bits = [node.text or "" for node in item.findall(".//m:t", ns)]
+                    shared.append("".join(bits))
+            sheets = sorted(
+                name
+                for name in names
+                if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
+            )
+            if not sheets:
+                raise KnowledgeBaseError("xlsx file contains no worksheets")
+            lines: list[str] = []
+            for sheet_name in sheets:
+                sheet = ET.fromstring(archive.read(sheet_name))
+                ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+                for row in sheet.findall(".//m:row", ns):
+                    values: list[str] = []
+                    for cell in row.findall("m:c", ns):
+                        value_node = cell.find("m:v", ns)
+                        if value_node is None or value_node.text is None:
+                            continue
+                        raw = value_node.text
+                        if cell.get("t") == "s":
+                            try:
+                                raw = shared[int(raw)]
+                            except (ValueError, IndexError):
+                                pass
+                        if str(raw).strip():
+                            values.append(str(raw).strip())
+                    if values:
+                        lines.append(" | ".join(values))
+    except (BadZipFile, KeyError, ET.ParseError) as exc:
+        raise KnowledgeBaseError("invalid xlsx file") from exc
+    text = "\n".join(lines).strip()
+    if not text:
+        raise KnowledgeBaseError("xlsx file contains no extractable text")
+    return text
+
+
 def _extract_pdf_text(data: bytes) -> str:
     try:
         from pypdf import PdfReader  # type: ignore
@@ -480,6 +558,8 @@ def extract_document_text(filename: str, data: bytes) -> str:
         return _extract_doc_text(filename, data)
     if extension == ".pdf":
         return _validate_extracted_text(_extract_pdf_text(data))
+    if extension == ".xlsx":
+        return _validate_extracted_text(_extract_xlsx_text(data))
     # Binary office/image formats: keep a searchable filename marker for MVP.
     stem = Path(filename).stem.replace("_", " ").replace("-", " ")
     return _validate_extracted_text(normalize_text(f"{stem} {filename}"))
@@ -533,7 +613,7 @@ def upload_document(
         )
     )
     if reindex:
-        reindex_knowledge_base(kb.pk)
+        reindex_knowledge_base(kb.pk, wait=True)
         kb.refresh_from_db()
         document.refresh_from_db()
     return {
@@ -563,19 +643,43 @@ def delete_document(kb_id: int, document_id: int) -> dict[str, Any]:
     return serialize_knowledge_base(kb, include_documents=True)
 
 
-@transaction.atomic
-def reindex_knowledge_base(kb_id: int) -> dict[str, Any]:
-    kb = ContactCenterKnowledgeBase.objects.select_for_update().get(pk=kb_id)
+def reindex_knowledge_base(kb_id: int, *, wait: bool = True) -> dict[str, Any]:
+    kb = ContactCenterKnowledgeBase.objects.get(pk=kb_id)
     _require_manual_kb(kb)
     kb.status = ContactCenterKnowledgeBase.STATUS_INDEXING
     kb.status_message = "Индексация выполняется"
     kb.save(update_fields=("status", "status_message", "updated_at"))
+    if not wait:
+        _spawn_reindex(lambda: _run_cc_reindex(kb_id), name=f"cc-reindex-{kb_id}")
+        return serialize_knowledge_base(kb, include_documents=True)
+    _run_cc_reindex(kb_id)
+    kb.refresh_from_db()
+    return serialize_knowledge_base(kb, include_documents=True)
 
+
+def _spawn_reindex(job, *, name: str) -> None:
+    import threading
+
+    from django.db import close_old_connections
+
+    def runner() -> None:
+        close_old_connections()
+        try:
+            job()
+        finally:
+            close_old_connections()
+
+    threading.Thread(target=runner, daemon=True, name=name).start()
+
+
+def _run_cc_reindex(kb_id: int) -> None:
+    kb = ContactCenterKnowledgeBase.objects.get(pk=kb_id)
+    _require_manual_kb(kb)
     registry = ModelRegistry.load()
     profile = registry.get_profile("kb_cc_production")
     total_chunks = 0
     try:
-        for document in kb.documents.select_for_update():
+        for document in kb.documents.order_by("pk"):
             text = normalize_text(document.extracted_text)
             if not text:
                 document.status = KnowledgeBaseDocument.STATUS_ERROR
@@ -594,6 +698,9 @@ def reindex_knowledge_base(kb_id: int) -> dict[str, Any]:
                 chunk_size=profile.chunk_size_tokens,
                 overlap=profile.chunk_overlap_tokens,
             )
+            write_index_progress(document, 5)
+            kb.status_message = f"Индексация «{document.filename}» 5%"
+            kb.save(update_fields=("status_message", "updated_at"))
             checksum = checksum_for_text(text)
             # Prefer a real source URL from the document body when present
             # (e.g. scraper "URL: https://belarusbank.by/..."), else local stub.
@@ -611,40 +718,52 @@ def reindex_knowledge_base(kb_id: int) -> dict[str, Any]:
             permalink = source_url or (
                 f"https://suz.local/admin-kb/{kb.slug}/documents/{document.pk}"
             )
-            CCProductionChunk.objects.filter(
-                article_id=document.article_id
-            ).delete()
-            CCProductionChunk.objects.bulk_create(
-                [
-                    CCProductionChunk(
-                        article_id=document.article_id,
-                        version_id=document.pk,
-                        chunk_index=index,
-                        title=document.filename,
-                        content=chunk,
-                        permalink=permalink,
-                        locale="ru",
-                        visibility_scope=["kc_operator", "contact_center"],
-                        checksum=checksum,
-                        embedding_model=profile.embedding_model,
-                        embedding=embed_passage(chunk),
-                        is_active=True,
+            step = max(1, len(chunks) // 20)
+            embeddings: list[list[float]] = []
+            for index, chunk in enumerate(chunks):
+                embeddings.append(embed_passage(chunk))
+                if index == 0 or (index + 1) % step == 0 or index + 1 == len(chunks):
+                    percent = min(99, max(5, round(100 * (index + 1) / len(chunks))))
+                    write_index_progress(document, percent)
+                    kb.status_message = (
+                        f"Индексация «{document.filename}» {percent}%"
                     )
-                    for index, chunk in enumerate(chunks)
-                ]
-            )
-            document.status = KnowledgeBaseDocument.STATUS_INDEXED
-            document.status_message = ""
-            document.chunk_count = len(chunks)
-            document.indexed_at = timezone.now()
-            document.save(
-                update_fields=(
-                    "status",
-                    "status_message",
-                    "chunk_count",
-                    "indexed_at",
+                    kb.save(update_fields=("status_message", "updated_at"))
+            with transaction.atomic():
+                CCProductionChunk.objects.filter(
+                    article_id=document.article_id
+                ).delete()
+                CCProductionChunk.objects.bulk_create(
+                    [
+                        CCProductionChunk(
+                            article_id=document.article_id,
+                            version_id=document.pk,
+                            chunk_index=index,
+                            title=document.filename,
+                            content=chunk,
+                            permalink=permalink,
+                            locale="ru",
+                            visibility_scope=["kc_operator", "contact_center"],
+                            checksum=checksum,
+                            embedding_model=profile.embedding_model,
+                            embedding=embeddings[index],
+                            is_active=True,
+                        )
+                        for index, chunk in enumerate(chunks)
+                    ]
                 )
-            )
+                document.status = KnowledgeBaseDocument.STATUS_INDEXED
+                document.status_message = ""
+                document.chunk_count = len(chunks)
+                document.indexed_at = timezone.now()
+                document.save(
+                    update_fields=(
+                        "status",
+                        "status_message",
+                        "chunk_count",
+                        "indexed_at",
+                    )
+                )
             total_chunks += len(chunks)
         kb.status = ContactCenterKnowledgeBase.STATUS_READY
         kb.status_message = "Индекс актуален"

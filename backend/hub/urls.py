@@ -3,13 +3,18 @@ from django.urls import path
 from hub.views import (
     assistant_capabilities,
     assistant_capability_detail,
+    assistant_doc_template_detail,
+    assistant_doc_templates,
     assistant_knowledge_base_detail,
     assistant_knowledge_base_document_detail,
+    assistant_knowledge_base_crawl,
     assistant_knowledge_base_reindex,
     assistant_knowledge_base_upload,
     assistant_knowledge_bases,
     assistant_prompt_detail,
     assistant_prompts,
+    assistant_skill_detail,
+    assistant_skills,
     knowledge_base_detail,
     knowledge_base_document_detail,
     knowledge_base_reindex,
@@ -91,6 +96,11 @@ urlpatterns = [
         name="assistant_knowledge_base_reindex",
     ),
     path(
+        "assistant/kb/<int:kb_id>/crawl/",
+        assistant_knowledge_base_crawl,
+        name="assistant_knowledge_base_crawl",
+    ),
+    path(
         "assistant/kb/<int:kb_id>/documents/<int:document_id>/",
         assistant_knowledge_base_document_detail,
         name="assistant_knowledge_base_document_detail",
@@ -110,5 +120,21 @@ urlpatterns = [
         "assistant/capabilities/<slug:code>/",
         assistant_capability_detail,
         name="assistant_capability_detail",
+    ),
+    path("assistant/skills/", assistant_skills, name="assistant_skills"),
+    path(
+        "assistant/skills/<int:skill_id>/",
+        assistant_skill_detail,
+        name="assistant_skill_detail",
+    ),
+    path(
+        "assistant/doc-templates/",
+        assistant_doc_templates,
+        name="assistant_doc_templates",
+    ),
+    path(
+        "assistant/doc-templates/<int:template_id>/",
+        assistant_doc_template_detail,
+        name="assistant_doc_template_detail",
     ),
 ]

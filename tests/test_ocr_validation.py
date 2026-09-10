@@ -7,6 +7,7 @@ import io
 import json
 import os
 import sys
+import zipfile
 from pathlib import Path
 
 
@@ -24,7 +25,12 @@ from django.contrib.auth.models import Group  # noqa: E402
 from django.test import Client, TestCase  # noqa: E402
 
 from auth.roles import ROLES_BY_CODE  # noqa: E402
-from ocr.export import build_csv_export, build_json_export  # noqa: E402
+from ocr.export import (  # noqa: E402
+    build_csv_export,
+    build_docx_export,
+    build_json_export,
+    labeled_export_lines,
+)
 from ocr.validation import (  # noqa: E402
     STATUS_PENDING_REVIEW,
     STATUS_VALID,
@@ -78,7 +84,8 @@ class OcrValidationEngineTest(TestCase):
         result = validate_document(
             "passport",
             {
-                "full_name": "Ив",
+                "surname": "И",
+                "given_name": "И",
                 "series": "123",
                 "number": "ABC",
             },
@@ -89,7 +96,7 @@ class OcrValidationEngineTest(TestCase):
         codes = {item.code for item in result.anomalies}
         self.assertIn("invalid_format", codes)
         rejected = set(result.rejected_fields)
-        self.assertTrue({"series", "number", "full_name"} <= rejected)
+        self.assertTrue({"series", "number", "surname", "given_name"} <= rejected)
         with self.assertRaises(ValidationRequestError):
             assert_downstream_ready(result)
 
@@ -130,6 +137,31 @@ class OcrValidationEngineTest(TestCase):
         rows = list(csv.reader(io.StringIO(csv_bytes.decode("utf-8-sig"))))
         self.assertEqual(rows[0][0], "document_type")
         self.assertTrue(any(row[2] == "product" for row in rows[1:]))
+
+        lines = labeled_export_lines(valid)
+        self.assertIn("Номер заявления: APP-104", lines)
+        self.assertIn("Продукт: платёжная карта", lines)
+        self.assertTrue(all(":" in line for line in lines))
+        self.assertFalse(any("application_number" in line for line in lines))
+        docx_bytes = build_docx_export(valid)
+        self.assertTrue(docx_bytes.startswith(b"PK"))
+        with zipfile.ZipFile(io.BytesIO(docx_bytes)) as archive:
+            xml = archive.read("word/document.xml")
+        self.assertIn("Номер заявления".encode("utf-8"), xml)
+
+        noisy = validate_document(
+            "passport",
+            {
+                "surname": "SAYAPIN",
+                "given_name": "IVAN",
+                "number": "1234567",
+                "слкд": "еспылика",
+            },
+        )
+        noisy_lines = labeled_export_lines(noisy)
+        self.assertIn("Фамилия: SAYAPIN", noisy_lines)
+        self.assertIn("Имя: IVAN", noisy_lines)
+        self.assertFalse(any("еспылика" in line or "слкд" in line for line in noisy_lines))
 
         invalid = validate_document("passport", {"series": "MP"})
         with self.assertRaises(ValidationRequestError):
@@ -213,6 +245,33 @@ class OcrValidationApiTest(TestCase):
         self.assertIn("text/csv", export_csv["Content-Type"])
         self.assertIn(b"document_number", export_csv.content)
         self.assertIn(b"42", export_csv.content)
+
+        export_pdf = client.post(
+            "/api/v1/ocr/export/?format=pdf",
+            data=json.dumps(good_body),
+            content_type="application/json",
+        )
+        self.assertEqual(export_pdf.status_code, 200, export_pdf.content)
+        self.assertIn("application/pdf", export_pdf["Content-Type"])
+        self.assertTrue(export_pdf.content.startswith(b"%PDF"))
+
+        export_docx = client.post(
+            "/api/v1/ocr/export/?format=docx",
+            data=json.dumps(good_body),
+            content_type="application/json",
+        )
+        self.assertEqual(export_docx.status_code, 200, export_docx.content)
+        self.assertIn(
+            "wordprocessingml.document",
+            export_docx["Content-Type"],
+        )
+        self.assertTrue(export_docx.content.startswith(b"PK"))
+        with zipfile.ZipFile(io.BytesIO(export_docx.content)) as archive:
+            xml = archive.read("word/document.xml")
+        self.assertIn("Плательщик".encode("utf-8"), xml)
+        self.assertIn("ООО Альфа".encode("utf-8"), xml)
+        self.assertNotIn(b"OCR HITL", xml)
+        self.assertNotIn(b"document_number", xml)
 
         blocked = client.post(
             "/api/v1/ocr/export/?format=json",

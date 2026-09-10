@@ -12,7 +12,12 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
 
-from hub.kb_admin import KnowledgeBaseError, extract_document_text
+from hub.kb_admin import (
+    KnowledgeBaseError,
+    document_index_percent,
+    extract_document_text,
+    write_index_progress,
+)
 from hub.models import (
     AssistantCapability,
     AssistantKnowledgeBase,
@@ -95,7 +100,7 @@ DEFAULT_CAPABILITIES: tuple[dict[str, Any], ...] = (
     {
         "code": "generate_document",
         "name": "Генерация документов",
-        "description": "Word/PDF по шаблону.",
+        "description": "Word/PDF/Excel/PPT/BPMN по шаблону банка.",
         "deep_link": "assistant_tools",
         "category": "tool",
         "sort_order": 30,
@@ -452,6 +457,9 @@ def serialize_document(document: AssistantKnowledgeBaseDocument) -> dict[str, An
             document.indexed_at.isoformat() if document.indexed_at else None
         ),
         "uploaded_by": document.uploaded_by,
+        "index_percent": document_index_percent(
+            document.status, document.status_message
+        ),
     }
 
 
@@ -478,19 +486,84 @@ def serialize_kb(
         "created_at": kb.created_at.isoformat(),
         "updated_at": kb.updated_at.isoformat(),
         "created_by": kb.created_by,
+        "source": kb.source or AssistantKnowledgeBase.SOURCE_MANUAL,
+        "source_label": (
+            "Сайт"
+            if kb.source == AssistantKnowledgeBase.SOURCE_WEBSITE
+            else "Ручная загрузка"
+        ),
+        "start_url": kb.start_url,
+        "crawl_depth": kb.crawl_depth,
+        "max_pages": kb.max_pages,
+        "ignore_robots": kb.ignore_robots,
+        "allowed_hosts": list(kb.allowed_hosts or []),
     }
+    from hub.website_crawl import latest_crawl_job, serialize_crawl_job, serialize_website_page
+
+    job = latest_crawl_job(kb)
+    payload["latest_job"] = serialize_crawl_job(job)
+    file_docs = [
+        serialize_document(document) for document in kb.documents.all()
+    ]
+    from ingest.web_fetcher import is_sitemap_url
+
+    page_docs = [
+        serialize_website_page(page)
+        for page in kb.website_pages.all()
+        if page.extracted_text and not is_sitemap_url(page.url)
+    ]
     if include_documents:
-        payload["documents"] = [
-            serialize_document(document) for document in kb.documents.all()
-        ]
+        payload["documents"] = file_docs + page_docs
+        payload["pages"] = page_docs
+        percents = [int(doc["index_percent"]) for doc in payload["documents"]]
+        payload["index_percent"] = (
+            round(sum(percents) / len(percents)) if percents else 0
+        )
+        if kb.status == AssistantKnowledgeBase.STATUS_INDEXING and percents:
+            payload["index_percent"] = min(payload["index_percent"], 99)
+    else:
+        docs = list(kb.documents.all())
+        if docs:
+            percents = [
+                document_index_percent(item.status, item.status_message)
+                for item in docs
+            ]
+            payload["index_percent"] = round(sum(percents) / len(percents))
+        else:
+            payload["index_percent"] = (
+                100
+                if kb.status == AssistantKnowledgeBase.STATUS_READY
+                and kb.document_count
+                else 0
+            )
+        if kb.status == AssistantKnowledgeBase.STATUS_INDEXING:
+            payload["index_percent"] = min(int(payload["index_percent"]), 99)
+    if kb.source == AssistantKnowledgeBase.SOURCE_WEBSITE:
+        payload["index_percent"] = _website_index_percent(kb, job)
     return payload
+
+
+def _website_index_percent(kb: AssistantKnowledgeBase, job) -> int:
+    if kb.status == AssistantKnowledgeBase.STATUS_READY and kb.document_count:
+        return 100
+    if job is None:
+        return 0
+    if job.status == "ready":
+        return 100 if kb.document_count or int(job.pages_ok or 0) else 0
+    if job.status == "failed":
+        return 0
+    if job.status == "indexing":
+        return 85
+    if kb.max_pages:
+        return max(5, min(80, round(100 * int(job.pages_ok) / kb.max_pages)))
+    return 10
 
 
 def get_assistant_kb(kb_id: int) -> dict[str, Any]:
     try:
-        kb = AssistantKnowledgeBase.objects.prefetch_related("documents").get(
-            pk=kb_id
-        )
+        kb = AssistantKnowledgeBase.objects.prefetch_related(
+            "documents", "website_pages", "crawl_jobs"
+        ).get(pk=kb_id)
     except AssistantKnowledgeBase.DoesNotExist as exc:
         raise AssistantAdminError("KB not found") from exc
     return serialize_kb(kb, include_documents=True)
@@ -604,11 +677,34 @@ def create_assistant_kb(
             f"База с названием «{name}» уже существует. "
             "Выберите другое имя."
         )
+    source = str(payload.get("source") or AssistantKnowledgeBase.SOURCE_MANUAL).strip()
+    if source not in {
+        AssistantKnowledgeBase.SOURCE_MANUAL,
+        AssistantKnowledgeBase.SOURCE_WEBSITE,
+    }:
+        raise AssistantAdminError("source must be manual or website")
+    from ingest.web_fetcher import normalize_allowed_hosts
+
+    allowed_hosts = normalize_allowed_hosts(payload.get("allowed_hosts"))
+    start_url = str(payload.get("start_url") or "").strip()
+    if source == AssistantKnowledgeBase.SOURCE_WEBSITE:
+        if not start_url:
+            raise AssistantAdminError("укажите стартовый URL сайта")
+        if not allowed_hosts:
+            raise AssistantAdminError("укажите разрешённые домены (allowed_hosts)")
     kb = AssistantKnowledgeBase.objects.create(
         name=name,
         slug=slug,
         scope=str(payload.get("scope") or "department")[:64],
         description=str(payload.get("description") or ""),
+        source=source,
+        start_url=start_url,
+        crawl_depth=max(0, min(10, int(payload.get("depth") or payload.get("crawl_depth") or 1))),
+        max_pages=max(1, min(2000, int(payload.get("max_pages") or 15))),
+        ignore_robots=str(payload.get("ignore_robots") or "").lower()
+        in {"1", "true", "yes", "on"}
+        or payload.get("ignore_robots") is True,
+        allowed_hosts=allowed_hosts,
         status=AssistantKnowledgeBase.STATUS_IDLE,
         created_by=username,
     )
@@ -623,6 +719,7 @@ def delete_assistant_kb(kb_id: int) -> None:
     if not kb.slug.startswith(ASSISTANT_SLUG_PREFIX):
         raise AssistantAdminError("refusing to delete non-assistant namespace")
     article_ids = list(kb.documents.values_list("article_id", flat=True))
+    article_ids.extend(kb.website_pages.values_list("article_id", flat=True))
     if article_ids:
         AssistantProductionChunk.objects.filter(
             kb_slug=kb.slug,
@@ -697,7 +794,7 @@ def upload_assistant_document(
         kb_pk = kb.pk
 
     if reindex:
-        kb_payload = reindex_assistant_kb(kb_pk)
+        kb_payload = reindex_assistant_kb(kb_pk, wait=True)
         document = AssistantKnowledgeBaseDocument.objects.get(pk=document_id)
         return {
             "knowledge_base": kb_payload,
@@ -748,7 +845,7 @@ def delete_assistant_document(kb_id: int, document_id: int) -> dict[str, Any]:
         return serialize_kb(kb, include_documents=True)
 
 
-def reindex_assistant_kb(kb_id: int) -> dict[str, Any]:
+def reindex_assistant_kb(kb_id: int, *, wait: bool = False) -> dict[str, Any]:
     try:
         kb = AssistantKnowledgeBase.objects.get(pk=kb_id)
     except AssistantKnowledgeBase.DoesNotExist as exc:
@@ -759,7 +856,28 @@ def reindex_assistant_kb(kb_id: int) -> dict[str, Any]:
     kb.status = AssistantKnowledgeBase.STATUS_INDEXING
     kb.status_message = "Индексация выполняется"
     kb.save(update_fields=("status", "status_message", "updated_at"))
+    for document in kb.documents.exclude(
+        status=AssistantKnowledgeBaseDocument.STATUS_ERROR
+    ):
+        document.status = AssistantKnowledgeBaseDocument.STATUS_UPLOADED
+        document.save(update_fields=("status",))
+        write_index_progress(document, 0)
 
+    if wait:
+        _run_assistant_reindex(kb_id)
+        return get_assistant_kb(kb_id)
+
+    from hub.kb_admin import _spawn_reindex
+
+    _spawn_reindex(
+        lambda: _run_assistant_reindex(kb_id),
+        name=f"assistant-reindex-{kb_id}",
+    )
+    return get_assistant_kb(kb_id)
+
+
+def _run_assistant_reindex(kb_id: int) -> None:
+    kb = AssistantKnowledgeBase.objects.get(pk=kb_id)
     chunk_size, overlap, embedding_model = _chunk_profile()
     total_chunks = 0
     try:
@@ -783,8 +901,22 @@ def reindex_assistant_kb(kb_id: int) -> dict[str, Any]:
                 chunk_size=chunk_size,
                 overlap=overlap,
             )
+            write_index_progress(document, 5)
+            kb.status_message = f"Индексация «{document.filename}» 5%"
+            kb.save(update_fields=("status_message", "updated_at"))
             checksum = checksum_for_text(text)
-            vectors = embed_texts(chunks, is_query=False)
+            batch = 8
+            vectors: list[list[float]] = []
+            for start in range(0, len(chunks), batch):
+                part = chunks[start : start + batch]
+                vectors.extend(embed_texts(part, is_query=False))
+                done = start + len(part)
+                percent = min(99, max(5, round(100 * done / len(chunks))))
+                write_index_progress(document, percent)
+                kb.status_message = (
+                    f"Индексация «{document.filename}» {percent}%"
+                )
+                kb.save(update_fields=("status_message", "updated_at"))
             with transaction.atomic():
                 AssistantProductionChunk.objects.filter(
                     kb_slug=kb.slug,
@@ -846,8 +978,6 @@ def reindex_assistant_kb(kb_id: int) -> dict[str, Any]:
         kb.status_message = str(exc)[:500]
         kb.save(update_fields=("status", "status_message", "updated_at"))
         raise AssistantAdminError(kb.status_message) from exc
-
-    return serialize_kb(kb, include_documents=True)
 
 
 def list_prompts() -> list[dict[str, Any]]:

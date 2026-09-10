@@ -60,14 +60,18 @@ function candidatePasswords(): string[] {
   return [...new Set(passwords)]
 }
 
+function candidateUsernames(): string[] {
+  const configured = String(import.meta.env.VITE_DEV_AUTH_USER ?? '').trim()
+  return [...new Set([configured, 'dev-role-01', 'dev-role-02'].filter(Boolean))]
+}
+
 async function loginDevUser(): Promise<boolean> {
-  const username = String(
-    import.meta.env.VITE_DEV_AUTH_USER ?? 'dev-role-01',
-  ).trim()
-  for (const password of candidatePasswords()) {
-    if (await tryLogin(username, password).catch(() => false)) {
-      workingPassword = password
-      return true
+  for (const username of candidateUsernames()) {
+    for (const password of candidatePasswords()) {
+      if (await tryLogin(username, password).catch(() => false)) {
+        workingPassword = password
+        return true
+      }
     }
   }
   return false
@@ -96,9 +100,11 @@ export async function ensureCsrfToken(forceRefresh = false): Promise<string> {
   return token
 }
 
-async function ensureDevSessionOnce(): Promise<boolean> {
+async function ensureDevSessionOnce(forceRelogin = false): Promise<boolean> {
   // Always re-check /me/ — also refreshes csrftoken after login rotation.
-  let me = await fetchAuthMe().catch(() => ({ authenticated: false }))
+  let me = forceRelogin
+    ? { authenticated: false }
+    : await fetchAuthMe().catch(() => ({ authenticated: false }))
   let justLoggedIn = false
   if (!me.authenticated) {
     if (!isDevRuntime()) return false
@@ -109,15 +115,15 @@ async function ensureDevSessionOnce(): Promise<boolean> {
     if (!me.authenticated) return false
   }
 
-  const csrf = await ensureCsrfToken(justLoggedIn)
+  const csrf = await ensureCsrfToken(justLoggedIn || forceRelogin)
   return Boolean(csrf)
 }
 
 /** Returns true when the browser has an authenticated Django session + CSRF cookie. */
-export async function ensureDevSession(): Promise<boolean> {
-  if (inFlight) return inFlight
+export async function ensureDevSession(forceRelogin = false): Promise<boolean> {
+  if (inFlight && !forceRelogin) return inFlight
 
-  inFlight = ensureDevSessionOnce()
+  inFlight = ensureDevSessionOnce(forceRelogin)
 
   try {
     return await inFlight

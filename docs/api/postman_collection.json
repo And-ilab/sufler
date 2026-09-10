@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Sufler AI Hub API",
-    "description": "Integrator-facing OpenAPI for приёмка and Postman. Covers `/api/v1/assistant` (III.7 / III.10.2), `/api/v1/sufler` (FR-CC-03 / II.3.5.5), and `/api/v1/knowledge` (SUZ ingest INT-01…09).",
+    "description": "Integrator-facing OpenAPI for приёмка and Postman. Covers `/api/v1/assistant` (III.7 / III.10.2), `/api/v1/sufler` (FR-CC-03 / II.3.5.5), `/api/v1/knowledge` (SUZ ingest INT-01…09), and `/api/v1/ocr` (P6-01a, §6.1.4 / §6.1.17).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_postman_id": "sufler-ai-hub-v1"
   },
@@ -373,8 +373,286 @@
       ]
     },
     {
+      "name": "ocr",
+      "item": [
+        {
+          "name": "Enqueue OCR job (multipart)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "description": "Optional bearer"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/ocr/jobs/",
+              "protocol": "http",
+              "host": [
+                "{{base_host}}"
+              ],
+              "port": "{{base_port}}",
+              "path": [
+                "api",
+                "v1",
+                "ocr",
+                "jobs"
+              ],
+              "query": []
+            },
+            "description": "Upload a scan (pdf/jpg/png/tiff). Pass `doc_type` with `mode=template`, or `mode=ml` for auto-detect. Requires `ocr.use`. Async only — poll GET /jobs/{id}/.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "description": "",
+                  "src": ""
+                },
+                {
+                  "key": "doc_type",
+                  "type": "text",
+                  "description": "Document type / template id",
+                  "value": "passport"
+                },
+                {
+                  "key": "document_type",
+                  "type": "text",
+                  "description": "Alias for doc_type",
+                  "value": ""
+                },
+                {
+                  "key": "mode",
+                  "type": "text",
+                  "description": "template requires doc_type; ml auto-detects type",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "OCR job status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "description": "Optional bearer"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/ocr/jobs/{id}/",
+              "protocol": "http",
+              "host": [
+                "{{base_host}}"
+              ],
+              "port": "{{base_port}}",
+              "path": [
+                "api",
+                "v1",
+                "ocr",
+                "jobs",
+                ":id"
+              ],
+              "query": []
+            },
+            "description": "status, progress (0–100), error. Requires `ocr.use`."
+          }
+        },
+        {
+          "name": "Approve / edit OCR fields (optional stub)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "description": "Optional bearer"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/ocr/jobs/{id}/approve/",
+              "protocol": "http",
+              "host": [
+                "{{base_host}}"
+              ],
+              "port": "{{base_port}}",
+              "path": [
+                "api",
+                "v1",
+                "ocr",
+                "jobs",
+                ":id",
+                "approve"
+              ],
+              "query": []
+            },
+            "description": "Optional HITL confirm. Full HITL UI is P6-02. Requires `ocr.use`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "OCR fields JSON",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "description": "Optional bearer"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/ocr/jobs/{id}/result/",
+              "protocol": "http",
+              "host": [
+                "{{base_host}}"
+              ],
+              "port": "{{base_port}}",
+              "path": [
+                "api",
+                "v1",
+                "ocr",
+                "jobs",
+                ":id",
+                "result"
+              ],
+              "query": []
+            },
+            "description": "Structured fields with confidence. 409 if the job is not completed."
+          }
+        }
+      ]
+    },
+    {
       "name": "sufler",
       "item": [
+        {
+          "name": "Enter a suggested scenario from the operator lamp",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "description": "Optional bearer"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/sufler/scenario/enter",
+              "protocol": "http",
+              "host": [
+                "{{base_host}}"
+              ],
+              "port": "{{base_port}}",
+              "path": [
+                "api",
+                "v1",
+                "sufler",
+                "scenario",
+                "enter"
+              ],
+              "query": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Leave the active scenario and return to knowledge base",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "description": "Optional bearer"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/sufler/scenario/exit",
+              "protocol": "http",
+              "host": [
+                "{{base_host}}"
+              ],
+              "port": "{{base_port}}",
+              "path": [
+                "api",
+                "v1",
+                "sufler",
+                "scenario",
+                "exit"
+              ],
+              "query": []
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
         {
           "name": "Ranked operator hints (FR-CC-03 / FR-CC-14)",
           "request": {
@@ -412,7 +690,7 @@
             "description": "Requires `sufler.telephony` or `sufler.chat`. Returns hints with %% relevance and SUZ citations.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"text\": \"как оформить дебетовую карту\",\n  \"limit\": 5\n}",
+              "raw": "{\n  \"text\": \"как оформить дебетовую карту\",\n  \"limit\": 3\n}",
               "options": {
                 "raw": {
                   "language": "json"

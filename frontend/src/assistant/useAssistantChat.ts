@@ -4,7 +4,13 @@ import {
   fieldDisplayValue,
   type ChatAttachmentPayload,
 } from './api/attachments'
+import {
+  generateFromPrompt,
+  looksLikeContentPrompt,
+} from './api/docTemplates'
 import { streamAssistantChat, streamDemoChat } from './api/chatStream'
+import { compactChatText } from './compactChatText'
+import { finishLastSentence } from './finishLastSentence'
 import {
   createDialogInHistory,
   deleteDialogFromHistory,
@@ -14,9 +20,11 @@ import {
   savePersistedChat,
   type ChatDialogSummary,
 } from './chatPersistence'
+import { filterOcrFields } from '../ai-hub/ocr/fieldQuality'
 import {
   DEFAULT_TOOLS,
   SEED_MESSAGES,
+  type AssistantGeneratedDraft,
   type AssistantMessage,
   type AssistantOcrResult,
   type AssistantToolState,
@@ -40,16 +48,28 @@ const OCR_FIELD_LABELS: Record<string, string> = {
   amount: 'Сумма',
   purpose: 'Назначение',
   currency: 'Валюта',
+  address: 'Адрес',
+  issued_by: 'Кем выдан',
+  birth_place: 'Место рождения',
+  personal_number: 'Личный номер',
+  nationality: 'Гражданство',
 }
 
 function toAssistantOcr(attachment: ChatAttachmentPayload): AssistantOcrResult | null {
   const ocr = attachment.ocr
   if (!ocr?.job_id) return null
-  const fields = Object.entries(ocr.fields || {}).map(([id, raw]) => ({
-    id,
-    label: OCR_FIELD_LABELS[id] || id,
-    value: fieldDisplayValue(raw),
-    confidence: fieldConfidencePercent(raw),
+  const fields = filterOcrFields(Object.entries(ocr.fields || {}).map(([id, raw]) => {
+    const explicit = (
+      raw && typeof raw === 'object' && raw !== null && 'label' in raw
+        ? String((raw as { label?: unknown }).label || '').trim()
+        : ''
+    )
+    return {
+      id,
+      label: OCR_FIELD_LABELS[id] || explicit || id,
+      value: fieldDisplayValue(raw),
+      confidence: fieldConfidencePercent(raw),
+    }
   }))
   return {
     jobId: ocr.job_id,
@@ -70,6 +90,9 @@ export interface UseAssistantChatOptions {
   sessionId?: string
   /** Selected assistant_* KB slugs for RAG. */
   getKbSlugs?: () => string[]
+  /** Active slash skill for this send (org or personal). */
+  getSkillId?: () => number | null
+  getSkillAlias?: () => string | null
   /** Persist chat across remounts / full-page open (localStorage history). */
   persist?: boolean
 }
@@ -79,6 +102,8 @@ export function useAssistantChat({
   initialMessages,
   sessionId: sessionIdProp,
   getKbSlugs,
+  getSkillId,
+  getSkillAlias,
   persist = true,
 }: UseAssistantChatOptions = {}) {
   const history = persist && !demoMode ? loadChatHistory() : null
@@ -169,6 +194,36 @@ export function useAssistantChat({
     }, 450)
   }, [])
 
+  const setToolState = useCallback((
+    toolId: ToolId,
+    patch: Partial<AssistantToolState>,
+  ) => {
+    setTools((current) =>
+      current.map((tool) => (tool.id === toolId ? { ...tool, ...patch } : tool)),
+    )
+  }, [])
+
+  const pushLocalAssistantMessage = useCallback((
+    content: string,
+    draft?: AssistantGeneratedDraft,
+  ) => {
+    const id = uid('asst')
+    setMessages((current) => [
+      ...current,
+      { id, role: 'assistant', content, draft, tools: draft ? ['text'] : ['document'] },
+    ])
+  }, [])
+
+  const updateDraftText = useCallback((messageId: string, text: string) => {
+    setMessages((current) =>
+      current.map((item) =>
+        item.id === messageId && item.draft
+          ? { ...item, draft: { ...item.draft, text }, content: item.content }
+          : item,
+      ),
+    )
+  }, [])
+
   const sendMessage = useCallback(
     async (text: string, attachments: ChatAttachmentPayload[] = []) => {
       const trimmed = text.trim()
@@ -178,12 +233,15 @@ export function useAssistantChat({
       if ((!trimmed && !readyAttachments.length) || streaming) return
 
       const ocrResult = readyAttachments.map(toAssistantOcr).find(Boolean) || null
+      const mediaOnly = readyAttachments.some((item) => item.media)
       const displayText =
         trimmed
         || (ocrResult
           ? `Распознай документ «${readyAttachments[0]?.name || 'файл'}» и покажи поля.`
           : readyAttachments.length === 1
-            ? `Суммаризируй вложение «${readyAttachments[0].name}».`
+            ? mediaOnly
+              ? `Суммаризируй запись «${readyAttachments[0].name}».`
+              : `Суммаризируй вложение «${readyAttachments[0].name}».`
             : 'Суммаризируй вложения.')
       const userId = uid('user')
       const assistantId = uid('asst')
@@ -194,9 +252,14 @@ export function useAssistantChat({
           id: userId,
           role: 'user',
           content: displayText,
+          skill: getSkillAlias?.()
+            ? { alias: getSkillAlias() as string }
+            : undefined,
           attachments: readyAttachments.map((item) => ({
             name: item.name,
             type: item.type,
+            text: item.text,
+            mediaKind: item.media?.kind,
           })),
         },
         {
@@ -239,6 +302,50 @@ export function useAssistantChat({
         return
       }
 
+      if (trimmed && looksLikeContentPrompt(trimmed) && !readyAttachments.length) {
+        try {
+          const result = await generateFromPrompt(trimmed)
+          const draft: AssistantGeneratedDraft = {
+            kind: result.kind,
+            templateId: result.template_id,
+            templateName: result.template_name,
+            filename: result.filename,
+            outputFormat: result.output_format,
+            formatLabel: result.format_label,
+            text: result.text,
+            fields: result.fields || {},
+          }
+          const lead =
+            result.kind === 'text'
+              ? `Черновик «${result.template_name}» — можно править в поле ниже.`
+              : `Подготовлен файл «${result.template_name}». Скачайте или поправьте текст и скачайте снова.`
+          setMessages((current) =>
+            current.map((item) =>
+              item.id === assistantId
+                ? { ...item, content: lead, pending: false, draft, tools: ['text'] }
+                : item,
+            ),
+          )
+        } catch (err) {
+          setMessages((current) =>
+            current.map((item) =>
+              item.id === assistantId
+                ? {
+                    ...item,
+                    pending: false,
+                    content:
+                      err instanceof Error
+                        ? err.message
+                        : 'Не удалось сформировать черновик',
+                  }
+                : item,
+            ),
+          )
+          setError(err instanceof Error ? err.message : 'Не удалось сформировать черновик')
+        }
+        return
+      }
+
       setStreaming(true)
 
       const controller = new AbortController()
@@ -251,18 +358,20 @@ export function useAssistantChat({
               message: trimmed || displayText,
               sessionId,
               kbSlugs: getKbSlugs?.() ?? [],
+              skillId: getSkillId?.() ?? undefined,
               attachments: readyAttachments.map((item) => ({
                 name: item.name,
                 type: item.type,
                 text: item.text || '',
                 content_type: item.content_type,
                 size_bytes: item.size_bytes,
+                media: item.media,
               })),
               signal: controller.signal,
             })
 
         for await (const chunk of stream) {
-          if (chunk.sources?.length) {
+          if (Array.isArray(chunk.sources)) {
             setMessages((current) =>
               current.map((item) =>
                 item.id === assistantId
@@ -296,7 +405,17 @@ export function useAssistantChat({
 
         setMessages((current) =>
           current.map((item) =>
-            item.id === assistantId ? { ...item, pending: false } : item,
+            item.id === assistantId
+              ? {
+                  ...item,
+                  pending: false,
+                  content: compactChatText(
+                    item.expanded
+                      ? item.content
+                      : finishLastSentence(item.content),
+                  ),
+                }
+              : item,
           ),
         )
       } catch (err) {
@@ -307,7 +426,9 @@ export function useAssistantChat({
                 ? {
                     ...item,
                     pending: false,
-                    content: item.content || 'Генерация остановлена.',
+                    content: item.content
+                      ? compactChatText(finishLastSentence(item.content))
+                      : 'Генерация остановлена.',
                   }
                 : item,
             ),
@@ -324,7 +445,140 @@ export function useAssistantChat({
         setStreaming(false)
       }
     },
-    [demoMode, getKbSlugs, sessionId, streaming],
+    [demoMode, getKbSlugs, getSkillAlias, getSkillId, sessionId, streaming],
+  )
+
+  const expandAnswer = useCallback(
+    async (messageId: string) => {
+      const current = messagesRef.current
+      const target = current.find((item) => item.id === messageId)
+      if (!target || target.role !== 'assistant' || streaming) return
+
+      if (target.expanded) {
+        setMessages((items) =>
+          items.map((item) =>
+            item.id === messageId
+              ? {
+                  ...item,
+                  content: item.shortContent || item.content,
+                  expanded: false,
+                }
+              : item,
+          ),
+        )
+        return
+      }
+
+      if (target.detailContent) {
+        setMessages((items) =>
+          items.map((item) =>
+            item.id === messageId
+              ? { ...item, content: item.detailContent || item.content, expanded: true }
+              : item,
+          ),
+        )
+        return
+      }
+
+      const targetIndex = current.findIndex((item) => item.id === messageId)
+      const question = [...current.slice(0, targetIndex)]
+        .reverse()
+        .find((item) => item.role === 'user')
+      if (!question?.content.trim()) return
+
+      const shortContent = target.content
+      setError('')
+      setMessages((items) =>
+        items.map((item) =>
+          item.id === messageId
+            ? {
+                ...item,
+                shortContent,
+                content: '',
+                pending: true,
+                expanded: true,
+              }
+            : item,
+        ),
+      )
+      setStreaming(true)
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      try {
+        const stream = demoMode
+          ? streamDemoChat(question.content, controller.signal, true)
+          : streamAssistantChat({
+              message: question.content,
+              sessionId,
+              kbSlugs: getKbSlugs?.() ?? [],
+              skillId: getSkillId?.() ?? undefined,
+              expand: true,
+              signal: controller.signal,
+            })
+
+        for await (const chunk of stream) {
+          if (chunk.content) {
+            setMessages((items) =>
+              items.map((item) =>
+                item.id === messageId
+                  ? { ...item, content: item.content + chunk.content }
+                  : item,
+              ),
+            )
+          }
+          if (chunk.done) break
+        }
+
+        setMessages((items) =>
+          items.map((item) =>
+            item.id === messageId
+              ? {
+                  ...item,
+                  pending: false,
+                  detailContent: item.content,
+                  expanded: true,
+                }
+              : item,
+          ),
+        )
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          setMessages((items) =>
+            items.map((item) =>
+              item.id === messageId
+                ? {
+                    ...item,
+                    pending: false,
+                    content: item.content || shortContent,
+                    detailContent: item.content || undefined,
+                    expanded: Boolean(item.content),
+                  }
+                : item,
+            ),
+          )
+        } else {
+          const message = err instanceof Error ? err.message : 'Ошибка стриминга'
+          setError(message)
+          setMessages((items) =>
+            items.map((item) =>
+              item.id === messageId
+                ? {
+                    ...item,
+                    pending: false,
+                    content: shortContent,
+                    expanded: false,
+                  }
+                : item,
+            ),
+          )
+        }
+      } finally {
+        abortRef.current = null
+        setStreaming(false)
+      }
+    },
+    [demoMode, getKbSlugs, getSkillAlias, getSkillId, sessionId, streaming],
   )
 
   const newDialog = useCallback(() => {
@@ -395,9 +649,13 @@ export function useAssistantChat({
     toolsOpen,
     setToolsOpen,
     sendMessage,
+    expandAnswer,
     stopStreaming,
     setFeedback,
     runTool,
+    setToolState,
+    pushLocalAssistantMessage,
+    updateDraftText,
     newDialog,
     openDialog,
     deleteDialog,

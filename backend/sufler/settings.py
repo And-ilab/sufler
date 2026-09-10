@@ -548,10 +548,9 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "Sufler AI Hub API",
+    "TITLE": "Sufler OCR API",
     "DESCRIPTION": (
-        "OpenAPI for integrators and приёмка. Curated paths for "
-        "assistant, sufler, and ingest are merged via postprocessing hook."
+        "OCR jobs for integrators. Other modules are hidden in Swagger for now."
     ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
