@@ -505,8 +505,12 @@ def serialize_kb(
     file_docs = [
         serialize_document(document) for document in kb.documents.all()
     ]
+    from ingest.web_fetcher import is_sitemap_url
+
     page_docs = [
-        serialize_website_page(page) for page in kb.website_pages.all()
+        serialize_website_page(page)
+        for page in kb.website_pages.all()
+        if page.extracted_text and not is_sitemap_url(page.url)
     ]
     if include_documents:
         payload["documents"] = file_docs + page_docs

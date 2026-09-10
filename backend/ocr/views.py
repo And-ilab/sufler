@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from auth.decorators import require_permissions
@@ -166,6 +167,7 @@ def _enqueue_upload(request: HttpRequest, *, allow_sync: bool) -> JsonResponse:
     return JsonResponse(payload, status=202 if not run_inline else 200)
 
 
+@csrf_exempt
 @require_http_methods(["POST"])
 @require_permissions(PERM_OCR_USE, api=True)
 def ocr_upload(request: HttpRequest) -> JsonResponse:
@@ -173,6 +175,7 @@ def ocr_upload(request: HttpRequest) -> JsonResponse:
     return _enqueue_upload(request, allow_sync=True)
 
 
+@csrf_exempt
 @require_http_methods(["GET", "POST"])
 @require_permissions(PERM_OCR_USE, api=True)
 def ocr_jobs_list(request: HttpRequest) -> JsonResponse:
@@ -253,6 +256,7 @@ def ocr_job_original(request: HttpRequest, job_id: str) -> HttpResponse:
     return response
 
 
+@csrf_exempt
 @require_http_methods(["POST"])
 @require_permissions(PERM_OCR_USE, api=True)
 def ocr_job_approve(request: HttpRequest, job_id: str) -> JsonResponse:

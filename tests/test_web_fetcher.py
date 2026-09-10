@@ -16,6 +16,7 @@ from ingest.web_fetcher import (  # noqa: E402
     canonicalize_url,
     crawl_website,
     host_in_whitelist,
+    url_topic_priority,
     validate_fetch_url,
     validate_redirect,
 )
@@ -128,6 +129,87 @@ class WebFetcherSecurityTest(TestCase):
         self.assertIn("set_filter=", url)
         self.assertNotIn("Показать", url)
         self.assertNotIn("вклады", url)
+
+    def test_sitemap_index_yields_pages_not_xml_files(self):
+        pages = {
+            "https://docs.example.com/robots.txt": (200, "text/plain", b""),
+            "https://docs.example.com/sitemap.xml": (
+                200,
+                "application/xml",
+                b"<?xml version='1.0'?><sitemapindex>"
+                b"<sitemap><loc>https://docs.example.com/sitemap-iblock-13.xml</loc></sitemap>"
+                b"</sitemapindex>",
+            ),
+            "https://docs.example.com/sitemap-iblock-13.xml": (
+                200,
+                "application/xml",
+                b"<?xml version='1.0'?><urlset>"
+                b"<url><loc>https://docs.example.com/credits</loc></url>"
+                b"</urlset>",
+            ),
+            "https://docs.example.com/": (
+                200,
+                "text/html",
+                b"<html><title>Home</title><p>bank</p></html>",
+            ),
+            "https://docs.example.com/credits": (
+                200,
+                "text/html",
+                b"<html><title>Credits</title><p>credit offer</p></html>",
+            ),
+        }
+        fetched = crawl_website(
+            "https://docs.example.com/",
+            allowed_hosts=["docs.example.com"],
+            depth=0,
+            max_pages=5,
+            http_get=self._http(pages),
+        )
+        urls = [item.final_url or item.url for item in fetched if item.text]
+        self.assertTrue(any(url.rstrip("/").endswith("credits") for url in urls))
+        self.assertFalse(any("sitemap" in url for url in urls))
+
+    def test_sitemap_prefers_contacts_over_news(self):
+        self.assertLess(
+            url_topic_priority("https://docs.example.com/ru/kontakty"),
+            url_topic_priority("https://docs.example.com/news/1"),
+        )
+        pages = {
+            "https://docs.example.com/robots.txt": (200, "text/plain", b""),
+            "https://docs.example.com/sitemap.xml": (
+                200,
+                "application/xml",
+                b"<?xml version='1.0'?><urlset>"
+                b"<url><loc>https://docs.example.com/news/1</loc></url>"
+                b"<url><loc>https://docs.example.com/ru/kontakty</loc></url>"
+                b"</urlset>",
+            ),
+            "https://docs.example.com/": (
+                200,
+                "text/html",
+                b"<html><title>Home</title><p>bank</p></html>",
+            ),
+            "https://docs.example.com/news/1": (
+                200,
+                "text/html",
+                b"<html><title>News</title><p>rate change</p></html>",
+            ),
+            "https://docs.example.com/ru/kontakty": (
+                200,
+                "text/html",
+                b"<html><title>Contacts</title><p>+375 17 218 84 31 147</p></html>",
+            ),
+        }
+        fetched = crawl_website(
+            "https://docs.example.com/",
+            allowed_hosts=["docs.example.com"],
+            depth=0,
+            max_pages=2,
+            http_get=self._http(pages),
+        )
+        urls = [item.final_url or item.url for item in fetched if item.text]
+        self.assertTrue(any("kontakty" in url for url in urls))
+        self.assertFalse(any("/news/" in url for url in urls))
 
     def test_crawl_skips_broken_page_and_continues(self):
         def getter(url: str) -> RawHttpResponse:

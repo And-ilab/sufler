@@ -839,27 +839,35 @@ def merge_into_spectacular_schema(
     result: dict[str, Any],
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """drf-spectacular POSTPROCESSING_HOOK: inject curated v1 paths."""
+    """Swagger shows OCR only; other modules stay in the curated export."""
     curated = build_openapi_v1()
-    paths = result.setdefault("paths", {})
-    paths.update(curated["paths"])
+    ocr_paths = {
+        path: item
+        for path, item in curated["paths"].items()
+        if path.startswith("/api/v1/ocr")
+    }
+    result["paths"] = ocr_paths
+    result["tags"] = [tag for tag in curated["tags"] if tag.get("name") == "ocr"]
 
-    components = result.setdefault("components", {})
-    schemas = components.setdefault("schemas", {})
-    schemas.update(curated["components"]["schemas"])
-    security = components.setdefault("securitySchemes", {})
-    security.update(curated["components"]["securitySchemes"])
-
-    existing_tags = {tag.get("name") for tag in result.get("tags") or []}
-    tags = list(result.get("tags") or [])
-    for tag in curated["tags"]:
-        if tag["name"] not in existing_tags:
-            tags.append(tag)
-    result["tags"] = tags
+    curated_schemas = curated["components"]["schemas"]
+    result["components"] = {
+        "securitySchemes": {
+            key: value
+            for key, value in curated["components"]["securitySchemes"].items()
+            if key in {"SessionCookie", "BearerAuth"}
+        },
+        "schemas": {
+            key: value
+            for key, value in curated_schemas.items()
+            if key == "Error" or key.startswith("Ocr")
+        },
+    }
 
     info = result.setdefault("info", {})
-    info.setdefault("title", curated["info"]["title"])
-    if not info.get("description"):
-        info["description"] = curated["info"]["description"]
+    info["title"] = "Sufler OCR API"
+    info["description"] = (
+        "OCR для интеграторов: загрузка → статус → поля JSON → утверждение. "
+        "Остальные модули временно скрыты."
+    )
     info.setdefault("version", curated["info"]["version"])
     return result

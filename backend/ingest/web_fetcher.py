@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 import socket
 import xml.etree.ElementTree as ET
 from collections import deque
@@ -11,7 +12,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Callable, Iterable, Sequence
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.robotparser import RobotFileParser
 
@@ -351,6 +352,33 @@ def extract_html(url: str, body: bytes, content_type: str) -> tuple[str, str, li
     return parser.title[:500], parser.extracted_text(), links
 
 
+_CONTACT_PATH_RE = re.compile(
+    r"kontakt|contact|hotline|obratn|rekvizit|o-bank|about|ofis|office|address",
+    re.IGNORECASE,
+)
+
+
+def is_sitemap_url(url: str) -> bool:
+    """True for sitemap.xml / sitemap-iblock-13.xml — not a human page."""
+    path = urlparse(url or "").path.lower()
+    name = path.rsplit("/", 1)[-1]
+    return "sitemap" in path and (
+        name.endswith(".xml")
+        or name.endswith(".xml.gz")
+        or "sitemap" in name
+    )
+
+
+def url_topic_priority(url: str) -> int:
+    """Lower is better: contacts/about before random sitemap news."""
+    if is_sitemap_url(url):
+        return 99
+    path = unquote(urlparse(url or "").path)
+    if _CONTACT_PATH_RE.search(path):
+        return 0
+    return 1
+
+
 def parse_sitemap_urls(body: bytes) -> list[str]:
     try:
         root = ET.fromstring(body)
@@ -421,7 +449,12 @@ def load_robots(start_url: str, *, http_get: HttpGet | None = None) -> RobotFile
     return parser
 
 
-def load_sitemap_urls(start_url: str, *, http_get: HttpGet | None = None) -> list[str]:
+def load_sitemap_urls(
+    start_url: str,
+    *,
+    http_get: HttpGet | None = None,
+    page_limit: int = 200,
+) -> list[str]:
     parsed = urlparse(canonicalize_url(start_url))
     sitemap_url = urlunparse((parsed.scheme, parsed.netloc, "/sitemap.xml", "", "", ""))
     try:
@@ -430,7 +463,26 @@ def load_sitemap_urls(start_url: str, *, http_get: HttpGet | None = None) -> lis
         return []
     if not (200 <= response.status < 300):
         return []
-    return parse_sitemap_urls(response.body)
+    pending = deque(parse_sitemap_urls(response.body))
+    pages: list[str] = []
+    seen: set[str] = set()
+    nested = 0
+    while pending and len(pages) < max(1, int(page_limit)) and nested < 20:
+        loc = pending.popleft()
+        if loc in seen:
+            continue
+        seen.add(loc)
+        if is_sitemap_url(loc):
+            nested += 1
+            try:
+                child = _http_get(loc, http_get)
+            except FetcherError:
+                continue
+            if 200 <= child.status < 300:
+                pending.extend(parse_sitemap_urls(child.body))
+            continue
+        pages.append(loc)
+    return pages
 
 
 def is_html_content(content_type: str, url: str = "") -> bool:
@@ -494,15 +546,23 @@ def crawl_website(
     pending: deque[tuple[str, int]] = deque([(origin, 0)])
     limit = max(1, int(max_pages))
     sitemap_budget = max(limit * 2, limit)
-    for sitemap_url in load_sitemap_urls(origin, http_get=http_get):
-        if len(pending) >= sitemap_budget:
+    sitemap_pages: list[str] = []
+    for sitemap_url in load_sitemap_urls(
+        origin, http_get=http_get, page_limit=sitemap_budget
+    ):
+        if len(sitemap_pages) >= sitemap_budget:
             break
         try:
             canonical = canonicalize_url(sitemap_url)
+            if is_sitemap_url(canonical):
+                continue
             if same_registrable_domain(canonical, origin):
-                pending.append((canonical, 0))
+                sitemap_pages.append(canonical)
         except Exception:
             continue
+    sitemap_pages.sort(key=url_topic_priority)
+    for canonical in sitemap_pages:
+        pending.append((canonical, 0))
     seen: set[str] = set()
     pages: list[FetchedPage] = []
     max_depth = max(0, int(depth))
@@ -516,6 +576,8 @@ def crawl_website(
         except Exception:
             continue
         if canonical in seen:
+            continue
+        if is_sitemap_url(canonical):
             continue
         seen.add(canonical)
         page = _crawl_one(
@@ -543,7 +605,10 @@ def crawl_website(
                     continue
                 if child in seen or not same_registrable_domain(child, origin):
                     continue
-                pending.append((child, current_depth + 1))
+                if url_topic_priority(child) == 0:
+                    pending.appendleft((child, current_depth + 1))
+                else:
+                    pending.append((child, current_depth + 1))
     return pages
 
 

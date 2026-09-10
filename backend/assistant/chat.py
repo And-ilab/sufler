@@ -35,8 +35,11 @@ _NO_KB_RULE = (
     "Запрещено использовать общие знания, догадки и информацию вне "
     "фрагментов. Не придумывай процедуры, сроки и правила. "
     "Если фрагменты по теме вопроса есть — ответь по ним, даже если "
-    "формулировка не дословная. Скажи, что в базе знаний нет информации, "
-    "только если фрагменты про другое и ответа там нет."
+    "формулировка не дословная. Если там перечислены кому платят, "
+    "в каких случаях, размеры или как оформить — перескажи это. "
+    "Скажи, что в базе знаний нет информации, только если фрагменты "
+    "про другое и ответа там нет. Не пиши «во фрагментах не указано», "
+    "если такие факты в тексте есть."
 )
 GROUNDED_SYSTEM_PROMPT = (
     "Ты внутренний ИИ-ассистент банка. Отвечай ТОЛЬКО фактами из "
@@ -51,6 +54,7 @@ GROUNDED_SYSTEM_PROMPT = (
     + _NO_KB_RULE
     + " Ответ по делу: закончи законченным предложением и законченной "
     "мыслью, не обрывай фразу, список или абзац на середине. "
+    "Не пиши пустой следующий номер шага."
     + _ANSWER_STYLE
 )
 EXPAND_SYSTEM_PROMPT = (
@@ -380,6 +384,7 @@ def _inject_rag_context(
                         else "Сформулируй полный ответ только по тексту фрагментов. "
                         "Закончи законченным предложением и законченной мыслью: "
                         "не обрывай фразу, список или абзац на середине. "
+                        "Не пиши пустой следующий номер шага. "
                     )
                     + "Числа и сроки бери дословно из тела фрагмента, "
                     "не из имени файла. Отвечай по смыслу вопроса тем, что есть "
@@ -413,12 +418,22 @@ def retrieve_assistant_context(
         kb_slugs=kb_slugs,
         limit=limit,
     )
-    documents = [
-        document
-        for document in result["documents"]
-        if float(document["relevance_score"]) >= threshold
-    ][:limit]
-    return documents, threshold
+    from qu.assistant_retrieval import contact_fact_signal
+
+    kept: list[dict[str, Any]] = []
+    for document in result["documents"]:
+        score = float(document["relevance_score"])
+        if score >= threshold:
+            kept.append(document)
+            continue
+        signal = contact_fact_signal(
+            query,
+            str(document.get("title") or ""),
+            str(document.get("content") or ""),
+        )
+        if signal >= 0.2 and score >= 0.15:
+            kept.append(document)
+    return kept[:limit], threshold
 
 
 # +18% on the default (non-expand) cap so the last sentence can finish.

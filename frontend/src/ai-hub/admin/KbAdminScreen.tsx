@@ -743,7 +743,7 @@ export function KbAdminScreen({ canEdit = true, demoKb }: KbAdminScreenProps) {
                       disabled={!canEdit || busy}
                       onChange={(event) => setCrawlDepth(event.target.value)}
                     />
-                    <small>0 — только стартовая страница. 1 — ещё ссылки с неё.</small>
+                    <small>Сколько кликов от главной: 0 — только она, 1 — ещё страницы со ссылок на ней.</small>
                   </label>
                   <label>
                     <span>Макс. страниц</span>
@@ -755,7 +755,7 @@ export function KbAdminScreen({ canEdit = true, demoKb }: KbAdminScreenProps) {
                       disabled={!canEdit || busy}
                       onChange={(event) => setMaxPages(event.target.value)}
                     />
-                    <small>Жёсткий потолок страниц в индексе.</small>
+                    <small>Сколько страниц максимум положить в базу. 15 — мало для большого сайта.</small>
                   </label>
                   <label className="kb-admin__check">
                     <input
@@ -765,7 +765,9 @@ export function KbAdminScreen({ canEdit = true, demoKb }: KbAdminScreenProps) {
                       onChange={(event) => setIgnoreRobots(event.target.checked)}
                       data-testid="kb-create-ignore-robots"
                     />
-                    <span>Игнорировать robots.txt Disallow</span>
+                    <span title="Сайт просит роботов не заходить на часть ссылок. Галочка — зайти всё равно.">
+                      не слушать robots.txt
+                    </span>
                   </label>
                 </>
               )}

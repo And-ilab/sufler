@@ -162,6 +162,22 @@ class OcrPipelineApiTest(TestCase):
         result = fetched.json()
         self.assertIn("fields", result)
 
+    def test_jobs_post_skips_csrf_for_integrators(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user_for_role("document_recognition_user"))
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        upload = SimpleUploadedFile(
+            "scan.png",
+            b"OCR demo payment order #42\nAmount: 1500.00 BYN\n",
+            content_type="image/png",
+        )
+        response = client.post(
+            "/api/v1/ocr/jobs/",
+            {"file": upload, "mode": "ml"},
+        )
+        self.assertEqual(response.status_code, 202, response.content)
+
     def test_template_mode_requires_doc_type(self):
         client = Client()
         client.force_login(self.user_for_role("document_recognition_user"))

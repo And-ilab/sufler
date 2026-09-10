@@ -19,9 +19,12 @@ from ingest.models import AssistantProductionChunk, CCProductionChunk
 from qu.models import QuReferenceExample
 from qu.service import (
     EXAMPLE_MATCH_FLOOR,
+    _PHONE_FACT_RE,
+    _PUBLIC_CONTACT_QUERY_RE,
     _distinctive_terms,
     _lexical_score,
     boost_chunks_with_examples,
+    expand_user_query,
     extractive_answer,
     focused_snippet,
     matching_training_examples,
@@ -43,6 +46,16 @@ _URL_ALIASES = (
     ("телефон", ("phone", "tel", "hotline", "call")),
     ("адрес", ("address", "office", "ofis")),
     ("офис", ("office", "ofis", "head")),
+)
+_HR_CONTACT_CENTER_RE = re.compile(
+    r"премирован|работник\w*\s+контакт|контакт-центр\w*\s+работ|"
+    r"оплат\w+\s+труд\w*\s+контакт|дистанционн\w+\s+взаимодейств",
+    re.IGNORECASE,
+)
+_CONTACT_LABEL_RE = re.compile(
+    r"справочн\w*\s+номер|единый справочн|обратная связь|"
+    r"юридическ\w+\s+адрес|головн\w+\s+офис",
+    re.IGNORECASE,
 )
 
 
@@ -192,6 +205,16 @@ def _rerank_scored_chunks(
             blended = mixed
         else:
             blended = min(original, mixed)
+        blended = max(
+            0.0,
+            min(
+                1.0,
+                blended
+                + contact_fact_signal(
+                    query, chunk.title or "", chunk.content or ""
+                ),
+            ),
+        )
         rescored.append((blended, chunk, slug))
     rescored.sort(
         key=lambda item: (
@@ -204,12 +227,71 @@ def _rerank_scored_chunks(
     return rescored
 
 
+_CASE_MARKERS = (
+    "оздоровлен",
+    "брак",
+    "рожден",
+    "усыновл",
+    "смерт",
+    "пенси",
+    "увечь",
+    "найм",
+    "отпуск",
+    "пособ",
+    "заявлен",
+    "документ",
+)
+
+
+def _content_only_score(query: str, content: str) -> float:
+    """Ignore the file name so the cover page does not beat the answering chapter."""
+    base = topical_relevance_score(query, "", content or "")
+    blob = (content or "").casefold()
+    diversity = sum(1 for marker in _CASE_MARKERS if marker in blob)
+    return base + min(0.18, 0.03 * diversity)
+
+
+def _article_chunks_by_content(
+    query: str,
+    slug: str,
+    article_id: int,
+    quota: int,
+    fallback: list[tuple[float, Any, str]],
+) -> list[tuple[float, Any, str]]:
+    """After the right file is chosen, pick passages that answer the question."""
+    assistant = list(
+        AssistantProductionChunk.objects.filter(
+            is_active=True,
+            article_id=article_id,
+            kb_slug=slug,
+        ).order_by("chunk_index")
+    )
+    if not assistant:
+        assistant = list(
+            CCProductionChunk.objects.filter(
+                is_active=True,
+                article_id=article_id,
+            ).order_by("chunk_index")
+        )
+    if not assistant:
+        return fallback[:quota]
+    scored = [
+        (_content_only_score(query, chunk.content or ""), chunk, slug)
+        for chunk in assistant
+    ]
+    scored.sort(key=lambda row: (-row[0], row[1].chunk_index))
+    if scored[0][0] < 0.12:
+        return fallback[:quota]
+    return scored[:quota]
+
+
 def _select_ranked_chunks(
     scored_chunks: list[tuple[float, Any, str]],
     *,
     limit: int,
+    query: str = "",
 ) -> list[tuple[float, Any, str]]:
-    """Best article first (several chunks), then one chunk from each next file."""
+    """Best article first (answering chunks), then one chunk from each next file."""
     by_article: dict[tuple[str, int], list[tuple[float, Any, str]]] = {}
     for item in scored_chunks:
         _score, chunk, slug = item
@@ -224,7 +306,12 @@ def _select_ranked_chunks(
     picked: list[tuple[float, Any, str]] = []
     for index, key in enumerate(article_order):
         quota = MAX_CHUNKS_PER_ARTICLE if index == 0 else 1
-        for item in by_article[key][:quota]:
+        chosen = by_article[key]
+        if index == 0 and query.strip() and quota > 1:
+            chosen = _article_chunks_by_content(
+                query, key[0], key[1], quota, by_article[key]
+            )
+        for item in chosen[:quota]:
             picked.append(item)
             if len(picked) >= limit:
                 return picked
@@ -267,6 +354,23 @@ def _permalink_text(permalink: str) -> str:
         return ""
     path = unquote(parsed.path or "").casefold()
     return f"{parsed.netloc} {path.replace('/', ' ').replace('-', ' ').replace('_', ' ')}"
+
+
+def contact_fact_signal(query: str, title: str, content: str) -> float:
+    """Lift a page that actually lists phones; drop HR texts about the call centre."""
+    if not _PUBLIC_CONTACT_QUERY_RE.search(query or ""):
+        return 0.0
+    blob = f"{title or ''}\n{content or ''}"
+    if _HR_CONTACT_CENTER_RE.search(blob) and not _PHONE_FACT_RE.search(blob):
+        return -0.32
+    boost = 0.0
+    if _PHONE_FACT_RE.search(blob):
+        boost += 0.34
+    if "147" in blob:
+        boost += 0.10
+    if _CONTACT_LABEL_RE.search(blob):
+        boost += 0.10
+    return min(0.45, boost)
 
 
 def permalink_signal(query: str, permalink: str) -> float:
@@ -407,7 +511,7 @@ def preview_assistant_query(
     group_articles: bool = False,
 ) -> dict[str, Any]:
     """Rank active chunks; assistant_* plus optional SUZ/CC when selected."""
-    normalized_query = query.strip()
+    normalized_query = expand_user_query(query.strip())
     if not normalized_query:
         raise ValueError("query must be a non-empty string")
     if not 1 <= limit <= MAX_LIMIT:
@@ -612,7 +716,9 @@ def preview_assistant_query(
             )
         ]
     else:
-        ranked = _select_ranked_chunks(scored_chunks, limit=limit)
+        ranked = _select_ranked_chunks(
+            scored_chunks, limit=limit, query=normalized_query
+        )
         documents = [
             _document_from_chunk(
                 rank=rank,

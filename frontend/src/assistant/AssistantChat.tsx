@@ -33,6 +33,7 @@ import {
   formatDialogDate,
   type ChatDialogSummary,
 } from './chatPersistence'
+import { compactChatText } from './compactChatText'
 import { finishLastSentence } from './finishLastSentence'
 import {
   downloadGeneratedDocument,
@@ -62,32 +63,6 @@ import './AssistantChat.css'
 const ATTACH_ACCEPT = '.pdf,.doc,.docx,.txt,.rtf,.xlsx,.jpg,.jpeg,.png,.tiff,.tif,.wav,.mp3,.m4a,.ogg,.flac,.webm,.mp4,.mov,.mkv,.avi'
 const OCR_ACCEPT = '.pdf,.jpg,.jpeg,.png,.tiff,.tif'
 const ATTACH_MAX_FILES = 5
-
-function compactChatText(text: string) {
-  let out = text.replace(/\r\n/g, '\n')
-  out = out.replace(/\*\*([^*]+)\*\*/g, '$1')
-  out = out.replace(/\*([^*\n]+)\*/g, '$1')
-  out = out.replace(/\*\*/g, '')
-  const lines = out.split('\n').filter((line) => {
-    const trimmed = line.trim()
-    if (!trimmed) return true
-    if (/^источники\s*[:(\[]/i.test(trimmed)) return false
-    if (/^источники\s*\(\d+\)/i.test(trimmed)) return false
-    if (/^[-–—•]\s*\[\d+\]/.test(trimmed)) return false
-    if (/^\[\d+\]\s+\S/.test(trimmed) && /(бз:|источник|\.txt|\.doc|\.pdf)/i.test(trimmed)) {
-      return false
-    }
-    if (/по предоставленн\w*\s+фрагмент/i.test(trimmed)) return false
-    if (/в базе знаний найдено/i.test(trimmed)) return false
-    if (/^фрагменты базы знаний/i.test(trimmed)) return false
-    return true
-  })
-  return lines
-    .join('\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{2,}/g, '\n')
-    .trim()
-}
 
 const OCR_FIELD_LABELS: Record<string, string> = {
   full_name: 'ФИО',
@@ -580,7 +555,17 @@ function MessageLenta({
 
   return (
     <div className="asst-lenta" data-testid="asst-lenta" aria-live="polite">
-      {messages.map((message, index) => (
+      {messages.map((message, index) => {
+        if (
+          message.role === 'assistant'
+          && !message.pending
+          && !compactChatText(message.content)
+          && !message.ocr
+          && !message.draft
+        ) {
+          return null
+        }
+        return (
         <div
           key={message.id}
           ref={index === messages.length - 1 ? lastTurnRef : undefined}
@@ -677,7 +662,8 @@ function MessageLenta({
             </Card>
           )}
         </div>
-      ))}
+        )
+      })}
       {streaming ? (
         <div className="asst-streaming asst-streaming--footer" data-testid="asst-streaming-flag">
           Стриминг токенов…

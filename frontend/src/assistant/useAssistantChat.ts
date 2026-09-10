@@ -9,6 +9,7 @@ import {
   looksLikeContentPrompt,
 } from './api/docTemplates'
 import { streamAssistantChat, streamDemoChat } from './api/chatStream'
+import { compactChatText } from './compactChatText'
 import { finishLastSentence } from './finishLastSentence'
 import {
   createDialogInHistory,
@@ -408,9 +409,11 @@ export function useAssistantChat({
               ? {
                   ...item,
                   pending: false,
-                  content: item.expanded
-                    ? item.content
-                    : finishLastSentence(item.content),
+                  content: compactChatText(
+                    item.expanded
+                      ? item.content
+                      : finishLastSentence(item.content),
+                  ),
                 }
               : item,
           ),
@@ -424,7 +427,7 @@ export function useAssistantChat({
                     ...item,
                     pending: false,
                     content: item.content
-                      ? finishLastSentence(item.content)
+                      ? compactChatText(finishLastSentence(item.content))
                       : 'Генерация остановлена.',
                   }
                 : item,

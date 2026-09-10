@@ -28,19 +28,18 @@ from api_docs.openapi_v1 import build_openapi_v1  # noqa: E402
 
 
 class OpenApiSchemaTest(SimpleTestCase):
-    def test_schema_endpoint_lists_v1_integrator_paths(self):
+    def test_schema_endpoint_lists_ocr_only(self):
         client = Client()
         response = client.get("/api/schema/", HTTP_ACCEPT="application/json")
         self.assertEqual(response.status_code, 200)
         schema = response.json()
         self.assertTrue(str(schema.get("openapi", "")).startswith("3."))
         paths = schema.get("paths") or {}
-        self.assertIn("/api/v1/assistant/chat", paths)
-        self.assertIn("/api/v1/sufler/suggest", paths)
-        self.assertIn("/api/v1/knowledge/events", paths)
-        self.assertIn("post", paths["/api/v1/sufler/suggest"])
-        self.assertIn("post", paths["/api/v1/assistant/chat"])
-        self.assertIn("post", paths["/api/v1/knowledge/events"])
+        self.assertTrue(paths)
+        self.assertTrue(all(path.startswith("/api/v1/ocr") for path in paths))
+        self.assertNotIn("/api/v1/assistant/chat", paths)
+        self.assertNotIn("/api/v1/sufler/suggest", paths)
+        self.assertNotIn("/api/v1/knowledge/events", paths)
         self.assertIn("/api/v1/ocr/jobs/", paths)
         self.assertIn("post", paths["/api/v1/ocr/jobs/"])
         self.assertIn("/api/v1/ocr/jobs/{id}/", paths)
@@ -48,7 +47,7 @@ class OpenApiSchemaTest(SimpleTestCase):
         self.assertIn("/api/v1/ocr/jobs/{id}/result/", paths)
         self.assertIn("get", paths["/api/v1/ocr/jobs/{id}/result/"])
         tag_names = {tag.get("name") for tag in (schema.get("tags") or [])}
-        self.assertIn("ocr", tag_names)
+        self.assertEqual(tag_names, {"ocr"})
 
     def test_swagger_ui_available_when_debug(self):
         client = Client()

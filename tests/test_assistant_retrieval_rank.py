@@ -16,8 +16,12 @@ from django.test import TestCase  # noqa: E402
 
 from ingest.models import AssistantProductionChunk, CCProductionChunk  # noqa: E402
 from ingest.pipeline import deterministic_embedding  # noqa: E402
-from qu.assistant_retrieval import permalink_signal, preview_assistant_query  # noqa: E402
-from qu.service import topical_relevance_score  # noqa: E402
+from qu.assistant_retrieval import (  # noqa: E402
+    contact_fact_signal,
+    permalink_signal,
+    preview_assistant_query,
+)
+from qu.service import expand_user_query, topical_relevance_score  # noqa: E402
 
 
 VISA_Q = (
@@ -146,6 +150,102 @@ class AssistantRetrievalRankTest(TestCase):
         result = preview_assistant_query(HIRE_Q, search_all=True, limit=5)
         titles = [doc["title"] for doc in result["documents"]]
         self.assertEqual(titles[0], "Регламент учета персонала.doc")
+
+    def test_picks_aid_chapter_not_cover_page(self):
+        self._chunk(
+            kb_slug="assistant_mat_pomosh",
+            article_id=9_100_113,
+            chunk_index=0,
+            title="Положение 113.1 мат помощь.doc",
+            content=(
+                "ОАО АСБ Беларусбанк. УТВЕРЖДЕНО протокол 08.08.2023 № 113.1 "
+                "ПОЛОЖЕНИЕ о единовременном материальном поощрении. "
+                "Перечень внесенных дополнений и изменений: Дополнение 1."
+            ),
+        )
+        self._chunk(
+            kb_slug="assistant_mat_pomosh",
+            article_id=9_100_113,
+            chunk_index=4,
+            title="Положение 113.1 мат помощь.doc",
+            content=(
+                "ГЛАВА 3 МАТЕРИАЛЬНАЯ ПОМОЩЬ. Оказание материальной помощи "
+                "на оздоровление. Работникам при предоставлении трудового "
+                "отпуска выплачивается материальная помощь на оздоровление "
+                "в размере 2 окладов. При рождении ребенка выплачивается "
+                "помощь в размере 5 БПМ."
+            ),
+            checksum="sha256:113-ch3",
+        )
+        result = preview_assistant_query(
+            "Кому и в каких случаях банк даёт материальную помощь "
+            "по положению 113.1?",
+            limit=5,
+        )
+        joined = " ".join(doc.get("content") or "" for doc in result["documents"])
+        self.assertIn("2 окладов", joined)
+        self.assertIn("рождении", joined)
+
+    def test_matpomosh_alias_finds_material_aid(self):
+        self.assertIn("материальная помощь", expand_user_query("подать на матпомощь"))
+        self._chunk(
+            kb_slug="assistant_mat_pomosh_docs",
+            article_id=9_100_114,
+            chunk_index=0,
+            title="Положение 113.1 мат помощь.doc",
+            content=(
+                "Порядок оформления. Для получения материальной помощи "
+                "работник подаёт заявление и копию свидетельства о рождении."
+            ),
+        )
+        result = preview_assistant_query(
+            "Какие документы нужны, чтобы подать на матпомощь?",
+            limit=5,
+        )
+        joined = " ".join(doc.get("content") or "" for doc in result["documents"])
+        self.assertIn("заявление", joined)
+
+    def test_website_hotline_beats_contact_center_bonus(self):
+        query = "Контакты: телефон горячей линии, адрес головного офиса"
+        self.assertIn("147", expand_user_query(query))
+        self._chunk(
+            kb_slug="assistant_bank_sayt",
+            article_id=9_100_200,
+            chunk_index=4,
+            title="Вход в интернет-банкинг",
+            content=(
+                "Обратная связь +375 17 218 84 31 +375 25 767 88 77 Life 147 "
+                "Единый справочный номер доступен по Беларуси. "
+                "Режим работы Контакт-центра: пн—пт 8:30. "
+                "Юридический адрес: 220002, г. Минск, пр. Дзержинского, 18."
+            ),
+            checksum="sha256:site-footer",
+        )
+        self._chunk(
+            kb_slug="assistant_polozhenie_55_3_premirovanie",
+            article_id=9_100_201,
+            chunk_index=0,
+            title="Положение 55.3 премирование.doc",
+            content=(
+                "Положение 55.3 о премировании. Порядок расчета премии "
+                "работников контакт-центра, осуществляющих дистанционное "
+                "взаимодействие с клиентами. Контакты подразделения HR."
+            ),
+            checksum="sha256:55-3",
+        )
+        self.assertGreater(
+            contact_fact_signal(
+                query,
+                "Вход в интернет-банкинг",
+                "+375 17 218 84 31 147 Единый справочный номер",
+            ),
+            0.3,
+        )
+        result = preview_assistant_query(query, search_all=True, limit=5)
+        titles = [doc["title"] for doc in result["documents"]]
+        self.assertEqual(titles[0], "Вход в интернет-банкинг")
+        self.assertGreaterEqual(result["documents"][0]["relevance_percent"], 60)
+        self.assertIn("147", result["documents"][0].get("content") or "")
 
 
 class WebsitePermalinkSignalTest(unittest.TestCase):

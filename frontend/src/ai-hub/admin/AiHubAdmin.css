@@ -1168,9 +1168,23 @@
 }
 
 .kb-admin__check {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  font-size: .6875rem;
+  font-weight: 600;
+}
+
+.kb-admin__check input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 13px;
+  accent-color: var(--color-accent, #1f8a70);
 }
 
 .kb-admin__crawl-card {
@@ -1182,7 +1196,7 @@
   font-size: .8125rem;
 }
 
-.kb-admin__create input,
+.kb-admin__create input:not([type="checkbox"]),
 .kb-admin__create select {
   width: 100%;
   min-height: 40px;
