@@ -26,7 +26,8 @@ def create_presence_log_if_missing(apps, schema_editor):
         ended_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
         class Meta:
-            app_label = "online_chat"
+            # Avoid clashing with online_chat.models.OperatorPresenceLog during migrate.
+            app_label = "_migration_online_chat_0028"
             db_table = table
             ordering = ("started_at",)
             indexes = (
