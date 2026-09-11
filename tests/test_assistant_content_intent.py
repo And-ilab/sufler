@@ -19,6 +19,8 @@ from django.contrib.auth import get_user_model  # noqa: E402
 from django.contrib.auth.models import Group  # noqa: E402
 from django.test import Client, TestCase  # noqa: E402
 
+from django.apps import apps  # noqa: E402
+
 from assistant.content_intent import (  # noqa: E402
     classify_prompt,
     extract_topic,
@@ -29,7 +31,24 @@ from auth.roles import ROLES_BY_CODE  # noqa: E402
 from hub.models import AssistantDocumentTemplate  # noqa: E402
 
 
+def _seed_assistant_templates() -> None:
+    import importlib
+
+    seed_leave = importlib.import_module(
+        "hub.migrations.0018_assistant_document_template"
+    )
+    seed_content = importlib.import_module(
+        "hub.migrations.0019_text_slides_diagram_templates"
+    )
+    seed_leave.seed_templates(apps, None)
+    seed_content.seed(apps, None)
+
+
 class AssistantContentIntentTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        _seed_assistant_templates()
+
     def user_for_role(self, role_code):
         role = ROLES_BY_CODE[role_code]
         user = get_user_model().objects.create_user(

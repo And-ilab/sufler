@@ -159,11 +159,13 @@ class Command(BaseCommand):
                 )
             hint = result["hints"][0]["text"]
             hint_l = hint.lower()
+            grounded = "карт" in hint_l or query.lower() in hint_l
             if (
                 "суз" not in hint_l
                 and "подсказка" not in hint
                 and "уточните" not in hint_l
                 and "ответ" not in hint_l
+                and not grounded
             ):
                 raise CommandError(f"unexpected stub hint text: {hint[:80]!r}")
             self.stdout.write(

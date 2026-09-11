@@ -325,6 +325,7 @@ class CcReportsApiTest(TestCase):
             {
                 "report": "relevance",
                 "scope": "sufler",
+                "group_by": "none",
                 "date_from": day,
                 "date_to": day,
             },

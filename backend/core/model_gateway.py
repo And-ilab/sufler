@@ -490,51 +490,9 @@ class ModelGateway:
         self,
         messages: Sequence[Mapping[str, Any]],
     ) -> str:
-        """Build structured JSON from OCR text in the user message."""
-        ocr_text = ""
-        filename = ""
-        document_type_hint = ""
-        for message in reversed(messages):
-            if message.get("role") != "user":
-                continue
-            raw = str(message.get("content") or "")
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                ocr_text = raw
-                break
-            if isinstance(payload, Mapping):
-                ocr_text = str(payload.get("ocr_text") or "")
-                filename = str(payload.get("filename") or "")
-                document_type_hint = str(
-                    payload.get("document_type_hint") or ""
-                )
-                break
-            ocr_text = raw
-            break
-        try:
-            from ocr.extraction import extract_fields
-
-            doc_type, fields = extract_fields(
-                ocr_text,
-                document_type=document_type_hint or None,
-                filename=filename,
-            )
-        except Exception:
-            doc_type, fields = "unknown", {}
-        return json.dumps(
-            {
-                "document_type": doc_type,
-                "fields": fields,
-                "validation": {
-                    "status": "proposed",
-                    "missing_required_fields": [],
-                    "anomalies": [],
-                },
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
+        """Return the canned docs_ocr stub (empty fields, no network)."""
+        del messages
+        return STUB_RESPONSES["docs_ocr"]
 
     def _stub_chat(
         self,

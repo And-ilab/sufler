@@ -1469,7 +1469,11 @@ def suggest(
         query=retrieval_text,
         min_relevance=min_relevance,
     )
-    if documents and not _document_supports_query(documents[0], normalized):
+    if (
+        documents
+        and not selected_slugs
+        and not _document_supports_query(documents[0], normalized)
+    ):
         documents = []
     latency_ms["rag"] = _elapsed_ms(rag_started)
 
