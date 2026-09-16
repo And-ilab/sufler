@@ -30,12 +30,17 @@ def build_openapi_v1() -> dict[str, Any]:
             {"name": "sufler", "description": "Суфлёр suggest + internal KC test-dialog"},
             {"name": "ingest", "description": "СУЗ Model B webhook + INT-09 reconcile"},
             {"name": "ocr", "description": "OCR jobs: upload → poll → fields JSON"},
+            {
+                "name": "telephony",
+                "description": "Oktell pickup webhook + dual-leg barge (02*/03*)",
+            },
         ],
         "paths": {
             **_assistant_paths(),
             **_sufler_paths(),
             **_ingest_paths(),
             **_ocr_paths(),
+            **_telephony_paths(),
         },
         "components": {
             "securitySchemes": {
@@ -251,6 +256,49 @@ def _assistant_paths() -> dict[str, Any]:
                         },
                     },
                     **_error_responses(400, 403),
+                },
+            }
+        },
+    }
+
+
+def _telephony_paths() -> dict[str, Any]:
+    pickup = {
+        "type": "object",
+        "required": ["CallerID", "CalledID", "Idchain"],
+        "properties": {
+            "CallerID": {"type": "string", "example": "375336664177"},
+            "CalledID": {"type": "string", "example": "1001"},
+            "Idchain": {"type": "string", "example": "affcc4a7-5bbc-4206-97e2-74d18ba4cb30"},
+            "op_name": {"type": "string", "example": "operator1"},
+            "call_type": {"type": "string", "enum": ["in", "out"]},
+        },
+    }
+    return {
+        "/api/v1/telephony/oktell/call-started": {
+            "post": {
+                "tags": ["telephony"],
+                "operationId": "oktellCallStarted",
+                "summary": "Oktell pickup webhook (Подслушивание.pdf)",
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": pickup}},
+                },
+                "responses": {
+                    "201": {"description": "Listeners 02* / 03* started"},
+                    **_error_responses(400, 401, 503),
+                },
+            }
+        },
+        "/api/v1/telephony/oktell/calls": {
+            "get": {
+                "tags": ["telephony"],
+                "operationId": "oktellCalls",
+                "summary": "Active dual-leg listen instances",
+                "security": [{"SessionCookie": []}, {"BearerAuth": []}],
+                "responses": {
+                    "200": {"description": "Active calls"},
+                    **_error_responses(401, 403),
                 },
             }
         },

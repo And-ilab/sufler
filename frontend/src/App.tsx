@@ -14,7 +14,7 @@ import { canAccessCcReports } from './ai-hub/reports/reportsAccess'
 import { InternalKcDialogApp } from './internal-kc/InternalKcDialogApp'
 import { canAccessInternalKc } from './internal-kc/internalKcAccess'
 import { AssistantWindowApp } from './assistant/AssistantWindowApp'
-import { SuflerPhoneApp } from './sufler/SuflerPhoneApp'
+import { LiveSuflerPhoneApp } from './sufler/LiveSuflerPhoneApp'
 import { ChatArmApp } from './online-chat/ChatArmApp'
 import {
   canOperateOnlineChatArm,
@@ -116,9 +116,8 @@ function StandaloneModule({
 
   if (module === 'sufler') {
     return (
-      <SuflerPhoneApp
-        demoMode={import.meta.env.VITE_SUFLER_DEMO === '1' || import.meta.env.DEV}
-        operatorName="Иванова М.П."
+      <LiveSuflerPhoneApp
+        operatorName={username ?? 'Иванова М.П.'}
       />
     )
   }

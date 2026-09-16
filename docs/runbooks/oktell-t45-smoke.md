@@ -123,6 +123,26 @@ asyncio.run(main())
 | INT-T03 | `phoneevent_commstopped` |
 | Marking | Call tagged `TEST_OKTELL_T45` (or configured marking) |
 
+## Smoke C — vendor pickup POST + dual-leg (no their PBX)
+
+Their file «Подслушивание»: after answer they POST JSON. We start two listen instances (`02*` client, `03*` operator) and push text into `/ws/sufler/<Idchain>/`.
+
+```powershell
+# 1) Pretend Oktell answered
+curl.exe -s -X POST http://127.0.0.1:8001/api/v1/telephony/oktell/call-started `
+  -H "Content-Type: application/json" `
+  -d "{\"CallerID\":\"375336664177\",\"CalledID\":\"1001\",\"Idchain\":\"test-chain-1\",\"op_name\":\"operator1\",\"call_type\":\"in\"}"
+
+# 2) Open operator window
+# http://localhost:5173/sufler?callId=test-chain-1
+```
+
+**Pass:** response `201` with legs `02*1001` / `03*1001` and sip users `2001` / `2002`; window leaves demo and shows the mock client phrase + hints.
+
+Two POSTs with different `Idchain` = two instances (многоканальность). `operator1`…`operator5` stay in their Oktell client — we only store `op_name`.
+
+Real SIP (`OKTELL_LISTEN_MODE=sip` + passwords in env, never commit the Excel) still needs their stand/VPN. Until then keep `mock`.
+
 **Fail / rollback:** set `OKTELL_MODE=mock`, restart services; file incident with `chainid`, WS URL host, and timestamp.
 
 ## Ops notes

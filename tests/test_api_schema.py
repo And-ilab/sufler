@@ -60,7 +60,7 @@ class PostmanExportTest(unittest.TestCase):
     def test_postman_collection_covers_four_api_groups(self):
         collection = openapi_to_postman(build_openapi_v1())
         folder_names = {item["name"] for item in collection["item"]}
-        self.assertEqual(folder_names, {"assistant", "ingest", "ocr", "sufler"})
+        self.assertEqual(folder_names, {"assistant", "ingest", "ocr", "sufler", "telephony"})
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "postman_collection.json"
             export_postman_collection(out)

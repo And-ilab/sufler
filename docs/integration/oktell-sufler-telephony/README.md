@@ -18,6 +18,7 @@
 | Flag | Values | Effect |
 |------|--------|--------|
 | `OKTELL_MODE` | `mock` (default) / `prod` | Local `oktell_mock` vs bank TEST line **T+45** (`test_line_t45`) |
+| `OKTELL_LISTEN_MODE` | `mock` / `sip` | Vendor POST + `02*`/`03*` barge. `mock` glues pickup → sufler window |
 
 Factory: `OktellClient.from_settings()`. Env templates: [`infra/.env.example`](../../../infra/.env.example), TEST cutover [`infra/test/.env.example`](../../../infra/test/.env.example). Ops smoke: [oktell-t45-smoke.md](../../runbooks/oktell-t45-smoke.md).
 

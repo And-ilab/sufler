@@ -24,6 +24,7 @@ from auth.roles import (
     PERM_SUFLER_TELEPHONY,
     has_permission,
 )
+from integrations.oktell.bridge import sufler_group
 from orchestrator.scenario_engine import clear_scenario_session
 from orchestrator.sufler import SuflerOrchestratorError, suggest
 
@@ -50,6 +51,7 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
             "call_id",
             "live",
         )
+        await self.channel_layer.group_add(sufler_group(str(self.call_id)), self.channel_name)
         await self.accept()
         await self.send_json(
             {
@@ -63,7 +65,13 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code: int) -> None:
         call_id = str(getattr(self, "call_id", "") or "")
         if call_id:
+            await self.channel_layer.group_discard(sufler_group(call_id), self.channel_name)
             await sync_to_async(clear_scenario_session, thread_sensitive=True)(call_id)
+
+    async def sufler_event(self, event: dict[str, Any]) -> None:
+        payload = event.get("payload")
+        if isinstance(payload, dict):
+            await self.send_json(payload)
 
     async def receive(self, text_data: str | None = None, bytes_data=None) -> None:
         if not text_data:

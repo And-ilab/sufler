@@ -366,6 +366,21 @@ OKTELL_TEST_LINE_LABEL = os.getenv(
 )
 OKTELL_TEST_QUEUE = os.getenv("OKTELL_TEST_QUEUE", "")
 OKTELL_TEST_MARKING = os.getenv("OKTELL_TEST_MARKING", "TEST_OKTELL_T45")
+# Vendor pickup POST + SIP barge 02*/03* (Подслушивание.pdf).
+OKTELL_LISTEN_MODE = os.getenv("OKTELL_LISTEN_MODE", "mock").strip().lower() or "mock"
+OKTELL_WEBHOOK_SECRET = os.getenv("OKTELL_WEBHOOK_SECRET", "")
+OKTELL_SIP_SERVER = os.getenv("OKTELL_SIP_SERVER", "dev-qms.onedemoserver.online")
+OKTELL_SIP_PROXY = os.getenv("OKTELL_SIP_PROXY", "10.1.1.181")
+OKTELL_SIP_USER_START = int(os.getenv("OKTELL_SIP_USER_START", "2001") or "2001")
+OKTELL_SIP_USER_COUNT = int(os.getenv("OKTELL_SIP_USER_COUNT", "8") or "8")
+OKTELL_SIP_PASSWORD = os.getenv("OKTELL_SIP_PASSWORD", "")
+OKTELL_SIP_ACCOUNTS = os.getenv("OKTELL_SIP_ACCOUNTS", "")
+OKTELL_SIP_PASSWORDS_JSON = os.getenv("OKTELL_SIP_PASSWORDS_JSON", "")
+OKTELL_MOCK_CLIENT_TEXT = os.getenv(
+    "OKTELL_MOCK_CLIENT_TEXT",
+    "Подскажите, как оформить перевод в Россию через мобильный банк?",
+)
+OKTELL_MOCK_OPERATOR_TEXT = os.getenv("OKTELL_MOCK_OPERATOR_TEXT", "")
 
 
 # Internationalization

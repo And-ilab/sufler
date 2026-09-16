@@ -9,7 +9,7 @@ import {
   type AiHubColorTheme,
 } from '../ai-hub/colorTheme'
 import { AssistantChat } from '../assistant/AssistantChat'
-import { SuflerPhoneApp } from '../sufler/SuflerPhoneApp'
+import { LiveSuflerPhoneApp } from '../sufler/LiveSuflerPhoneApp'
 import { Button } from './Button'
 import { Card } from './Card'
 import { Fab } from './Fab'
@@ -279,8 +279,7 @@ function ModuleWindow({
 
       {module === 'sufler' ? (
         <div className="portal-module-window__body portal-module-window__body--sufler-app">
-          <SuflerPhoneApp
-            demoMode
+          <LiveSuflerPhoneApp
             embedded
             operatorName={username || 'Иванова М.П.'}
           />
