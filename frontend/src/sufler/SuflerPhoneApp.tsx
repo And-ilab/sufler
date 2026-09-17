@@ -27,6 +27,7 @@ export interface SuflerPhoneAppProps {
   callId?: string
   demoMode?: boolean
   demoLines?: TranscriptLine[]
+  seedLines?: TranscriptLine[]
   operatorName?: string
   /** Embed inside portal module window (II.3.2 / I-0b). */
   embedded?: boolean
@@ -194,6 +195,7 @@ export function SuflerPhoneApp({
   callId,
   demoMode = false,
   demoLines = DEFAULT_DEMO,
+  seedLines = [],
   operatorName = 'Оператор КЦ',
   embedded = false,
   clientPhone = '',
@@ -228,6 +230,7 @@ export function SuflerPhoneApp({
     callId: resolvedCallId,
     demoMode,
     demoLines,
+    seedLines,
     getKbSlugs: kb.getKbSlugs,
   })
   const liveTurns = useRef<Record<DualSpeaker, string>>({ client: '', operator: '' })

@@ -29,6 +29,7 @@ interface UseSuflerTranscriptOptions {
   callId?: string
   demoMode?: boolean
   demoLines?: TranscriptLine[]
+  seedLines?: TranscriptLine[]
   getKbSlugs?: () => string[] | undefined
 }
 
@@ -89,9 +90,11 @@ export function useSuflerTranscript({
   callId = 'live',
   demoMode = false,
   demoLines = [],
+  seedLines = [],
   getKbSlugs,
 }: UseSuflerTranscriptOptions) {
-  const [lines, setLines] = useState<TranscriptLine[]>(demoMode ? demoLines : [])
+  const initialLines = demoMode ? demoLines : seedLines
+  const [lines, setLines] = useState<TranscriptLine[]>(initialLines)
   const [connected, setConnected] = useState(demoMode)
   const [error, setError] = useState('')
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
@@ -100,7 +103,7 @@ export function useSuflerTranscript({
     NonNullable<SuggestResponse['suggested_scenario']> | null
   >(null)
   const socketRef = useRef<WebSocket | null>(null)
-  const linesRef = useRef<TranscriptLine[]>(demoMode ? demoLines : [])
+  const linesRef = useRef<TranscriptLine[]>(initialLines)
   const pausedRef = useRef(false)
   const resetGenRef = useRef(0)
   const inboundEnabledRef = useRef(true)
@@ -160,8 +163,16 @@ export function useSuflerTranscript({
       if (demoMode) {
         linesRef.current = demoLines
         setLines(demoLines)
+      } else if (seedLines.length) {
+        linesRef.current = seedLines
+        setLines(seedLines)
       }
       return
+    }
+
+    if (seedLines.length) {
+      linesRef.current = seedLines
+      setLines(seedLines)
     }
 
     const socket = new WebSocket(wsUrl(callId))
@@ -230,7 +241,7 @@ export function useSuflerTranscript({
       socket.close()
       socketRef.current = null
     }
-  }, [attachHints, callId, demoLines, demoMode, enabled, upsertLine])
+  }, [attachHints, callId, demoLines, demoMode, enabled, seedLines, upsertLine])
 
   const ingestLive = useCallback(
     (message: {

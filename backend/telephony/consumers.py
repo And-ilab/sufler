@@ -43,14 +43,18 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
 
     async def connect(self) -> None:
         user = self.scope.get("user")
-        allowed = await sync_to_async(_user_may_use_sufler, thread_sensitive=True)(user)
-        if not allowed:
-            await self.close(code=4403)
-            return
         self.call_id = self.scope["url_route"]["kwargs"].get(
             "call_id",
             "live",
         )
+        allowed = await sync_to_async(_user_may_use_sufler, thread_sensitive=True)(user)
+        if not allowed:
+            from integrations.oktell.call_hub import hub
+
+            allowed = hub.get(str(self.call_id)) is not None
+        if not allowed:
+            await self.close(code=4403)
+            return
         await self.channel_layer.group_add(sufler_group(str(self.call_id)), self.channel_name)
         await self.accept()
         await self.send_json(
@@ -61,6 +65,21 @@ class SuflerTranscriptConsumer(AsyncWebsocketConsumer):
                 "asr": "active",
             }
         )
+        await self._replay_oktell_events()
+
+    async def _replay_oktell_events(self) -> None:
+        from integrations.oktell.call_hub import hub
+
+        call = hub.get(str(self.call_id))
+        if call is None:
+            return
+        for payload in list(call.events):
+            if isinstance(payload, dict) and payload.get("type") in {
+                "transcript",
+                "hints",
+                "error",
+            }:
+                await self.send_json(payload)
 
     async def disconnect(self, close_code: int) -> None:
         call_id = str(getattr(self, "call_id", "") or "")

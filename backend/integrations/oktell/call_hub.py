@@ -46,6 +46,7 @@ class LiveCall:
     listen_mode: str = "mock"
     created_at: float = field(default_factory=time.time)
     stop_event: threading.Event = field(default_factory=threading.Event)
+    events: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def idchain(self) -> str:
@@ -58,6 +59,7 @@ class LiveCall:
             "listen_mode": self.listen_mode,
             "legs": [leg.as_dict() for leg in self.legs],
             "sufler_ws": f"/ws/sufler/{self.idchain}/",
+            "events": list(self.events),
         }
 
 
@@ -84,6 +86,13 @@ class CallHub:
         with self._lock:
             return self._calls.get(idchain)
 
+    def record_event(self, idchain: str, payload: dict[str, Any]) -> None:
+        with self._lock:
+            call = self._calls.get(idchain)
+            if call is None:
+                return
+            call.events.append(dict(payload))
+
     def allocate_accounts(self, count: int = 2) -> list[SipAccount]:
         pool = account_pool()
         if len(pool) < count:
@@ -99,7 +108,13 @@ class CallHub:
         with self._lock:
             existing = self._calls.get(pickup.idchain)
             if existing is not None:
-                return existing, False
+                replay = existing
+            else:
+                replay = None
+        if replay is not None:
+            if not replay.events and replay.listen_mode == "mock":
+                self._run_mock_utterances(replay)
+            return replay, False
 
         client_account, operator_account = self.allocate_accounts(2)
         codes = listen_codes(pickup.called_id)

@@ -19,6 +19,12 @@ def sufler_group(call_id: str) -> str:
 
 
 def publish_to_call(call_id: str, payload: dict[str, Any]) -> None:
+    try:
+        from integrations.oktell.call_hub import hub
+
+        hub.record_event(call_id, payload)
+    except Exception:  # noqa: BLE001 — replay must not break live publish
+        logger.debug("could not record oktell event for %s", call_id, exc_info=True)
     channel_layer = get_channel_layer()
     if channel_layer is None:
         logger.warning("no channel layer; drop sufler event call_id=%s", call_id)

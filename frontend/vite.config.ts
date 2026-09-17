@@ -22,6 +22,7 @@ export default defineConfig(({ mode }) => {
         '/ws': {
           target: apiProxyTarget,
           ws: true,
+          changeOrigin: true,
         },
       },
     },

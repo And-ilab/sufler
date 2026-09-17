@@ -5,6 +5,16 @@ export type OktellListenLeg = {
   status: string
 }
 
+export type OktellCallEvent = {
+  type?: string
+  speaker?: 'client' | 'operator'
+  text?: string
+  is_final?: boolean
+  turn_id?: string
+  hints?: unknown[]
+  blocked_reason?: string | null
+}
+
 export type OktellLiveCall = {
   CallerID: string
   CalledID: string
@@ -15,6 +25,7 @@ export type OktellLiveCall = {
   listen_mode: string
   legs: OktellListenLeg[]
   sufler_ws: string
+  events?: OktellCallEvent[]
 }
 
 export async function fetchOktellCalls(): Promise<OktellLiveCall[]> {
@@ -29,4 +40,14 @@ export async function fetchOktellCalls(): Promise<OktellLiveCall[]> {
   }
   const body = (await response.json()) as { calls?: OktellLiveCall[] }
   return Array.isArray(body.calls) ? body.calls : []
+}
+
+export async function fetchOktellCall(idchain: string): Promise<OktellLiveCall | null> {
+  if (!idchain) return null
+  const response = await fetch(
+    `/api/v1/telephony/oktell/calls/${encodeURIComponent(idchain)}`,
+  )
+  if (!response.ok) return null
+  const body = (await response.json()) as { call?: OktellLiveCall }
+  return body.call ?? null
 }

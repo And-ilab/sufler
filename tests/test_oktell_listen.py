@@ -84,6 +84,10 @@ class OktellWebhookTest(TestCase):
         self.assertEqual(body["Idchain"], INCOMING["Idchain"])
         self.assertEqual([leg["dial"] for leg in body["legs"]], ["02*1001", "03*1001"])
         self.assertEqual({leg["sip_user"] for leg in body["legs"]}, {"2001", "2002"})
+        detail = client.get(
+            f"/api/v1/telephony/oktell/calls/{INCOMING['Idchain']}"
+        )
+        self.assertEqual(detail.status_code, 200)
 
         with patch("integrations.oktell.call_hub.publish_transcript"), patch(
             "integrations.oktell.call_hub.publish_to_call"

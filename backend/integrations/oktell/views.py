@@ -78,9 +78,10 @@ def oktell_calls(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"calls": calls, "listen": as_settings_snapshot()})
 
 
+@csrf_exempt
 @require_GET
-@require_permissions(PERM_SUFLER_TELEPHONY, PERM_SUFLER_CHAT, require_all=False, api=True)
 def oktell_call_detail(request: HttpRequest, idchain: str) -> JsonResponse:
+    """Public replay for TEST: window can load the last POST without a Django login."""
     call = hub.get(idchain)
     if call is None:
         return JsonResponse({"error": "not_found"}, status=404)
