@@ -113,7 +113,7 @@ class CallHub:
                 replay = None
         if replay is not None:
             if not replay.events and replay.listen_mode == "mock":
-                self._run_mock_utterances(replay)
+                self._spawn_call(replay, None, None)
             return replay, False
 
         client_account, operator_account = self.allocate_accounts(2)
@@ -132,17 +132,22 @@ class CallHub:
         with self._lock:
             self._calls[pickup.idchain] = call
 
-        if call.listen_mode == "mock":
-            self._run_call(call, client_account, operator_account)
-        else:
-            worker = threading.Thread(
-                target=self._run_call,
-                args=(call, client_account, operator_account),
-                name=f"oktell-call-{pickup.idchain[:8]}",
-                daemon=True,
-            )
-            worker.start()
+        self._spawn_call(call, client_account, operator_account)
         return call, True
+
+    def _spawn_call(
+        self,
+        call: LiveCall,
+        client_account: SipAccount | None,
+        operator_account: SipAccount | None,
+    ) -> None:
+        worker = threading.Thread(
+            target=self._run_call,
+            args=(call, client_account, operator_account),
+            name=f"oktell-call-{call.idchain[:8]}",
+            daemon=True,
+        )
+        worker.start()
 
     def stop(self, idchain: str) -> LiveCall | None:
         with self._lock:
@@ -163,8 +168,8 @@ class CallHub:
     def _run_call(
         self,
         call: LiveCall,
-        client_account: SipAccount,
-        operator_account: SipAccount,
+        client_account: SipAccount | None,
+        operator_account: SipAccount | None,
     ) -> None:
         del operator_account
         call.state = "listening"
@@ -180,7 +185,7 @@ class CallHub:
                 "called_id": call.pickup.called_id,
             },
         )
-        if call.listen_mode == "sip" and not client_account.password:
+        if call.listen_mode == "sip" and client_account is not None and not client_account.password:
             logger.warning(
                 "OKTELL_LISTEN_MODE=sip but SIP password for %s is empty; "
                 "legs stay in dialing until vault is filled",
@@ -196,7 +201,7 @@ class CallHub:
                 call.state = "stopped"
 
     def _run_mock_utterances(self, call: LiveCall) -> None:
-        if call.stop_event.wait(timeout=0.05):
+        if call.stop_event.is_set():
             return
         operator_text = mock_operator_text()
         if operator_text:

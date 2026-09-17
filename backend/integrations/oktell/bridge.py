@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from typing import Any
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
 from orchestrator.sufler import SuflerOrchestratorError, suggest
+
+_SUGGEST_SECONDS = 8
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +29,20 @@ def publish_to_call(call_id: str, payload: dict[str, Any]) -> None:
         hub.record_event(call_id, payload)
     except Exception:  # noqa: BLE001 — replay must not break live publish
         logger.debug("could not record oktell event for %s", call_id, exc_info=True)
-    channel_layer = get_channel_layer()
-    if channel_layer is None:
-        logger.warning("no channel layer; drop sufler event call_id=%s", call_id)
-        return
-    async_to_sync(channel_layer.group_send)(
-        sufler_group(call_id),
-        {"type": "sufler.event", "payload": payload},
-    )
+    def _send() -> None:
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            logger.warning("no channel layer; drop sufler event call_id=%s", call_id)
+            return
+        try:
+            async_to_sync(channel_layer.group_send)(
+                sufler_group(call_id),
+                {"type": "sufler.event", "payload": payload},
+            )
+        except RuntimeError:
+            logger.debug("skip live WS push for %s (async loop busy)", call_id)
+
+    threading.Thread(target=_send, name=f"oktell-ws-{call_id[:8]}", daemon=True).start()
 
 
 def publish_transcript(
@@ -59,12 +69,25 @@ def publish_transcript(
     if not (is_final and speaker == "client"):
         return
     try:
-        result = suggest(
-            cleaned,
-            limit=5,
-            session_id=call_id,
-            channel="telephony",
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            result = pool.submit(
+                suggest,
+                cleaned,
+                limit=5,
+                session_id=call_id,
+                channel="telephony",
+            ).result(timeout=_SUGGEST_SECONDS)
+    except FuturesTimeout:
+        logger.warning("suggest timed out for call %s", call_id)
+        publish_to_call(
+            call_id,
+            {
+                "type": "error",
+                "message": "suggest timeout",
+                "turn_id": turn_id,
+            },
         )
+        return
     except (SuflerOrchestratorError, RuntimeError, ValueError, KeyError, TypeError) as exc:
         logger.warning("suggest failed for call %s: %s", call_id, exc)
         publish_to_call(
