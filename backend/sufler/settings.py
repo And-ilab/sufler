@@ -309,6 +309,7 @@ MODEL_GATEWAY_MODE = os.getenv("MODEL_GATEWAY_MODE", "").strip()
 ASR_MODE = os.getenv("ASR_MODE", "stub").strip() or "stub"
 ASR_WS_URL = os.getenv("ASR_WS_URL", "ws://asr:8765/")
 ASR_HEALTH_URL = os.getenv("ASR_HEALTH_URL", "http://asr:8764/health")
+VOSK_MODEL_PATH = os.getenv("VOSK_MODEL_PATH", "")
 
 # Structured VI.3 audit and KUMA-compatible sinks (P2-05 schema_version=1.0 unchanged).
 AUDIT_ENABLED = os.getenv("AUDIT_ENABLED", "true").lower() in {
@@ -369,8 +370,9 @@ OKTELL_TEST_MARKING = os.getenv("OKTELL_TEST_MARKING", "TEST_OKTELL_T45")
 # Vendor pickup POST + SIP barge 02*/03* (Подслушивание.pdf).
 OKTELL_LISTEN_MODE = os.getenv("OKTELL_LISTEN_MODE", "mock").strip().lower() or "mock"
 OKTELL_WEBHOOK_SECRET = os.getenv("OKTELL_WEBHOOK_SECRET", "")
-OKTELL_SIP_SERVER = os.getenv("OKTELL_SIP_SERVER", "dev-qms.onedemoserver.online")
-OKTELL_SIP_PROXY = os.getenv("OKTELL_SIP_PROXY", "10.1.1.181")
+OKTELL_SIP_SERVER = os.getenv("OKTELL_SIP_SERVER", "10.1.1.31")
+OKTELL_SIP_DOMAIN = os.getenv("OKTELL_SIP_DOMAIN", "dev-qms.onedemoserver.online")
+OKTELL_SIP_PROXY = os.getenv("OKTELL_SIP_PROXY", "10.1.1.31")
 OKTELL_SIP_USER_START = int(os.getenv("OKTELL_SIP_USER_START", "2001") or "2001")
 OKTELL_SIP_USER_COUNT = int(os.getenv("OKTELL_SIP_USER_COUNT", "8") or "8")
 OKTELL_SIP_PASSWORD = os.getenv("OKTELL_SIP_PASSWORD", "")

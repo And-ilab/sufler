@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,6 +24,13 @@ from django.test import Client, SimpleTestCase, TestCase, override_settings  # n
 
 from auth.roles import ROLES_BY_CODE  # noqa: E402
 from integrations.oktell.call_hub import hub  # noqa: E402
+from integrations.oktell.g711 import alaw_to_pcm16, rtp_payload_to_pcm16  # noqa: E402
+from integrations.oktell.sip_dialog import (  # noqa: E402
+    SipAuth,
+    digest_response,
+    parse_authenticate,
+    parse_sdp_audio,
+)
 from integrations.oktell.sip_ua import plan_dual_leg  # noqa: E402
 from integrations.oktell.sip_pool import SipAccount, parse_password_map  # noqa: E402
 from integrations.oktell.webhook import listen_codes, parse_pickup_payload  # noqa: E402
@@ -35,6 +43,17 @@ INCOMING = {
     "op_name": "Администратор",
     "call_type": "in",
 }
+
+
+class SipEnvExportTest(SimpleTestCase):
+    def test_env_text_contains_json_users(self):
+        sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
+        from export_oktell_sip_env import env_text
+
+        text = env_text([("2001", "p1"), ("2002", "p2")], count=2)
+        self.assertIn("OKTELL_LISTEN_MODE=sip", text)
+        self.assertIn("2001", text)
+        self.assertIn("p1", text)
 
 
 class PickupParseTest(SimpleTestCase):
@@ -59,6 +78,39 @@ class DualLegPlanTest(SimpleTestCase):
         self.assertTrue(dials[1].target.startswith("sip:03*1001@"))
         self.assertEqual(dials[0].account.user, "2001")
         self.assertEqual(dials[1].account.user, "2002")
+
+
+class SipCodecTest(SimpleTestCase):
+    def test_alaw_pcm_length(self):
+        pcm = alaw_to_pcm16(bytes([0xD5, 0x55]))
+        self.assertEqual(len(pcm), 4)
+        self.assertEqual(rtp_payload_to_pcm16(b"\xd5", 8), alaw_to_pcm16(b"\xd5"))
+
+    def test_digest_and_sdp(self):
+        auth = parse_authenticate(
+            'Digest realm="oktell", nonce="abc", algorithm=MD5'
+        )
+        self.assertEqual(auth.realm, "oktell")
+        self.assertEqual(
+            digest_response(
+                username="2001",
+                password="secret",
+                method="REGISTER",
+                uri="sip:oktell",
+                auth=SipAuth(realm="oktell", nonce="abc"),
+            ),
+            digest_response(
+                username="2001",
+                password="secret",
+                method="REGISTER",
+                uri="sip:oktell",
+                auth=SipAuth(realm="oktell", nonce="abc"),
+            ),
+        )
+        host, port, payload = parse_sdp_audio(
+            "v=0\r\nc=IN IP4 10.1.1.31\r\nm=audio 18000 RTP/AVP 8 0\r\n"
+        )
+        self.assertEqual((host, port, payload), ("10.1.1.31", 18000, 8))
 
 
 class OktellWebhookTest(TestCase):
@@ -144,6 +196,37 @@ class OktellWebhookTest(TestCase):
                 HTTP_X_OKTELL_TOKEN="s3cret",
             )
         self.assertEqual(allowed.status_code, 201)
+
+    @override_settings(
+        OKTELL_LISTEN_MODE="sip",
+        OKTELL_WEBHOOK_SECRET="",
+        OKTELL_SIP_PASSWORDS_JSON='{"2001":"x","2002":"y"}',
+        OKTELL_SIP_USER_COUNT=8,
+    )
+    def test_sip_mode_does_not_emit_mock_phrase(self):
+        client = Client()
+        with patch(
+            "integrations.oktell.call_hub.place_barge_leg", return_value="listening"
+        ) as barge, patch(
+            "integrations.oktell.call_hub.publish_transcript"
+        ) as published:
+            response = client.post(
+                "/api/v1/telephony/oktell/call-started",
+                data=json.dumps({**INCOMING, "Idchain": "sip-live-1"}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.json()["call"]["listen_mode"], "sip")
+            deadline = time.time() + 2
+            while barge.call_count < 2 and time.time() < deadline:
+                time.sleep(0.05)
+            hub.stop("sip-live-1")
+        self.assertEqual(barge.call_count, 2)
+        texts = [call.kwargs.get("text") for call in published.call_args_list]
+        self.assertNotIn(
+            "Подскажите, как оформить перевод в Россию через мобильный банк?",
+            texts,
+        )
 
     def test_list_requires_operator(self):
         role = ROLES_BY_CODE["contact_center_telephony_operator"]

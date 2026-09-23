@@ -33,6 +33,15 @@ def sip_proxy() -> str:
     return _truthy("OKTELL_SIP_PROXY")
 
 
+def sip_domain() -> str:
+    return _truthy("OKTELL_SIP_DOMAIN") or sip_server()
+
+
+def sip_packet_host() -> str:
+    """UDP destination for REGISTER/INVITE. PBX IP, not this Debian host."""
+    return sip_proxy() or sip_server()
+
+
 def parse_password_map(raw: str) -> dict[str, str]:
     text = (raw or "").strip()
     if not text:
@@ -58,8 +67,8 @@ def account_pool() -> list[SipAccount]:
     count = int(getattr(settings, "OKTELL_SIP_USER_COUNT", 8) or 8)
     passwords = parse_password_map(_truthy("OKTELL_SIP_PASSWORDS_JSON") or _truthy("OKTELL_SIP_ACCOUNTS"))
     default_password = _truthy("OKTELL_SIP_PASSWORD")
-    server = sip_server()
-    proxy = sip_proxy()
+    server = sip_domain()
+    proxy = sip_packet_host()
     accounts: list[SipAccount] = []
     for offset in range(max(count, 1)):
         user = str(start + offset)
@@ -94,7 +103,8 @@ def as_settings_snapshot() -> dict[str, Any]:
     return {
         "listen_mode": listen_mode(),
         "sip_server": sip_server(),
-        "sip_proxy": sip_proxy(),
+        "sip_domain": sip_domain(),
+        "sip_proxy": sip_packet_host(),
         "pool_size": len(account_pool()),
         "user_start": int(getattr(settings, "OKTELL_SIP_USER_START", 2001) or 2001),
     }

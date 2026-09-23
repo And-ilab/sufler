@@ -141,7 +141,7 @@ curl.exe -s -X POST http://127.0.0.1:8001/api/v1/telephony/oktell/call-started `
 
 Two POSTs with different `Idchain` = two instances (многоканальность). `operator1`…`operator5` stay in their Oktell client — we only store `op_name`.
 
-Real SIP (`OKTELL_LISTEN_MODE=sip` + passwords in env, never commit the Excel) still needs their stand/VPN. Until then keep `mock`.
+Live listen: `OKTELL_LISTEN_MODE=sip`, passwords in env (never commit the Excel), SIP packets to Oktell `10.1.1.31`, Vosk model on Debian. `scripts/export_oktell_sip_env.py` builds the env file.
 
 **Fail / rollback:** set `OKTELL_MODE=mock`, restart services; file incident with `chainid`, WS URL host, and timestamp.
 

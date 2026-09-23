@@ -16,7 +16,8 @@ from integrations.oktell.sip_pool import (
     mock_client_text,
     mock_operator_text,
 )
-from integrations.oktell.sip_ua import plan_dual_leg, invite_summary
+from integrations.oktell.sip_ua import invite_summary, place_barge_leg, plan_dual_leg
+from integrations.oktell.sip_dialog import SipDialogError
 from integrations.oktell.webhook import PickupEvent, listen_codes
 
 logger = logging.getLogger(__name__)
@@ -171,7 +172,6 @@ class CallHub:
         client_account: SipAccount | None,
         operator_account: SipAccount | None,
     ) -> None:
-        del operator_account
         call.state = "listening"
         for leg in call.legs:
             leg.status = "dialing" if call.listen_mode == "sip" else "mock"
@@ -185,20 +185,76 @@ class CallHub:
                 "called_id": call.pickup.called_id,
             },
         )
-        if call.listen_mode == "sip" and client_account is not None and not client_account.password:
-            logger.warning(
-                "OKTELL_LISTEN_MODE=sip but SIP password for %s is empty; "
-                "legs stay in dialing until vault is filled",
-                client_account.user,
-            )
         if call.listen_mode == "mock":
             self._run_mock_utterances(call)
-        else:
-            # Real RTP/SIP audio is filled when the stand is reachable.
-            # Keep the two instances alive so a second POST can run in parallel.
+            return
+        if client_account is None or operator_account is None:
+            logger.warning("SIP barge missing accounts for %s", call.idchain)
             call.stop_event.wait(timeout=3600)
-            if call.state != "stopped":
-                call.state = "stopped"
+            return
+        self._run_sip_legs(call, client_account, operator_account)
+
+    def _run_sip_legs(
+        self,
+        call: LiveCall,
+        client_account: SipAccount,
+        operator_account: SipAccount,
+    ) -> None:
+        if not client_account.password or not operator_account.password:
+            logger.warning(
+                "OKTELL_LISTEN_MODE=sip but SIP password empty user=%s/%s",
+                client_account.user,
+                operator_account.user,
+            )
+        dials = plan_dual_leg(call.pickup.called_id, client_account, operator_account)
+        invite_summary(dials)
+        workers: list[threading.Thread] = []
+        for dial, leg in zip(dials, call.legs, strict=False):
+            worker = threading.Thread(
+                target=self._run_one_sip_leg,
+                args=(call, dial, leg),
+                name=f"oktell-sip-{dial.account.user}",
+                daemon=True,
+            )
+            workers.append(worker)
+            worker.start()
+        call.stop_event.wait(timeout=3600)
+        call.stop_event.set()
+        for worker in workers:
+            worker.join(timeout=5)
+        if call.state != "stopped":
+            call.state = "stopped"
+
+    def _run_one_sip_leg(self, call: LiveCall, dial, leg: ListenLeg) -> None:
+        turn = 0
+
+        def on_final(text: str) -> None:
+            nonlocal turn
+            turn += 1
+            publish_transcript(
+                call.idchain,
+                speaker=leg.speaker,
+                text=text,
+                turn_id=f"{call.idchain}-{leg.speaker}-{turn}",
+            )
+            leg.status = "heard"
+
+        try:
+            status = place_barge_leg(dial, stop_event=call.stop_event, on_final=on_final)
+            if leg.status != "heard":
+                leg.status = status
+        except SipDialogError as exc:
+            logger.warning("SIP barge failed %s %s: %s", dial.account.user, dial.target, exc)
+            leg.status = "error"
+            publish_to_call(
+                call.idchain,
+                {
+                    "type": "error",
+                    "message": str(exc),
+                    "speaker": leg.speaker,
+                    "sip_user": dial.account.user,
+                },
+            )
 
     def _run_mock_utterances(self, call: LiveCall) -> None:
         if call.stop_event.is_set():
