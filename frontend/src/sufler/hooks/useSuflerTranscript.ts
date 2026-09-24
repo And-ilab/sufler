@@ -158,21 +158,37 @@ export function useSuflerTranscript({
   )
 
   useEffect(() => {
-    if (!enabled || demoMode) {
-      setConnected(demoMode)
-      if (demoMode) {
-        linesRef.current = demoLines
-        setLines(demoLines)
-      } else if (seedLines.length) {
-        linesRef.current = seedLines
-        setLines(seedLines)
-      }
+    if (demoMode) {
+      linesRef.current = demoLines
+      setLines(demoLines)
+      setError('')
+      setConnected(true)
       return
     }
+    setLines((current) => {
+      if (!seedLines.length) {
+        if (current.length && current === linesRef.current) return current
+        linesRef.current = seedLines
+        return seedLines
+      }
+      if (!current.length) {
+        linesRef.current = seedLines
+        return seedLines
+      }
+      const seen = new Set(current.map((line) => `${line.turnId}:${line.speaker}`))
+      const extra = seedLines.filter((line) => !seen.has(`${line.turnId}:${line.speaker}`))
+      if (!extra.length) return current
+      const next = [...current, ...extra]
+      linesRef.current = next
+      return next
+    })
+  }, [callId, demoMode, demoLines, seedLines])
 
-    if (seedLines.length) {
-      linesRef.current = seedLines
-      setLines(seedLines)
+  useEffect(() => {
+    if (!enabled || demoMode || callId.startsWith('dev-call-')) {
+      setConnected(true)
+      setError('')
+      return
     }
 
     const socket = new WebSocket(wsUrl(callId))
@@ -241,7 +257,7 @@ export function useSuflerTranscript({
       socket.close()
       socketRef.current = null
     }
-  }, [attachHints, callId, demoLines, demoMode, enabled, seedLines, upsertLine])
+  }, [attachHints, callId, demoMode, enabled, upsertLine])
 
   const ingestLive = useCallback(
     (message: {

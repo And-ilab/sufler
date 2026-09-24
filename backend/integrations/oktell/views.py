@@ -15,7 +15,7 @@ from auth.decorators import require_permissions
 from auth.roles import PERM_SUFLER_CHAT, PERM_SUFLER_TELEPHONY
 from integrations.oktell.call_hub import hub
 from integrations.oktell.sip_pool import as_settings_snapshot
-from integrations.oktell.webhook import OktellWebhookError, parse_pickup_payload
+from integrations.oktell.webhook import OktellWebhookError, PickupEvent, parse_pickup_payload
 
 
 def _json_body(request: HttpRequest) -> Mapping[str, Any]:
@@ -71,10 +71,38 @@ def oktell_call_stopped(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"call": call.as_dict()})
 
 
+@require_http_methods(["POST"])
+@require_permissions(PERM_SUFLER_TELEPHONY, PERM_SUFLER_CHAT, require_all=False, api=True)
+def oktell_listen_now(request: HttpRequest) -> JsonResponse:
+    """Operator opened /sufler: attach to the inbound line without a vendor POST."""
+    active = [call for call in hub.list_calls() if call.state != "stopped"]
+    if active:
+        newest = max(active, key=lambda call: call.created_at)
+        return JsonResponse({"created": False, "call": newest.as_dict()})
+    line = str(getattr(settings, "OKTELL_SIP_LISTEN_LINE", "1001") or "1001")
+    pickup = PickupEvent(
+        caller_id="sufler",
+        called_id=line,
+        idchain="live",
+        op_name="sufler",
+        call_type="in",
+    )
+    try:
+        call, created = hub.start(pickup)
+    except RuntimeError as exc:
+        return JsonResponse({"error": "misconfigured", "detail": str(exc)}, status=503)
+    return JsonResponse({"created": created, "call": call.as_dict()}, status=201 if created else 200)
+
+
 @require_GET
 @require_permissions(PERM_SUFLER_TELEPHONY, PERM_SUFLER_CHAT, require_all=False, api=True)
 def oktell_calls(request: HttpRequest) -> JsonResponse:
-    calls = [call.as_dict() for call in hub.list_calls() if call.state != "stopped"]
+    calls = [
+        call.as_dict()
+        for call in hub.list_calls()
+        if call.state != "stopped"
+    ]
+    calls.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
     return JsonResponse({"calls": calls, "listen": as_settings_snapshot()})
 
 

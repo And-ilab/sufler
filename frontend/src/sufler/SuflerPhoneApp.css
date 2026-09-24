@@ -189,7 +189,13 @@
 .sufler-phone__footer-status {
   flex: 1 1 100%;
   min-width: 0;
+  min-height: 1.4em;
   line-height: 1.4;
+}
+
+.sufler-phone__meta .ui-status {
+  min-width: 7.25rem;
+  justify-content: center;
 }
 
 .sufler-phone__typed {

@@ -39,13 +39,16 @@ class SipDial:
 def plan_dual_leg(called_id: str, client_account: SipAccount, operator_account: SipAccount) -> list[SipDial]:
     codes = listen_codes(called_id)
     host = client_account.server or "oktell"
+    client = SipDial(
+        speaker="client",
+        code="02",
+        target=f"sip:{codes['client']}@{host}",
+        account=client_account,
+    )
+    if codes["client"] == codes["operator"]:
+        return [client]
     return [
-        SipDial(
-            speaker="client",
-            code="02",
-            target=f"sip:{codes['client']}@{host}",
-            account=client_account,
-        ),
+        client,
         SipDial(
             speaker="operator",
             code="03",

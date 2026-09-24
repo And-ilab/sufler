@@ -236,6 +236,15 @@ export function SuflerPhoneApp({
   const liveTurns = useRef<Record<DualSpeaker, string>>({ client: '', operator: '' })
   const dialogueRef = useRef<HTMLElement>(null)
   const [typedLine, setTypedLine] = useState('')
+  const [linkDown, setLinkDown] = useState(false)
+  useEffect(() => {
+    if (connected) {
+      setLinkDown(false)
+      return
+    }
+    const timer = window.setTimeout(() => setLinkDown(true), 2500)
+    return () => window.clearTimeout(timer)
+  }, [connected])
   const [feedbackByHint, setFeedbackByHint] = useState<Record<string, HintFeedbackChoice>>({})
   const [resumeOpen, setResumeOpen] = useState(false)
 
@@ -283,11 +292,13 @@ export function SuflerPhoneApp({
     clearImitation()
   }
 
-  const visibleError = [live.error, error].find(
-    (message) =>
-      Boolean(message)
-      && !/ошибка суфлёра|повторите попытку/i.test(message),
-  )
+  const visibleError = demoMode
+    ? live.error
+    : [live.error, error].find(
+        (message) =>
+          Boolean(message)
+          && !/ошибка суфлёра|повторите попытку/i.test(message),
+      )
   const blocks = useMemo(() => lines, [lines])
   const lastScenarioHintTurnId = useMemo(() => {
     for (let index = blocks.length - 1; index >= 0; index -= 1) {
@@ -413,14 +424,16 @@ export function SuflerPhoneApp({
             }
             compact
           />
-          <StatusBadge status={live.paused ? 'warning' : live.recording ? 'success' : connected ? 'info' : 'warning'}>
+          <StatusBadge status={live.paused ? 'warning' : live.recording ? 'success' : linkDown && demoMode ? 'warning' : 'info'}>
             {live.paused
               ? 'Распознавание на паузе'
               : live.recording
                 ? 'Имитация'
-                : connected
-                  ? 'Готов'
-                  : 'ASR офлайн'}
+                : !demoMode
+                  ? (linkDown ? 'Нет связи' : 'Слушаем')
+                  : linkDown
+                    ? 'ASR офлайн'
+                    : 'Готов'}
           </StatusBadge>
           <StatusBadge status="info">Консультация</StatusBadge>
           <span>{operatorName}</span>
@@ -620,7 +633,9 @@ export function SuflerPhoneApp({
                   ? `Оператор: ${live.systemCaption}`
                 : live.recording
                   ? 'Говорите в микрофон (клиент). Системный звук оператора появится в ленте после кнопки «Системный звук».'
-                  : 'Нажмите «Начать имитацию»: микрофон — клиент, системный звук — оператор. Реплики оператора пишутся в ленту.'}
+                  : demoMode
+                    ? 'Нажмите «Начать имитацию»: микрофон — клиент, системный звук — оператор. Реплики оператора пишутся в ленту.'
+                    : 'Слушаем линию. Когда заговорят, текст появится здесь.'}
             </Card>
           )}
         </section>
@@ -655,9 +670,11 @@ export function SuflerPhoneApp({
               ]
                 .filter(Boolean)
                 .join(' · ')
-            : connected
-              ? 'Готов к имитации'
-              : ''}
+            : linkDown
+              ? 'Нет связи с распознаванием'
+              : demoMode
+                ? 'Готов к имитации'
+                : 'Слушаем линию'}
           {!live.recording && latencyMs != null
             ? ` · p95 подсказки ${Math.round(latencyMs)} мс`
             : ''}
@@ -727,11 +744,11 @@ export function SuflerPhoneApp({
                 Стоп
               </Button>
             </>
-          ) : (
+          ) : demoMode ? (
             <Button variant="primary" onClick={startLive}>
               Начать имитацию
             </Button>
-          )}
+          ) : null}
           {demoMode && !live.recording && (
             <Button
               variant="secondary"

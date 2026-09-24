@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from django.conf import settings
 
@@ -12,17 +12,24 @@ from integrations.oktell.g711 import upsample_8k_to_16k
 
 logger = logging.getLogger(__name__)
 
-_CHUNK_BYTES_8K = 8000 * 2  # ~1 s of PCM16
+# ~2 s of PCM16 @ 8 kHz — longer windows cut garbage finals from the small model.
+_CHUNK_BYTES_8K = 16000 * 2
+
+_MODEL: Any = None
+_MODEL_KEY = ""
 
 
 def _model_path() -> Path | None:
     configured = str(getattr(settings, "VOSK_MODEL_PATH", "") or "").strip()
+    service_dir = Path(__file__).resolve().parents[2] / "services" / "asr"
+    var_dir = Path(__file__).resolve().parents[2] / "var"
     candidates = []
     if configured:
         candidates.append(Path(configured))
-    service_dir = Path(__file__).resolve().parents[2] / "services" / "asr"
     candidates.extend(
         [
+            var_dir / "vosk-model-ru-0.22",
+            var_dir / "vosk-model-small-ru-0.22",
             service_dir / "model" / "vosk-model-ru-0.22",
             service_dir.parents[2] / "recognizer" / "model" / "vosk-model-ru-0.22",
         ]
@@ -33,6 +40,22 @@ def _model_path() -> Path | None:
     return None
 
 
+def _shared_model() -> Any:
+    global _MODEL, _MODEL_KEY
+    path = _model_path()
+    if path is None:
+        return None
+    key = str(path)
+    if _MODEL is not None and _MODEL_KEY == key:
+        return _MODEL
+    from vosk import Model
+
+    logger.info("Loading Vosk model %s", key)
+    _MODEL = Model(key)
+    _MODEL_KEY = key
+    return _MODEL
+
+
 class LegTranscriber:
     """Buffer RTP PCM and emit Vosk finals. No-op if the model is missing."""
 
@@ -40,14 +63,14 @@ class LegTranscriber:
         self.on_final = on_final
         self._buffer = bytearray()
         self._recognizer = None
-        path = _model_path()
-        if path is None:
+        model = _shared_model()
+        if model is None:
             logger.warning("Vosk model missing; SIP audio will not become text")
             return
         try:
-            from vosk import KaldiRecognizer, Model
+            from vosk import KaldiRecognizer
 
-            self._recognizer = KaldiRecognizer(Model(str(path)), 16000)
+            self._recognizer = KaldiRecognizer(model, 16000)
             self._recognizer.SetWords(True)
         except Exception:  # noqa: BLE001 — live path must not kill the call
             logger.exception("could not start Vosk for SIP leg")
@@ -89,3 +112,4 @@ class LegTranscriber:
         text = str(payload.get("text") or "").strip()
         if text:
             self.on_final(text)
+        self._recognizer = None

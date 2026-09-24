@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import random
 import re
 import socket
@@ -140,6 +141,9 @@ def _token(header: str, name: str) -> str:
 
 
 def _local_ip(peer_host: str, peer_port: int = _SIP_PORT) -> str:
+    override = (os.getenv("OKTELL_SIP_LOCAL_IP") or "").strip()
+    if override:
+        return override
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         probe.connect((peer_host, peer_port))
@@ -206,7 +210,7 @@ class SipUserAgent:
         from_uri = f'"sufler" <sip:{self.user}@{self.domain}>'
         lines = [
             f"{method} {uri} SIP/2.0",
-            f"Via: SIP/2.0/UDP {self.local_ip}:{self.local_port};branch={self._branch()}",
+            f"Via: SIP/2.0/UDP {self.local_ip}:{self.local_port};rport;branch={self._branch()}",
             "Max-Forwards: 70",
             f"From: {from_uri};tag={self.tag}",
             to_header,
@@ -237,7 +241,28 @@ class SipUserAgent:
         self, method: str, uri: str, to_header: str, extra: list[str], body: str = ""
     ) -> tuple[int, dict[str, str], str]:
         self._send(method, uri, to_header, extra, body)
-        return self._recv()
+        return self._recv_final()
+
+    def _recv_final(self) -> tuple[int, dict[str, str], str]:
+        code, headers, body = self._recv()
+        tries = 0
+        while code in {100, 180, 181, 182, 183} and tries < 8:
+            code, headers, body = self._recv()
+            tries += 1
+        return code, headers, body
+
+    def _ack(self, uri: str, to_hdr: str) -> None:
+        payload = (
+            f"ACK {uri} SIP/2.0\r\n"
+            f"Via: SIP/2.0/UDP {self.local_ip}:{self.local_port};rport;branch={self._branch()}\r\n"
+            f"Max-Forwards: 70\r\n"
+            f"From: \"sufler\" <sip:{self.user}@{self.domain}>;tag={self.tag}\r\n"
+            f"To: {to_hdr}\r\n"
+            f"Call-ID: {self.call_id}\r\n"
+            f"CSeq: {self.cseq} ACK\r\n"
+            f"Content-Length: 0\r\n\r\n"
+        )
+        self.sock.sendto(payload.encode(), (self.peer_host, self.peer_port))
 
     def _with_auth(
         self,
@@ -253,6 +278,8 @@ class SipUserAgent:
         auth_header = headers.get("www-authenticate") or headers.get("proxy-authenticate")
         if not auth_header:
             raise SipDialogError(f"{method} {code} without authenticate")
+        if method == "INVITE":
+            self._ack(uri, headers.get("to") or to_header.split(":", 1)[-1].strip())
         self.auth = parse_authenticate(auth_header)
         prefix = "Proxy-Authorization: " if code == 407 else "Authorization: "
         retry = [
@@ -307,17 +334,7 @@ class SipUserAgent:
             raise SipDialogError(f"INVITE {target} failed {code}")
         host, port, payload = parse_sdp_audio(body)
         to_hdr = headers.get("to") or f"<{target}>"
-        ack = (
-            f"ACK {target} SIP/2.0\r\n"
-            f"Via: SIP/2.0/UDP {self.local_ip}:{self.local_port};branch={self._branch()}\r\n"
-            f"Max-Forwards: 70\r\n"
-            f"From: \"sufler\" <sip:{self.user}@{self.domain}>;tag={self.tag}\r\n"
-            f"To: {to_hdr}\r\n"
-            f"Call-ID: {self.call_id}\r\n"
-            f"CSeq: {self.cseq} ACK\r\n"
-            f"Content-Length: 0\r\n\r\n"
-        )
-        self.sock.sendto(ack.encode(), (self.peer_host, self.peer_port))
+        self._ack(target, to_hdr)
         rtp_sock.settimeout(1.0)
         return SipMedia(
             host=host,

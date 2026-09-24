@@ -12,11 +12,12 @@ export default defineConfig(({ mode }) => {
     server: {
       host: true,
       port: 5173,
+      hmr: process.env.VITE_DISABLE_HMR === '1' ? false : undefined,
       // Docker Desktop on Windows often misses bind-mount file events without polling.
-      watch: {
-        usePolling: true,
-        interval: 1000,
-      },
+      watch:
+        process.env.VITE_USE_POLLING === '1'
+          ? { usePolling: true, interval: 1000 }
+          : undefined,
       proxy: {
         '/api': apiProxyTarget,
         '/ws': {

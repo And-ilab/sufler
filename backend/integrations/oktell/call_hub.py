@@ -58,6 +58,7 @@ class LiveCall:
             **self.pickup.as_dict(),
             "state": self.state,
             "listen_mode": self.listen_mode,
+            "created_at": self.created_at,
             "legs": [leg.as_dict() for leg in self.legs],
             "sufler_ws": f"/ws/sufler/{self.idchain}/",
             "events": list(self.events),
@@ -108,14 +109,15 @@ class CallHub:
     def start(self, pickup: PickupEvent) -> tuple[LiveCall, bool]:
         with self._lock:
             existing = self._calls.get(pickup.idchain)
-            if existing is not None:
-                replay = existing
-            else:
-                replay = None
-        if replay is not None:
-            if not replay.events and replay.listen_mode == "mock":
-                self._spawn_call(replay, None, None)
-            return replay, False
+            others = [
+                call.idchain
+                for call in self._calls.values()
+                if call.state != "stopped" and call.idchain != pickup.idchain
+            ]
+        if existing is not None and existing.state != "stopped":
+            return existing, False
+        for idchain in others:
+            self.stop(idchain)
 
         client_account, operator_account = self.allocate_accounts(2)
         codes = listen_codes(pickup.called_id)

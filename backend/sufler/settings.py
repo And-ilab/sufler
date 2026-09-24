@@ -373,11 +373,15 @@ OKTELL_WEBHOOK_SECRET = os.getenv("OKTELL_WEBHOOK_SECRET", "")
 OKTELL_SIP_SERVER = os.getenv("OKTELL_SIP_SERVER", "10.1.1.31")
 OKTELL_SIP_DOMAIN = os.getenv("OKTELL_SIP_DOMAIN", "dev-qms.onedemoserver.online")
 OKTELL_SIP_PROXY = os.getenv("OKTELL_SIP_PROXY", "10.1.1.31")
+OKTELL_SIP_LOCAL_IP = os.getenv("OKTELL_SIP_LOCAL_IP", "")
 OKTELL_SIP_USER_START = int(os.getenv("OKTELL_SIP_USER_START", "2001") or "2001")
 OKTELL_SIP_USER_COUNT = int(os.getenv("OKTELL_SIP_USER_COUNT", "8") or "8")
 OKTELL_SIP_PASSWORD = os.getenv("OKTELL_SIP_PASSWORD", "")
 OKTELL_SIP_ACCOUNTS = os.getenv("OKTELL_SIP_ACCOUNTS", "")
 OKTELL_SIP_PASSWORDS_JSON = os.getenv("OKTELL_SIP_PASSWORDS_JSON", "")
+# star = Oktell 02*/03*. direct = INVITE the CalledID line (listen PBX).
+OKTELL_SIP_BARGE = os.getenv("OKTELL_SIP_BARGE", "star").strip().lower() or "star"
+OKTELL_SIP_LISTEN_LINE = os.getenv("OKTELL_SIP_LISTEN_LINE", "1001").strip() or "1001"
 OKTELL_MOCK_CLIENT_TEXT = os.getenv(
     "OKTELL_MOCK_CLIENT_TEXT",
     "Подскажите, как оформить перевод в Россию через мобильный банк?",

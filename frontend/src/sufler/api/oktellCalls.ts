@@ -23,9 +23,30 @@ export type OktellLiveCall = {
   call_type: string
   state: string
   listen_mode: string
+  created_at?: number
   legs: OktellListenLeg[]
   sufler_ws: string
   events?: OktellCallEvent[]
+}
+
+function csrfToken(): string {
+  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
+export async function ensureOktellListen(): Promise<OktellLiveCall | null> {
+  const response = await fetch('/api/v1/telephony/oktell/listen-now', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': csrfToken(),
+    },
+    body: '{}',
+  })
+  if (!response.ok) return null
+  const body = (await response.json()) as { call?: OktellLiveCall }
+  return body.call ?? null
 }
 
 export async function fetchOktellCalls(): Promise<OktellLiveCall[]> {
@@ -46,6 +67,7 @@ export async function fetchOktellCall(idchain: string): Promise<OktellLiveCall |
   if (!idchain) return null
   const response = await fetch(
     `/api/v1/telephony/oktell/calls/${encodeURIComponent(idchain)}`,
+    { credentials: 'include' },
   )
   if (!response.ok) return null
   const body = (await response.json()) as { call?: OktellLiveCall }

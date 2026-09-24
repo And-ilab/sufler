@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -74,8 +75,11 @@ def parse_pickup_payload(payload: Mapping[str, Any] | None) -> PickupEvent:
 
 
 def listen_codes(called_id: str) -> dict[str, str]:
-    """Vendor barge codes: 02* A, 03* B. We map A=client, B=operator until confirmed."""
+    """Oktell 02*/03* or plain line (listen PBX has no star codes)."""
     line = called_id.strip()
+    style = (os.getenv("OKTELL_SIP_BARGE") or "star").strip().lower()
+    if style in {"direct", "line", "plain"}:
+        return {"client": line, "operator": line, "mixed": line}
     return {
         "client": f"02*{line}",
         "operator": f"03*{line}",

@@ -79,6 +79,15 @@ class DualLegPlanTest(SimpleTestCase):
         self.assertEqual(dials[0].account.user, "2001")
         self.assertEqual(dials[1].account.user, "2002")
 
+    def test_direct_barge_dials_the_line_once(self):
+        client = SipAccount("2001", "", "dev-qms.onedemoserver.online", "10.1.1.181")
+        operator = SipAccount("2002", "", "dev-qms.onedemoserver.online", "10.1.1.181")
+        with patch.dict(os.environ, {"OKTELL_SIP_BARGE": "direct"}, clear=False):
+            self.assertEqual(listen_codes("1001")["client"], "1001")
+            dials = plan_dual_leg("1001", client, operator)
+        self.assertEqual(len(dials), 1)
+        self.assertEqual(dials[0].target, "sip:1001@dev-qms.onedemoserver.online")
+
 
 class SipCodecTest(SimpleTestCase):
     def test_alaw_pcm_length(self):
@@ -176,6 +185,9 @@ class OktellWebhookTest(TestCase):
         }
         self.assertEqual(users, {"2001", "2002", "2003", "2004"})
         self.assertEqual(len(hub.list_calls()), 2)
+        active = [call for call in hub.list_calls() if call.state != "stopped"]
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0].idchain, "second-chain")
 
     @override_settings(OKTELL_WEBHOOK_SECRET="s3cret", OKTELL_LISTEN_MODE="mock")
     def test_secret_required(self):

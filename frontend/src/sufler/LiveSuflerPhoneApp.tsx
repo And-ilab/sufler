@@ -1,19 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchOktellCall, type OktellCallEvent, type OktellLiveCall } from './api/oktellCalls'
+import {
+  ensureOktellListen,
+  fetchOktellCall,
+  type OktellCallEvent,
+  type OktellLiveCall,
+} from './api/oktellCalls'
 import { SuflerPhoneApp } from './SuflerPhoneApp'
 import { useOktellActiveCall } from './hooks/useOktellActiveCall'
 import type { TranscriptLine } from './hooks/useSuflerTranscript'
 import type { SuflerHint } from './api/suggest'
 import { emptySuflerHintMessage } from './emptyHintCopy'
-
-function queryCallId(): string {
-  try {
-    const params = new URLSearchParams(window.location.search)
-    return (params.get('callId') || params.get('Idchain') || '').trim()
-  } catch {
-    return ''
-  }
-}
 
 function linesFromEvents(events: OktellCallEvent[] | undefined): TranscriptLine[] {
   const lines: TranscriptLine[] = []
@@ -54,27 +50,43 @@ export function LiveSuflerPhoneApp({
   operatorName?: string
   embedded?: boolean
 }) {
-  const urlCallId = queryCallId()
-  const live = useOktellActiveCall(urlCallId)
+  const polled = useOktellActiveCall('')
+  const [started, setStarted] = useState<OktellLiveCall | null>(null)
+  const live = polled || started
   const [detail, setDetail] = useState<OktellLiveCall | null>(null)
-  const callId = live?.Idchain || detail?.Idchain || urlCallId
-  const liveMode = Boolean(callId)
+  const callId = live?.Idchain || ''
   const seedLines = useMemo(
     () => linesFromEvents(detail?.events || live?.events),
     [detail?.events, live?.events],
   )
 
   useEffect(() => {
-    if (!urlCallId && !live?.Idchain) return
-    const id = urlCallId || live?.Idchain || ''
-    void fetchOktellCall(id).then((call) => {
-      if (call) setDetail(call)
+    if (polled?.Idchain) {
+      setStarted(polled)
+      return
+    }
+    let cancelled = false
+    void ensureOktellListen().then((call) => {
+      if (!cancelled && call) setStarted(call)
     })
-  }, [live?.Idchain, urlCallId])
+    return () => {
+      cancelled = true
+    }
+  }, [polled?.Idchain])
+
+  useEffect(() => {
+    if (!callId) {
+      setDetail(null)
+      return
+    }
+    void fetchOktellCall(callId).then((call) => {
+      setDetail(call)
+    })
+  }, [callId])
 
   return (
     <SuflerPhoneApp
-      demoMode={!liveMode}
+      demoMode={false}
       callId={callId || undefined}
       clientPhone={detail?.CallerID || live?.CallerID || ''}
       seedLines={seedLines}
